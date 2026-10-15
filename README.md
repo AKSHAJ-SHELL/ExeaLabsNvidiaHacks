@@ -148,7 +148,7 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
   - commit `scans/<room_id>/roomplan.json`, a `notes.md` (location type, phone model, iOS version, lighting, clutter level) and 2 reference photos;
   - **measure 3 distances with a tape measure** (counter length, counter height, sink width) and record them in `notes.md`.
   - Remove anything personal from the photos.
-- **CAP-4: Scan protocol.** Write `docs/SCANNING.md`: how to walk the room, speed, lighting, what to avoid (mirrors, glass, clutter), how to name rooms, consent for scanning other people's homes.
+- **CAP-4: Scan protocol.** Implemented in [docs/SCANNING.md](docs/SCANNING.md): field capture, lighting and reflective surfaces, naming, consent, measurements, export layout, and review before a PR.
 - **CAP-5: Licenses.** Check the licenses of the two public scans in `tests/fixtures/roomplan/`, and replace them with our own scans if unclear.
 
 ### TWN: Twin & scan testing (4)
@@ -222,6 +222,7 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 
 - [docs/REFERENCE.md](docs/REFERENCE.md): every command, output layout, credentials, cost table, fine-tune command
 - [docs/08-access.md](docs/08-access.md): Nebius, Token Factory, GR00T and RoboCasa accounts and links
+- [docs/SCANNING.md](docs/SCANNING.md): field protocol for real room scans and tape measurements
 - [docs/04-contracts.md](docs/04-contracts.md): data schemas
 - [docs/09-later.md](docs/09-later.md): designs for MimicGen, splat, Cosmos and fine-tune
 - [docs/BUILD-LOG.md](docs/BUILD-LOG.md): what changed and why
