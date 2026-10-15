@@ -7,12 +7,12 @@ generates inside the request, and this module does not import the pipeline.
 
 from __future__ import annotations
 
-import email.parser
-import email.policy
 import html
 import io
 import json
+import mmap
 import re
+import tempfile
 import zipfile
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +21,40 @@ from pathlib import Path
 from arrival.jobs.queue import check_upload_size, create_job, read_job
 
 ID_RE = re.compile(r"^[a-z0-9_]+$")
+BOUNDARY_RE = re.compile(r'boundary="?([^";]+)"?', re.I)
+NAME_RE = re.compile(rb'name="([^"]*)"', re.I)
+FILENAME_RE = re.compile(rb'filename="([^"]*)"', re.I)
+READ_CHUNK = 1 << 20
+
+
+class UploadError(ValueError):
+    pass
+
+
+def find_part(buf, boundary: bytes, field: str) -> tuple[int, int, str]:
+    """Scan a multipart body for form field ``field``; return (data offset, data length, filename).
+    Raises UploadError on a missing closing boundary or a missing field."""
+    delim = b"--" + boundary
+    if buf.find(delim + b"--") < 0:
+        raise UploadError("multipart body has no closing boundary (truncated?)")
+    pos = buf.find(delim)
+    while pos >= 0:
+        start = pos + len(delim)
+        if buf[start:start + 2] == b"--":
+            break
+        head_end = buf.find(b"\r\n\r\n", start)
+        if head_end < 0:
+            raise UploadError("malformed multipart part headers")
+        headers = bytes(buf[start:head_end])
+        nxt = buf.find(b"\r\n" + delim, head_end + 4)
+        if nxt < 0:
+            raise UploadError("multipart part has no terminating boundary")
+        name = NAME_RE.search(headers)
+        if name and name.group(1).decode("latin-1") == field:
+            fn = FILENAME_RE.search(headers)
+            return head_end + 4, nxt - (head_end + 4), fn.group(1).decode("utf-8", "replace") if fn else ""
+        pos = nxt + 2
+    raise UploadError(f"missing file field {field!r}")
 
 CSS = """
 :root { --fg:#1d232a; --muted:#5b6672; --line:#d9dee3; --bg:#f7f8fa; --card:#fff;
@@ -91,6 +125,7 @@ class ArrivalServer(ThreadingHTTPServer):
 class Handler(BaseHTTPRequestHandler):
     server: ArrivalServer
     server_version = "WalkInArrival/0.1"
+    timeout = 30  # seconds per socket read; a stalled upload is dropped instead of pinning a thread
 
     # ---- helpers -------------------------------------------------------
     @property
@@ -298,6 +333,24 @@ class Handler(BaseHTTPRequestHandler):
         dl = (f"<p><a href='/download/{esc(room)}'>Download {esc(room)}.zip</a></p>"
               if ds_exists else "<p class='muted'>Dataset not generated yet.</p>")
 
+        sim_dir = self.out_dir / "datasets" / f"{room}_sim"
+        sim_info = _read_json(sim_dir / "meta" / "info.json") if sim_dir.is_dir() else None
+        if sim_dir.is_dir():
+            si = sim_info if isinstance(sim_info, dict) else {}
+            fams = si.get("walkin_families") or si.get("families") or []
+            sim_html = (
+                f"<p><a href='/download/{esc(room)}_sim'>Download {esc(room)}_sim.zip</a></p>"
+                "<div class='scroll'><table>"
+                f"<tr><td>walkin_generator</td><td class='mono'>{esc(si.get('walkin_generator', 'unknown'))}</td></tr>"
+                f"<tr><td>walkin_physically_valid</td><td class='mono'>{esc(si.get('walkin_physically_valid', 'unknown'))}</td></tr>"
+                f"<tr><td>episodes</td><td class='mono'>{esc(si.get('total_episodes', 'unknown'))}</td></tr>"
+                f"<tr><td>families</td><td class='mono'>{esc(', '.join(map(str, fams)) if isinstance(fams, list) else fams)}</td></tr>"
+                "</table></div>"
+            )
+        else:
+            sim_html = (f"<p class='muted'>No simulation dataset at <code>out/datasets/{esc(room)}_sim</code>. "
+                        "Run <code>python -m arrival sim</code>.</p>")
+
         body = (
             f"<p><a href='/'>← All rooms</a></p><h1>{esc(room)}</h1>"
             f"<p class='muted'>geometry_source: <code>{esc(scan.get('geometry_source', 'unknown'))}</code></p>"
@@ -306,6 +359,7 @@ class Handler(BaseHTTPRequestHandler):
             "<h2>Fixtures</h2>" + fx_table
             + "<h2>Tasks</h2>" + tasks_html
             + "<h2>Dataset</h2>" + dl + info_bits
+            + "<h2>Simulation dataset (MuJoCo)</h2>" + sim_html
             + "<h2>Report</h2>" + report_html
         )
         self._html(200, f"{room} · WALK·IN Arrival", body)
@@ -341,21 +395,33 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "")
         if not ctype.lower().startswith("multipart/form-data"):
             return self._json(400, {"error": "expected multipart/form-data"})
-        body = self.rfile.read(length)
-        msg = email.parser.BytesParser(policy=email.policy.default).parsebytes(
-            b"Content-Type: " + ctype.encode("latin-1") + b"\r\n\r\n" + body
-        )
-        part = None
-        if msg.is_multipart():
-            for p in msg.iter_parts():
-                if p.get_param("name", header="content-disposition") == "scan":
-                    part = p
+        m = BOUNDARY_RE.search(ctype)
+        if not m:
+            return self._json(400, {"error": "multipart boundary missing"})
+        with tempfile.TemporaryFile() as tmp:
+            left = length
+            while left > 0:  # stream to disk; never hold the whole body in memory
+                chunk = self.rfile.read(min(left, READ_CHUNK))
+                if not chunk:
                     break
-        if part is None:
-            return self._json(400, {"error": "missing file field 'scan'"})
-        data = part.get_payload(decode=True) or b""
-        filename = part.get_filename() or "upload.bin"
-        status = create_job(self.out_dir / "jobs", filename, data)
+                tmp.write(chunk)
+                left -= len(chunk)
+            if left:
+                self.close_connection = True
+                return self._json(400, {"error": "truncated body", "expected": length, "got": length - left})
+            if length == 0:
+                return self._json(400, {"error": "empty body"})
+            tmp.flush()
+            with mmap.mmap(tmp.fileno(), 0, access=mmap.ACCESS_READ) as buf:
+                try:
+                    offset, size, filename = find_part(buf, m.group(1).encode("latin-1"), "scan")
+                except UploadError as e:
+                    return self._json(400, {"error": str(e)})
+            if not filename:
+                return self._json(400, {"error": "file field 'scan' has no filename"})
+            if size <= 0:
+                return self._json(400, {"error": "uploaded file is empty"})
+            status = create_job(self.out_dir / "jobs", filename, src=tmp, offset=offset, length=size)
         self._json(202, {"status": "queued", "id": status["id"],
                          "status_url": f"/jobs/{status['id']}"})
 

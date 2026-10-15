@@ -1,21 +1,60 @@
-"""Structural checker for a GR00T LeRobot v2 folder. Does not import GR00T."""
+"""Structural checker for a GR00T LeRobot v2.1 folder. Does not import GR00T.
+
+Reads slices from the dataset's own modality.json and checks them against info.features shapes."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 
-from arrival.export.lerobot import MODALITY, VIDEO_KEY
-
-META = ("info.json", "tasks.jsonl", "episodes.jsonl", "modality.json", "embodiment.json")
-COLUMNS = ("observation.state", "action", "timestamp", "annotation.human.task_description",
-           "task_index", "episode_index", "index", "next.reward", "next.done")
+META = ("info.json", "tasks.jsonl", "episodes.jsonl", "episodes_stats.jsonl", "modality.json", "embodiment.json")
+DTYPES = {
+    "observation.state": pa.list_(pa.float32()), "action": pa.list_(pa.float32()), "timestamp": pa.float32(),
+    "annotation.human.task_description": pa.int64(), "task_index": pa.int64(), "episode_index": pa.int64(),
+    "index": pa.int64(), "next.reward": pa.float32(), "next.done": pa.bool_(),
+}
+VIDEO_SAMPLE = 3  # mp4s fully decoded (first, last, middle); the rest are existence-checked
 
 
 def _jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _check_slices(modality: dict, features: dict, errors: list[str]) -> None:
+    for group, feat in (("state", "observation.state"), ("action", "action")):
+        parts = modality.get(group)
+        if not isinstance(parts, dict) or not parts:
+            errors.append(f"modality.json has no {group} slices")
+            continue
+        dim = (features.get(feat, {}).get("shape") or [None])[0]
+        spans = sorted((p.get("start"), p.get("end"), k) for k, p in parts.items())
+        cursor = 0
+        for start, end, k in spans:
+            if not isinstance(start, int) or not isinstance(end, int) or start != cursor or end <= start:
+                errors.append(f"modality {group}.{k} slice [{start}, {end}) is not contiguous from {cursor}")
+                break
+            cursor = end
+        if dim is not None and cursor != dim:
+            errors.append(f"modality {group} slices cover {cursor} dims, info.features.{feat}.shape={dim}")
+
+
+def _check_video(path: Path, frames: int, shape: list[int]) -> str | None:
+    import imageio.v2 as imageio
+
+    try:
+        r = imageio.get_reader(str(path))
+        n = 0
+        for f in r:
+            if n == 0 and list(f.shape) != list(shape):
+                return f"{path.name}: frame shape {list(f.shape)} != {shape}"
+            n += 1
+        r.close()
+    except Exception as e:  # noqa: BLE001 - any decode failure is a dataset error
+        return f"{path.name}: cannot decode ({e})"
+    return None if n == frames else f"{path.name}: {n} frames, episodes.jsonl length {frames}"
 
 
 def validate(root: str | Path) -> list[str]:
@@ -28,60 +67,104 @@ def validate(root: str | Path) -> list[str]:
         return [f"missing meta/{m}" for m in missing]
     info = json.loads((root / "meta" / "info.json").read_text())
     modality = json.loads((root / "meta" / "modality.json").read_text())
-    for group in ("state", "action"):
-        for key in ("single_arm", "gripper"):
-            want = MODALITY[group][key]
-            got = modality.get(group, {}).get(key, {})
-            if (got.get("start"), got.get("end")) != (want["start"], want["end"]):
-                errors.append(f"modality {group}.{key} slice {got} != {want}")
-    if modality.get("video", {}).get("ego_view", {}).get("original_key") != VIDEO_KEY:
-        errors.append("modality video.ego_view.original_key is wrong")
+    features = info.get("features", {})
     if not isinstance(info.get("walkin_physically_valid"), bool):
         errors.append("info.walkin_physically_valid must be a bool")
+    for c in DTYPES:
+        if c not in features:
+            errors.append(f"info.features missing {c}")
+    _check_slices(modality, features, errors)
+    video_feats = {k: v for k, v in features.items() if v.get("dtype") == "video"}
+    declared = {v.get("original_key") for v in modality.get("video", {}).values()}
+    if declared != set(video_feats):
+        errors.append(f"modality.json video keys {sorted(k for k in declared if k)} != "
+                      f"info.features video keys {sorted(video_feats)}")
+    emb = json.loads((root / "meta" / "embodiment.json").read_text())
+    if emb.get("cartesian_sidecar") and not (root / "meta" / emb["cartesian_sidecar"]).is_file():
+        errors.append(f"embodiment cartesian_sidecar {emb['cartesian_sidecar']} not found in meta/")
 
     episodes = _jsonl(root / "meta" / "episodes.jsonl")
     tasks = _jsonl(root / "meta" / "tasks.jsonl")
-    if len(episodes) != info.get("total_episodes"):
-        errors.append(f"episodes.jsonl has {len(episodes)} rows, info.total_episodes={info.get('total_episodes')}")
+    n = info.get("total_episodes")
+    if len(episodes) != n:
+        errors.append(f"episodes.jsonl has {len(episodes)} rows, info.total_episodes={n}")
+    if [e.get("episode_index") for e in episodes] != list(range(len(episodes))):
+        errors.append("episodes.jsonl episode_index is not 0..N-1")
     if sum(e["length"] for e in episodes) != info.get("total_frames"):
         errors.append("sum of episode lengths != info.total_frames")
     if len(tasks) != info.get("total_tasks"):
         errors.append(f"tasks.jsonl has {len(tasks)} rows, info.total_tasks={info.get('total_tasks')}")
+    task_ids = {t["task_index"]: t["task"] for t in tasks}
+    if len(_jsonl(root / "meta" / "episodes_stats.jsonl")) != len(episodes):
+        errors.append("episodes_stats.jsonl row count != episodes.jsonl")
 
-    files = sorted((root / "data" / "chunk-000").glob("episode_*.parquet"))
-    if len(files) != info.get("total_episodes"):
-        errors.append(f"{len(files)} parquet files, info.total_episodes={info.get('total_episodes')}")
-    expected = [f"episode_{i:06d}.parquet" for i in range(len(files))]
-    if [f.name for f in files] != expected:
-        errors.append("parquet episode indexes are not contiguous from 0")
-    for i, f in enumerate(files):
-        # Full-check the first few files, schema-only check the rest (keeps 1,000 episodes fast).
-        if i < 3 or i == len(files) - 1:
-            t = pq.read_table(f)
-            cols = set(t.column_names)
-            for c in COLUMNS:
-                if c not in cols:
-                    errors.append(f"{f.name}: missing column {c}")
-            if "observation.state" in cols and t.num_rows:
-                if len(t.column("observation.state")[0].as_py()) != 8:
-                    errors.append(f"{f.name}: observation.state length != 8")
-                if i < len(episodes) and t.num_rows != episodes[i]["length"]:
-                    errors.append(f"{f.name}: row count != episodes.jsonl length")
+    size = info.get("chunks_size", 1000)
+    want_chunks = max(1, -(-len(episodes) // size))
+    if info.get("total_chunks") != want_chunks:
+        errors.append(f"info.total_chunks={info.get('total_chunks')}, expected {want_chunks}")
+    data_tpl, video_tpl = info.get("data_path", ""), info.get("video_path") or ""
+    expected = {(root / data_tpl.format(episode_chunk=e["episode_index"] // size,
+                                        episode_index=e["episode_index"])).resolve() for e in episodes}
+    found = {p.resolve() for p in root.glob("data/chunk-*/*.parquet")}
+    for p in sorted(found - expected)[:5]:
+        errors.append(f"unexpected parquet {p.relative_to(root.resolve())}")
+    s_dim = (features.get("observation.state", {}).get("shape") or [0])[0]
+    a_dim = (features.get("action", {}).get("shape") or [0])[0]
+    cursor = 0
+    for e in episodes:
+        ep, length = e["episode_index"], e["length"]
+        path = root / data_tpl.format(episode_chunk=ep // size, episode_index=ep)
+        name = path.relative_to(root)
+        if not path.is_file():
+            errors.append(f"missing {name}")
+            cursor += length
+            continue
+        t = pq.read_table(path)
+        for c, dt in DTYPES.items():
+            if c not in t.column_names:
+                errors.append(f"{name}: missing column {c}")
+            elif t.schema.field(c).type != dt:
+                errors.append(f"{name}: column {c} dtype {t.schema.field(c).type} != {dt}")
+        if errors and len(errors) > 50:
+            return errors
+        if t.num_rows != length:
+            errors.append(f"{name}: {t.num_rows} rows, episodes.jsonl length {length}")
+        cols = {c: t.column(c).to_pylist() for c in DTYPES if c in t.column_names}
+        if any(len(v) != s_dim for v in cols.get("observation.state", [])):
+            errors.append(f"{name}: observation.state length != {s_dim}")
+        if any(len(v) != a_dim for v in cols.get("action", [])):
+            errors.append(f"{name}: action length != {a_dim}")
+        if cols.get("index") != list(range(cursor, cursor + t.num_rows)):
+            errors.append(f"{name}: index is not continuous from {cursor}")
+        if set(cols.get("episode_index", [ep])) != {ep}:
+            errors.append(f"{name}: episode_index column != {ep}")
+        tis = set(cols.get("task_index", []))
+        if not tis <= set(task_ids):
+            errors.append(f"{name}: task_index {sorted(tis - set(task_ids))} not in tasks.jsonl")
+        elif any(task_ids[i] not in e.get("tasks", []) for i in tis):
+            errors.append(f"{name}: task_index does not match episodes.jsonl tasks")
+        done = cols.get("next.done", [])
+        if done and (done[-1] is not True or any(done[:-1])):
+            errors.append(f"{name}: next.done must be true on the last row only")
+        cursor += t.num_rows
+
+    if video_feats:
+        if not video_tpl:
+            errors.append("video features declared but info.video_path is empty")
         else:
-            names = pq.read_schema(f).names
-            if "observation.state" not in names:
-                errors.append(f"{f.name}: missing observation.state")
-
-    policy = info.get("walkin_video_policy")
-    mp4s = list((root / "videos" / "chunk-000" / VIDEO_KEY).glob("*.mp4"))
-    n = info.get("total_episodes", 0)
-    if policy == "sparse":
-        need = 8 if n >= 1000 else (n + 124) // 125
-        if len(mp4s) < need:
-            errors.append(f"sparse policy needs at least {need} mp4s, found {len(mp4s)}")
-    elif policy == "all":
-        if len(mp4s) != n:
-            errors.append(f"video policy 'all' needs {n} mp4s, found {len(mp4s)}")
-    elif policy != "none":
-        errors.append(f"unknown walkin_video_policy {policy!r}")
+            sample = {0, len(episodes) - 1, len(episodes) // 2}
+            for key, feat in video_feats.items():
+                for e in episodes:
+                    ep = e["episode_index"]
+                    path = root / video_tpl.format(episode_chunk=ep // size, video_key=key, episode_index=ep)
+                    if not path.is_file():
+                        errors.append(f"missing {path.relative_to(root)}")
+                    elif ep in sample:
+                        err = _check_video(path, e["length"], feat.get("shape", []))
+                        if err:
+                            errors.append(err)
+    elif list(root.glob("videos/**/*.mp4")):
+        errors.append("mp4s under videos/ but no video feature is declared in info.features")
+    if info.get("walkin_video_policy") not in ("all", "sparse", "none"):
+        errors.append(f"unknown walkin_video_policy {info.get('walkin_video_policy')!r}")
     return errors

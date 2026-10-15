@@ -9,7 +9,15 @@ import time
 from pathlib import Path
 
 EXIT_OK, EXIT_INVALID, EXIT_USAGE = 0, 1, 2
-MAX_DEFAULT_VIDEO_EPISODES = 16
+
+
+def resolve_scans(scans_dir: str | Path = "scans") -> Path:
+    """A relative --scans that does not exist in the cwd falls back to <repo root>/<scans_dir>."""
+    p = Path(scans_dir)
+    if p.is_absolute() or p.exists():
+        return p
+    repo = Path(__file__).resolve().parents[1] / p
+    return repo if repo.exists() else p
 
 
 def run_demo(room: str = "hero_kitchen", episodes: int = 4, videos: str = "all",
@@ -25,13 +33,17 @@ def run_demo(room: str = "hero_kitchen", episodes: int = 4, videos: str = "all",
     from arrival.tasks.propose import propose, write_tasks
     from arrival.twin.compile import compile_twin, write_twin
 
-    out_dir, scans_dir = Path(out_dir), Path(scans_dir)
+    out_dir, scans_dir = Path(out_dir), resolve_scans(scans_dir)
+    if not (scans_dir / room).is_dir():
+        raise SystemExit(f"room {room!r} not found under {scans_dir}")
     if from_roomplan:
-        bundle = roomplan.load(scans_dir / room / "roomplan.json", room)
-        # RoomPlan does not capture small objects; borrow the authored object placements if present.
-        authored = scans_dir / room / "scan.json"
-        if authored.is_file():
-            bundle["objects"] = scan_bundle.load(authored)["objects"]
+        rp_path = scans_dir / room / "roomplan.json"
+        if not rp_path.is_file():
+            raise SystemExit(f"no RoomPlan export at {rp_path} (room {room!r}; --scans {scans_dir})")
+        bundle = roomplan.load(rp_path, room)
+        # RoomPlan captures no small objects: place catalog objects on a counter top (seeded), never borrowed.
+        from arrival.twin.compile import place_default_objects
+        bundle["objects"] = place_default_objects(compile_twin(bundle), seed=seed)
     else:
         bundle = scan_bundle.load_room(room, scans_dir)
     twin = compile_twin(bundle)
@@ -65,13 +77,7 @@ def cmd_demo(a) -> int:
     if a.episodes < 1:
         print("--episodes must be >= 1", file=sys.stderr)
         return EXIT_USAGE
-    videos = a.videos
-    if videos is None:
-        if a.episodes > MAX_DEFAULT_VIDEO_EPISODES:
-            print(f"--episodes {a.episodes} > {MAX_DEFAULT_VIDEO_EPISODES}: pass --videos sparse "
-                  f"(or --videos all / none) explicitly.", file=sys.stderr)
-            return EXIT_USAGE
-        videos = "all"
+    videos = a.videos or "all"
     res = run_demo(a.room, a.episodes, videos, a.out, a.scans, from_roomplan=a.from_roomplan)
     r = res["report_data"]
     print(f"dataset: {res['dataset']}")
@@ -92,7 +98,8 @@ def cmd_validate(a) -> int:
         return EXIT_INVALID
     info = json.loads((Path(a.dataset_dir) / "meta" / "info.json").read_text())
     print(f"OK: {a.dataset_dir} — {info['total_episodes']} episodes, {info['total_frames']} frames, "
-          f"{info['total_tasks']} tasks, video_policy={info['walkin_video_policy']}, "
+          f"{info['total_tasks']} tasks, {info['total_chunks']} chunk(s), {info['total_videos']} videos, "
+          f"video_policy={info['walkin_video_policy']}, "
           f"physically_valid={info['walkin_physically_valid']}")
     return EXIT_OK
 
@@ -100,7 +107,44 @@ def cmd_validate(a) -> int:
 def cmd_serve(a) -> int:
     from arrival.web.app import serve
 
-    serve(port=a.port, out_dir=Path(a.out), scans_dir=Path(a.scans))
+    serve(port=a.port, out_dir=Path(a.out), scans_dir=resolve_scans(a.scans))
+    return EXIT_OK
+
+
+def cmd_sim(a) -> int:
+    """MuJoCo sim of the compiled twin -> physics-checked demos with real joint states."""
+    try:
+        import mujoco  # noqa: F401
+    except ImportError:
+        print("mujoco is not installed: pip install -e '.[sim]'", file=sys.stderr)
+        return EXIT_USAGE
+    from arrival.sim.collect import collect
+    from arrival.sim.tasks import SIM_FAMILIES
+
+    fams = list(SIM_FAMILIES) if a.families == "all" else [f.strip() for f in a.families.split(",") if f.strip()]
+    bad = [f for f in fams if f not in SIM_FAMILIES]
+    if bad or a.episodes < 1:
+        print(f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
+              file=sys.stderr)
+        return EXIT_USAGE
+    twin_path = Path(a.out) / "twins" / a.room / "twin.json"
+    if twin_path.is_file():
+        twin = json.loads(twin_path.read_text())
+    else:
+        from arrival.scan import bundle as scan_bundle
+        from arrival.twin.compile import compile_twin
+
+        twin = compile_twin(scan_bundle.load_room(a.room, Path(a.scans)))
+    res = collect(twin, fams, a.episodes, a.out, people=a.people, policy_name=a.policy, res=a.res,
+                  seed=a.seed, save_preview=a.save_preview)
+    r = res["report_data"]
+    print(f"dataset: {res['dataset']}")
+    print(f"report:  {res['report']}")
+    print(f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped, physics-checked) in "
+          f"{r['seconds']:.1f}s; per family: "
+          + ", ".join(f"{k} {v['successes']}/{v['attempts']}" for k, v in r["families"].items()))
+    if a.save_preview:
+        print(f"preview: {Path(a.out) / 'previews'}")
     return EXIT_OK
 
 
@@ -109,7 +153,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd")
     d = sub.add_parser("demo", help="compile the room and write the dataset")
     d.add_argument("--episodes", type=int, default=4)
-    d.add_argument("--videos", choices=["all", "sparse", "none"], default=None)
+    d.add_argument("--videos", choices=["all", "sparse", "none"], default="all",
+                   help="all (default): one mp4 per episode, declared to GR00T; sparse/none: no video "
+                        "feature, sparse writes human previews to <out>/datasets/<room>_previews/")
     d.add_argument("--room", default="hero_kitchen")
     d.add_argument("--from-roomplan", action="store_true", help="normalize scans/<room>/roomplan.json instead of scan.json")
     d.add_argument("--out", default="out")
@@ -123,6 +169,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", default="out")
     s.add_argument("--scans", default="scans")
     s.set_defaults(fn=cmd_serve)
+    m = sub.add_parser("sim", help="MuJoCo sim of the room: arm + drawers/doors + people -> LeRobot v2 demos")
+    m.add_argument("--room", default="hero_kitchen")
+    m.add_argument("--episodes", type=int, default=8)
+    m.add_argument("--families", default="counter_to_sink,open_drawer",
+                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door")
+    m.add_argument("--people", type=int, default=2)
+    m.add_argument("--policy", choices=["scripted", "vla"], default="scripted")
+    m.add_argument("--res", type=int, default=128)
+    m.add_argument("--out", default="out")
+    m.add_argument("--scans", default="scans")
+    m.add_argument("--seed", type=int, default=0)
+    m.add_argument("--save-preview", action="store_true")
+    m.set_defaults(fn=cmd_sim)
     return p
 
 

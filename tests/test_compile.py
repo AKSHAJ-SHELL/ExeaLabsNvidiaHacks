@@ -40,7 +40,7 @@ def test_sink_only_synthesizes_counter():
     assert len(counters) == 1
     c = counters[0]
     assert c["size"][2] == 0.92 and c["position"][2] == 0.46
-    assert c["size"][0] == 1.2 and c["position"][:2] == [1.6, 0.4]
+    assert c["size"][0] == 1.8 and c["position"][:2] == [1.6, 0.4]
 
 
 def test_layout_yaml(tmp_path, hero_twin):
@@ -53,3 +53,38 @@ def test_layout_yaml(tmp_path, hero_twin):
     assert walls["wall_east"]["size"] == [0.02, 3.0, 2.4]
     assert doc["room"]["floor"][0]["size"] == [4.0, 3.0, 0.02]
     assert doc["room"]["floor"][0]["pos"] == [2.0, 1.5, 0.0]
+
+
+def test_yawed_sink_counter_and_containment():
+    import math
+
+    from arrival.tasks.propose import in_top_rect
+
+    yaw = math.pi / 2
+    twin = compile_twin(_bundle([{"id": "s", "category": "sink", "size": [0.6, 0.5, 0.25],
+                                  "position": [0.4, 2.0, 0.85], "yaw": yaw}]))
+    c = next(f for f in twin["fixtures"] if f["type"] == "counter")
+    assert c["yaw"] == yaw
+    assert in_top_rect([0.4, 2.8], c) and not in_top_rect([1.2, 2.0], c)  # long axis runs along world Y
+
+
+def test_oblique_wall_gets_z_rot():
+    import math
+
+    w = {"id": "w", "start": [0, 0], "end": [3, 3], "height": 2.4, "thickness": 0.1}
+    doc = layout_dict(compile_twin(_bundle([], [w])))
+    entry = doc["room"]["walls"][0]
+    assert entry["z_rot"] == round(math.pi / 4, 6)
+    assert entry["size"][0] == round(math.hypot(3, 3), 6)
+
+
+def test_place_default_objects_seeded():
+    from arrival.tasks.propose import on_counter
+    from arrival.twin.compile import place_default_objects
+
+    fx = [{"id": "s", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [1.6, 0.4, 0.85], "yaw": 0}]
+    a, b = compile_twin(_bundle(fx)), compile_twin(_bundle(fx))
+    pa, pb = place_default_objects(a, seed=3), place_default_objects(b, seed=3)
+    assert pa == pb and {o["label"] for o in pa} == {"mug", "bowl"}
+    counter = next(f for f in a["fixtures"] if f["type"] == "counter")
+    assert all(on_counter(o, counter) for o in pa)

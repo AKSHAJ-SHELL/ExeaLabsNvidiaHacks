@@ -115,3 +115,55 @@ def test_download_zip(server):
     assert status == 200
     names = zipfile.ZipFile(io.BytesIO(body)).namelist()
     assert "hero_kitchen/meta/info.json" in names
+
+
+def _raw_post(srv, body: bytes, length: int, boundary: str = "bnd"):
+    import socket
+
+    s = socket.create_connection(("127.0.0.1", srv.server_address[1]), timeout=10)
+    s.sendall((f"POST /jobs HTTP/1.1\r\nHost: x\r\nContent-Type: multipart/form-data; boundary={boundary}\r\n"
+               f"Content-Length: {length}\r\nConnection: close\r\n\r\n").encode() + body)
+    s.shutdown(socket.SHUT_WR)  # client stops sending: server sees EOF before Content-Length bytes
+    data = b""
+    while chunk := s.recv(65536):
+        data += chunk
+    s.close()
+    return int(data.split(b" ", 2)[1])
+
+
+def _part(filename: str, payload: bytes, boundary: str = "bnd", close: bool = True) -> bytes:
+    fn = f'; filename="{filename}"' if filename is not None else ""
+    return (f'--{boundary}\r\nContent-Disposition: form-data; name="scan"{fn}\r\n\r\n').encode() + payload + (
+        f"\r\n--{boundary}--\r\n".encode() if close else b"")
+
+
+def test_truncated_upload_is_400(server):
+    srv, out = server
+    body = _part("scan.json", b'{"a": 1}')
+    assert _raw_post(srv, body, len(body) + 100) == 400
+    assert not (out / "jobs").exists() or not any((out / "jobs").iterdir())
+
+
+def test_missing_closing_boundary_is_400(server):
+    srv, _ = server
+    body = _part("scan.json", b'{"a": 1}', close=False)
+    assert _raw_post(srv, body, len(body)) == 400
+
+
+@pytest.mark.parametrize("filename,payload", [("scan.json", b""), (None, b"{}"), ("", b"{}")])
+def test_empty_file_or_no_filename_is_400(server, filename, payload):
+    srv, _ = server
+    body = _part(filename, payload)
+    assert _raw_post(srv, body, len(body)) == 400
+
+
+def test_room_page_links_sim_dataset(server):
+    srv, out = server
+    meta = out / "datasets" / "hero_kitchen_sim" / "meta"
+    meta.mkdir(parents=True)
+    (meta / "info.json").write_text(json.dumps({"walkin_generator": "mujoco_sim", "total_episodes": 3,
+                                                "walkin_physically_valid": True,
+                                                "walkin_families": ["counter_to_sink", "open_drawer"]}))
+    status, body = _get(srv, "/rooms/hero_kitchen")
+    assert status == 200
+    assert b"/download/hero_kitchen_sim" in body and b"mujoco_sim" in body and b"open_drawer" in body

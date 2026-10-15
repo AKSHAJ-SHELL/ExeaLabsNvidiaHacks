@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 from pathlib import Path
 
 import yaml
@@ -14,14 +15,30 @@ from arrival.catalog.objects import catalog_id
 COUNTER_DEPTH = 0.65
 COUNTER_HEIGHT = 0.92
 SYNTH_RADIUS = 0.3
+DEFAULT_OBJECTS = (("mug", [0.08, 0.08, 0.1]), ("bowl", [0.14, 0.14, 0.06]))
+PLACE_MARGIN = 0.08
+
+
+def to_local(xy, fixture: dict) -> tuple[float, float]:
+    """World (x, y) -> fixture-local (x, y): origin at the fixture centre, +X along the fixture's yaw."""
+    yaw = float(fixture.get("yaw", 0.0))
+    dx, dy = xy[0] - fixture["position"][0], xy[1] - fixture["position"][1]
+    c, s = math.cos(yaw), math.sin(yaw)
+    return c * dx + s * dy, -s * dx + c * dy
+
+
+def to_world(local, fixture: dict) -> tuple[float, float]:
+    yaw = float(fixture.get("yaw", 0.0))
+    c, s = math.cos(yaw), math.sin(yaw)
+    return (fixture["position"][0] + c * local[0] - s * local[1],
+            fixture["position"][1] + s * local[0] + c * local[1])
 
 
 def _rect_distance(xy: list[float], fixture: dict) -> float:
-    """Horizontal distance from a point to a fixture's footprint rectangle (axis-aligned)."""
-    (px, py), (cx, cy, _), (sx, sy, _) = xy[:2], fixture["position"], fixture["size"]
-    dx = max(abs(px - cx) - sx / 2, 0.0)
-    dy = max(abs(py - cy) - sy / 2, 0.0)
-    return math.hypot(dx, dy)
+    """Horizontal distance from a point to a fixture's footprint rectangle (in the fixture's local frame)."""
+    lx, ly = to_local(xy, fixture)
+    sx, sy, _ = fixture["size"]
+    return math.hypot(max(abs(lx) - sx / 2, 0.0), max(abs(ly) - sy / 2, 0.0))
 
 
 def _synth_counters(fixtures: list[dict]) -> list[dict]:
@@ -35,9 +52,9 @@ def _synth_counters(fixtures: list[dict]) -> list[dict]:
         out.append({
             "id": f"counter_synth_{f['id']}",
             "type": "counter",
-            "size": [max(f["size"][0] + 0.4, 1.2), COUNTER_DEPTH, COUNTER_HEIGHT],
+            "size": [max(f["size"][0] + 1.2, 1.8), COUNTER_DEPTH, COUNTER_HEIGHT],
             "position": [f["position"][0], f["position"][1], COUNTER_HEIGHT / 2],
-            "yaw": 0.0,
+            "yaw": float(f.get("yaw", 0.0)),  # long axis along the fixture's local X
             "source_category": "synthesized",
         })
     return out
@@ -82,17 +99,61 @@ def compile_twin(bundle: dict) -> dict:
     }
 
 
+def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
+    """RoomPlan captures no small objects: put a mug and a bowl on a counter top (the one holding or
+    touching a sink if any), away from sinks/stoves, deterministically from `seed`. Mutates twin."""
+    counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
+    blockers = [f for f in twin["fixtures"] if f["type"] in ("sink", "stove")]
+    sinks = [f for f in blockers if f["type"] == "sink"]
+    if not counters:
+        return []
+    counter = min(counters, key=lambda c: (min((_rect_distance(s["position"], c) for s in sinks), default=0.0),
+                                           c.get("default_config_name") == "dining", c["id"]))
+    rng = random.Random(seed)
+    sx, sy, _ = counter["size"]
+    top = counter["position"][2] + counter["size"][2] / 2
+    placed: list[dict] = []
+    for label, size in DEFAULT_OBJECTS:
+        half = max(size[0], size[1]) / 2 + PLACE_MARGIN
+        if sx / 2 <= half or sy / 2 <= half:
+            break
+        for _ in range(200):
+            local = (rng.uniform(-sx / 2 + half, sx / 2 - half), rng.uniform(-sy / 2 + half, sy / 2 - half))
+            x, y = to_world(local, counter)
+            if any(_rect_distance([x, y], b) < half for b in blockers if b is not counter):
+                continue
+            if any(math.dist([x, y], o["position"][:2]) < half + max(o["size"][:2]) for o in placed):
+                continue
+            placed.append({"id": f"{label}_1", "catalog_id": catalog_id(label), "label": label, "size": list(size),
+                           "position": [round(x, 6), round(y, 6), round(top + size[2] / 2, 6)], "yaw": 0.0,
+                           "placed_by": "place_default_objects"})
+            break
+    twin["objects"] += placed
+    return placed
+
+
+def _wall_entry(w: dict) -> dict:
+    (x0, y0), (x1, y1) = w["start"], w["end"]
+    length, angle = math.hypot(x1 - x0, y1 - y0), math.atan2(y1 - y0, x1 - x0)
+    pos = _r([(x0 + x1) / 2, (y0 + y1) / 2, w["height"] / 2])
+    a = abs(math.sin(angle))
+    if a < 1e-6:
+        size = [length, w["thickness"], w["height"]]
+    elif a > 1 - 1e-6:
+        size = [w["thickness"], length, w["height"]]
+    else:  # oblique wall: length along local X, rotated into place
+        return {"name": w["id"], "type": "wall", "size": _r([length, w["thickness"], w["height"]]), "pos": pos,
+                "z_rot": round(angle, 6)}
+    return {"name": w["id"], "type": "wall", "size": _r(size), "pos": pos}
+
+
 def layout_dict(twin: dict) -> dict:
     walls, xs, ys = [], [], []
     for w in twin.get("walls", []):
         (x0, y0), (x1, y1) = w["start"], w["end"]
         xs += [x0, x1]
         ys += [y0, y1]
-        length = math.hypot(x1 - x0, y1 - y0)
-        along_x = abs(x1 - x0) >= abs(y1 - y0)
-        size = [length, w["thickness"], w["height"]] if along_x else [w["thickness"], length, w["height"]]
-        walls.append({"name": w["id"], "type": "wall", "size": _r(size),
-                      "pos": _r([(x0 + x1) / 2, (y0 + y1) / 2, w["height"] / 2])})
+        walls.append(_wall_entry(w))
     room: dict = {"walls": walls}
     if xs:
         room["floor"] = [{"name": "floor", "type": "floor",

@@ -6,6 +6,8 @@ import json
 import random
 from pathlib import Path
 
+from arrival.twin.compile import to_local
+
 LIGHTING = ("dim", "neutral", "bright")
 POSE_OFFSETS = ([0.0, 0.0], [0.08, 0.0], [-0.08, 0.0], [0.0, 0.08])
 INSET = 0.05
@@ -33,8 +35,10 @@ def top_z(fixture: dict) -> float:
 
 
 def in_top_rect(xy, fixture: dict, inset: float = 0.0) -> bool:
-    (cx, cy, _), (sx, sy, _) = fixture["position"], fixture["size"]
-    return (abs(xy[0] - cx) <= sx / 2 - inset + 1e-9) and (abs(xy[1] - cy) <= sy / 2 - inset + 1e-9)
+    """Is (x, y) inside the fixture's top rectangle (in its yawed local frame), shrunk by `inset`?"""
+    lx, ly = to_local(xy, fixture)
+    sx, sy, _ = fixture["size"]
+    return abs(lx) <= sx / 2 - inset + 1e-9 and abs(ly) <= sy / 2 - inset + 1e-9
 
 
 def on_counter(obj: dict, counter: dict) -> bool:
@@ -47,7 +51,10 @@ def _fixture(twin: dict, fid: str) -> dict | None:
 
 
 def propose(twin: dict) -> dict:
-    counter_a = _fixture(twin, "counter_a") or next((f for f in twin["fixtures"] if f["type"] == "counter"), None)
+    counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
+    counter_a = (_fixture(twin, "counter_a")
+                 or next((c for c in counters if any(on_counter(o, c) for o in twin["objects"])), None)
+                 or next(iter(counters), None))
     counter_b = _fixture(twin, "counter_b") or next(
         (f for f in twin["fixtures"] if f["type"] == "counter" and f is not counter_a), None)
     sink = next((f for f in twin["fixtures"] if f["type"] == "sink"), None)

@@ -6,11 +6,12 @@ import json
 from pathlib import Path
 
 
-def build_report(room_id: str, attempts: int, successes: int, seconds: float, families: list[str]) -> dict:
+def build_report(room_id: str, attempts: int, successes: int, seconds: float, families: list[str],
+                 generator: str = "scripted_retarget", physically_valid: bool = False) -> dict:
     return {
         "room_id": room_id,
-        "generator": "scripted_retarget",
-        "physically_valid": False,
+        "generator": generator,
+        "physically_valid": physically_valid,
         "attempts": attempts,
         "successes": successes,
         "dropped": attempts - successes,

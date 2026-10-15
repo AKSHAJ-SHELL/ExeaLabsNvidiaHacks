@@ -1,0 +1,254 @@
+"""Run sim episodes at 20 Hz, record real joint states / commanded targets / camera frames,
+check success with physics, and write a LeRobot v2 dataset."""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+
+import mujoco
+import numpy as np
+
+from arrival.sim import robot
+from arrival.sim.people import Walkers
+from arrival.sim.scene import build_mjcf, door_w, drawer_x
+
+FPS = 20
+SUBSTEPS = 25  # 0.002 s physics -> 20 Hz control
+SETTLE_STEPS = 12
+
+
+def _front(f: dict) -> np.ndarray:
+    y = f.get("yaw", 0.0)
+    return np.array([-np.sin(y), np.cos(y), 0.0])
+
+
+class SimEnv:
+    def __init__(self, twin: dict, task: dict, res: int = 128, cameras=("ego_view", "wrist"), overview: bool = False):
+        self.twin, self.task = twin, task
+        self.fx = {f["id"]: f for f in twin["fixtures"]}
+        self.objs = {o["id"]: o for o in twin["objects"]}
+        obj_pos = {}
+        if "object_id" in task:
+            o = self.objs[task["object_id"]]
+            src = self.fx[task["source"]]
+            obj_pos[o["id"]] = [task["start"][0], task["start"][1], self._top(src) + o["size"][2] / 2 + 0.003]
+        base, yaw = self._base_pose(task, obj_pos)
+        xml = build_mjcf(twin, base, yaw, obj_pos, task.get("lighting", "neutral"), task.get("people", 0))
+        self.model = mujoco.MjModel.from_xml_string(xml)
+        self.data = mujoco.MjData(self.model)
+        self.qadr = [int(self.model.joint(j).qposadr[0]) for j in robot.ARM_JOINTS]
+        self.dofadr = [int(self.model.joint(j).dofadr[0]) for j in robot.ARM_JOINTS]
+        self.fadr = [int(self.model.joint(f"finger_{s}").qposadr[0]) for s in ("l", "r")]
+        self.data.qpos[self.qadr] = robot.HOME
+        self.data.qpos[self.fadr] = robot.FINGER_OPEN
+        self.data.ctrl[:] = list(robot.HOME) + [robot.FINGER_OPEN] * 2
+        free = self._free_floor()
+        self.walkers = Walkers(task.get("people", 0), free, seed=task.get("seed", 0)) if task.get("people") else None
+        mujoco.mj_forward(self.model, self.data)
+        self.cameras, self.res = cameras, res
+        self.renderer = mujoco.Renderer(self.model, res, res)
+        self.big = mujoco.Renderer(self.model, 360, 480) if overview else None
+        for _ in range(SETTLE_STEPS):
+            self.step(np.array(list(robot.HOME) + [robot.FINGER_OPEN]))
+
+    # ---- geometry helpers ----
+    @staticmethod
+    def _top(f: dict) -> float:
+        return f["position"][2] + f["size"][2] / 2
+
+    def _free_floor(self):
+        xs = [p for w in self.twin["walls"] for p in (w["start"][0], w["end"][0])]
+        ys = [p for w in self.twin["walls"] for p in (w["start"][1], w["end"][1])]
+        deep = max(f["position"][1] + f["size"][1] / 2 for f in self.twin["fixtures"])
+        return (min(xs) + 0.4, deep + 0.9, max(xs) - 0.4, max(ys) - 0.3)
+
+    def _base_pose(self, task: dict, obj_pos: dict):
+        fam = task["family"]
+        if fam in ("counter_to_sink", "counter_to_counter"):
+            src = self.fx[task["source"]]
+            p = np.array(obj_pos[task["object_id"]])
+            tgt = self.fx[task["target"]]
+            mid = (p[0] + task["target_x"]) / 2
+            n = _front(src)
+            y = src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28)
+            base = (mid, y, 0.75)
+            task.setdefault("_place", None)
+        else:
+            c = self.fx[task["fixture"]]
+            n = _front(c)
+            sx, sy = c["size"][0], c["size"][1]
+            if fam == "open_drawer":
+                lx, lz = drawer_x(c, self.twin["fixtures"]), robot_drawer_z()
+                along = 0.0
+                h = 0.72
+            else:
+                lx, lz = sx / 2 - 0.02 - door_w(c, self.twin["fixtures"]) + 0.06, 0.53
+                along = 0.3
+                h = 0.5
+            yaw = c.get("yaw", 0.0)
+            hx = c["position"][0] + np.cos(yaw) * (lx + along)
+            hy = c["position"][1] + np.sin(yaw) * (lx + along) + n[1] * (sy / 2 + h)
+            base = (hx, hy, 0.75)
+        return base, float(np.degrees(np.arctan2(-n[1], -n[0])))
+
+    def body_pos(self, name: str) -> np.ndarray:
+        return self.data.body(name).xpos.copy()
+
+    def site_pos(self, name: str) -> np.ndarray:
+        return self.data.site(name).xpos.copy()
+
+    def obj_half_h(self, oid: str) -> float:
+        return self.objs[oid]["size"][2] / 2
+
+    def place_point(self, task: dict) -> np.ndarray:
+        tgt = self.fx[task["target"]]
+        hh = self.obj_half_h(task["object_id"])
+        top = self._top(tgt) if tgt["type"] != "sink" else max(
+            self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
+        if tgt["type"] == "sink":
+            return np.array([tgt["position"][0], tgt["position"][1], top + hh + 0.05])
+        return np.array([task["target_x"], tgt["position"][1], top + hh + 0.012])
+
+    def pull_axis(self, task: dict) -> np.ndarray:
+        return _front(self.fx[task["fixture"]])
+
+    def door_geometry(self, task: dict):
+        b = self.data.body(f'{task["fixture"]}_door')
+        return b.xpos.copy(), self.site_pos(f'{task["fixture"]}_door_handle'), b.xmat.reshape(3, 3).copy()
+
+    # ---- stepping ----
+    def state(self) -> np.ndarray:
+        q = self.data.qpos
+        return np.array(list(q[self.qadr]) + [float(np.mean(q[self.fadr]))], dtype=np.float32)
+
+    def step(self, action: np.ndarray) -> None:
+        self.data.ctrl[:7] = action[:7]
+        self.data.ctrl[7:9] = action[7]
+        for _ in range(SUBSTEPS):
+            mujoco.mj_step(self.model, self.data)
+        self.people_xy = self.walkers.step(self.model, self.data, 1.0 / FPS) if self.walkers else []
+
+    def render(self, cam: str, big: bool = False) -> np.ndarray:
+        r = self.big if big else self.renderer
+        r.update_scene(self.data, cam)
+        return r.render().copy()
+
+    def obs(self) -> dict:
+        o = {"state": self.state()}
+        for c in self.cameras:
+            o[c] = self.render(c)
+        return o
+
+    # ---- physics success ----
+    def success(self, task: dict) -> tuple[bool, dict]:
+        fam = task["family"]
+        if fam in ("counter_to_sink", "counter_to_counter"):
+            oid = task["object_id"]
+            p = self.body_pos(oid)
+            v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
+            tgt = self.fx[task["target"]]
+            (cx, cy, _), (sx, sy, _) = tgt["position"], tgt["size"]
+            inside = abs(p[0] - cx) < sx / 2 - 0.01 and abs(p[1] - cy) < sy / 2 - 0.01
+            if tgt["type"] == "sink":
+                top = max(self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
+                ok = inside and p[2] < top and v < 0.05
+            else:
+                ok = inside and abs(p[2] - (self._top(tgt) + self.obj_half_h(oid))) < 0.025 and v < 0.05
+            return bool(ok), {"object_pos": p.round(4).tolist(), "object_speed": round(v, 4)}
+        jn = task["joint"]
+        q = float(self.data.joint(jn).qpos[0])
+        ok = q > 0.15 if fam == "open_drawer" else q > np.radians(60)
+        return bool(ok), {"joint": jn, "qpos": round(q, 4)}
+
+
+def robot_drawer_z() -> float:
+    from arrival.sim.scene import CARCASS_H
+
+    return CARCASS_H - 0.01
+
+
+def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: list | None = None) -> dict:
+    policy.reset(env, task)
+    states, actions, frames, people = [], [], {c: [] for c in env.cameras}, []
+    tail = 0
+    for t in range(max_steps):
+        obs = env.obs()
+        a = policy.act(obs)
+        states.append(obs["state"])
+        actions.append(np.asarray(a, dtype=np.float32))
+        for c in env.cameras:
+            frames[c].append(obs[c])
+        if preview is not None:
+            preview.append(env.render("overview", big=True))
+        env.step(a)
+        people.append(env.people_xy)
+        if getattr(policy, "done", lambda: False)():
+            tail += 1
+            if tail > 10:
+                break
+    ok, detail = env.success(task)
+    return {"states": np.array(states), "actions": np.array(actions), "videos": {c: np.array(v) for c, v in frames.items()},
+            "success": ok, "detail": detail, "people_xy": people, "ik_error": getattr(policy, "ik_error", None)}
+
+
+def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path = "out", people: int = 2,
+            policy_name: str = "scripted", res: int = 128, seed: int = 0, save_preview: bool = False,
+            log=print) -> dict:
+    """Collect `episodes` attempts; failed attempts are dropped and counted."""
+    from arrival.sim.export import SimDatasetWriter
+    from arrival.sim.policy import ScriptedExpert, VLAClient
+    from arrival.sim.tasks import make_tasks
+
+    out_dir = Path(out_dir)
+    room = twin["room_id"]
+    tasks = make_tasks(twin, families, episodes, seed=seed, people=people, log=log)
+    for t in tasks:
+        if t["family"] == "open_drawer":
+            t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
+        elif t["family"] == "open_door":
+            t["joint"] = f'{t["fixture"]}_door'
+    policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
+    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"))
+    t0 = time.perf_counter()
+    per = {}
+    preview = [] if save_preview else None
+    for i, task in enumerate(tasks):
+        env = SimEnv(twin, task, res=res, overview=save_preview and i == 0)
+        ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
+        fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0})
+        fam["attempts"] += 1
+        log(f"[sim] {task['task_id']}: {'OK ' if ep['success'] else 'MISS'} {ep['detail']} ik_err={ep['ik_error'] if ep['ik_error'] is None else round(ep['ik_error'], 4)}")
+        if ep["success"]:
+            fam["successes"] += 1
+            writer.add_episode(ep, task)
+        if save_preview and i == 0:
+            _write_preview(out_dir / "previews", room, preview, ep)
+    seconds = time.perf_counter() - t0
+    info = writer.finish(len(tasks))
+    succ = sum(f["successes"] for f in per.values())
+    report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name, "attempts": len(tasks),
+              "successes": succ, "dropped": len(tasks) - succ, "seconds": round(seconds, 2),
+              "demos_per_hour": round(succ / seconds * 3600, 1) if seconds else 0.0,
+              "families": {k: {**v, "success_rate": round(v["successes"] / v["attempts"], 3)} for k, v in per.items()},
+              "people": people, "resolution": res, "physics_checked_success": True, "grasp": "friction"}
+    rp = out_dir / "reports" / f"{room}_sim.json"
+    rp.parent.mkdir(parents=True, exist_ok=True)
+    rp.write_text(json.dumps(report, indent=2))
+    return {"dataset": writer.root, "report": rp, "report_data": report, "info": info}
+
+
+def _write_preview(d: Path, room: str, frames: list, ep: dict) -> None:
+    from PIL import Image
+
+    from arrival.export.lerobot import write_video
+
+    d.mkdir(parents=True, exist_ok=True)
+    write_video(d / f"{room}_sim_overview.mp4", np.array(frames), FPS)
+    picks = [frames[int(k)] for k in np.linspace(0, len(frames) - 1, 6)]
+    ego = ep["videos"]["ego_view"]
+    egos = [np.array(Image.fromarray(ego[int(k)]).resize((480, 360))) for k in np.linspace(0, len(ego) - 1, 6)]
+    sheet = np.concatenate([np.concatenate(picks[:3], 1), np.concatenate(picks[3:], 1),
+                            np.concatenate(egos[:3], 1), np.concatenate(egos[3:], 1)], 0)
+    Image.fromarray(sheet).save(d / f"{room}_sim_contact.png")

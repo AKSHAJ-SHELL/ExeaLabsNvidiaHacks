@@ -19,7 +19,7 @@ The implementing agent does not open these accounts and does not block on them. 
 | Isaac GR00T | <https://github.com/NVIDIA/Isaac-GR00T> | N1.7 code, Apache 2.0 |
 | GR00T hardware note | <https://github.com/NVIDIA/Isaac-GR00T/blob/main/getting_started/hardware_recommendation.md> | Fine-tune wants 40 GB+ VRAM |
 | GR00T data prep | <https://github.com/NVIDIA/Isaac-GR00T/blob/main/getting_started/data_preparation.md> | `meta/modality.json` |
-| GR00T weights | <https://huggingface.co/nvidia/GR00T-N1.7-3B> | Gated download. Request access here if the button is gated |
+| GR00T weights | <https://huggingface.co/nvidia/GR00T-N1.7-3B> | Not gated itself. Its Cosmos-Reason2-2B VLM backbone is gated on Hugging Face: accept that license with the same account before loading |
 | NVIDIA build | <https://build.nvidia.com/> | Only if a model is hosted there and not on Token Factory |
 | RoboCasa | <https://github.com/robocasa/robocasa> | Layout format and atomic tasks |
 | MimicGen guide | <https://github.com/robocasa/robocasa/blob/main/docs/use_cases/mimicgen.md> | `PnPCounterToSink` template path |
@@ -30,11 +30,11 @@ The implementing agent does not open these accounts and does not block on them. 
 1. Nebius account and a project id.
 2. Token Factory API key. Put it in an untracked `.env` as `TOKEN_FACTORY_API_KEY`.
 3. Serverless Jobs quota for at least one GPU preset. The jobs quickstart uses platform `gpu-l40s-a` and preset `1gpu-8vcpu-32gb`. Confirm those ids in the console; do not assume they are still current.
-4. Hugging Face access to `nvidia/GR00T-N1.7-3B` if the repo is gated. Record whether `NEW_EMBODIMENT` is the supported path for a 7-DoF arm. It was, in the public README, via `--embodiment-tag NEW_EMBODIMENT` and a modality config. Recheck before writing that config.
+4. Hugging Face access: `nvidia/GR00T-N1.7-3B` is not gated, but the Cosmos-Reason2-2B backbone it loads is; accept that model's license first. Record whether `NEW_EMBODIMENT` is the supported path for a 7-DoF arm. It was, in the public README, via `--embodiment-tag NEW_EMBODIMENT` and a modality config. Recheck before writing that config.
 5. An Object Storage bucket, S3-compatible, only when artifacts leave the laptop.
 
 ## What not to do
 
 - Do not put keys in the repo, the README, or the dataset.
 - Do not spend credits on a fine-tune of the placeholder dataset.
-- Scanner apps and RoomPlan category lists were unverified in the spec. The normalizer in this repo fixes the subset it accepts. A real export from Apple's RoomCaptureView sample can replace `scans/hero_kitchen/roomplan.json` later. Polycam and Scaniverse exports are not accepted until a converter is written.
+- Scanner apps and RoomPlan category lists were unverified in the spec. The normalizer in this repo fixes the subset it accepts. The normalizer now handles Apple's keyed-enum encoding and is tested against 2 public real exports (`tests/fixtures/roomplan/`); our own capture can replace `scans/hero_kitchen/roomplan.json` later. Polycam and Scaniverse exports are not accepted until a converter is written.

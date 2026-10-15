@@ -19,6 +19,12 @@ def is_miss(attempt_index: int) -> bool:
     return attempt_index % 10 == 9
 
 
+def task_slot(attempt_index: int) -> int:
+    """Index into the family-interleaved order. Skipping one slot every 10 attempts shifts parity so the
+    misses (9, 19, 29, ...) alternate between the two families instead of always hitting the same one."""
+    return attempt_index + attempt_index // 10
+
+
 def target_point(task: dict, twin: dict) -> list[float]:
     fixtures = {f["id"]: f for f in twin["fixtures"]}
     target = fixtures[task["target_fixture_id"]]
@@ -32,12 +38,19 @@ def _lerp(a, b, t):
 
 
 def seed_trajectory(start: list[float], target: list[float], miss: bool = False) -> list[dict]:
-    """80 frames, piecewise linear in cartesian space, 16 frames per segment."""
+    """80 frames, piecewise linear in cartesian space, 16 frames per segment.
+    While grasped the object keeps a constant offset GRASP below the eef; on release it is lowered onto
+    the target (no teleport), the gripper opens, then the eef rises."""
     sx, sy, sz = start
     hover, low = [sx, sy, sz + HOVER], [sx, sy, sz + GRASP]
-    lifted_eef, lifted_obj = [sx, sy, sz + LIFT], [sx, sy, sz + LIFT]
+    lifted_eef = [sx, sy, sz + LIFT]
     carried = [target[0], target[1], sz + LIFT]
-    risen = [target[0], target[1], sz + LIFT + RISE]
+    placed = [target[0], target[1], target[2] + GRASP]
+    risen = [target[0], target[1], target[2] + GRASP + RISE]
+
+    def held(eef):
+        return [eef[0], eef[1], eef[2] - GRASP]
+
     frames = []
     for i in range(N_FRAMES):
         seg, k = divmod(i, SEG)
@@ -47,13 +60,18 @@ def seed_trajectory(start: list[float], target: list[float], miss: bool = False)
         elif seg == 1:
             eef, grip, obj = list(low), t, list(start)
         elif seg == 2:
-            eef, grip, obj = _lerp(low, lifted_eef, t), 1.0, _lerp(list(start), lifted_obj, t)
+            eef, grip = _lerp(low, lifted_eef, t), 1.0
+            obj = held(eef)
         elif seg == 3:
-            eef, grip, obj = _lerp(lifted_eef, carried, t), 1.0, _lerp(lifted_obj, carried, t)
-        else:
-            eef = _lerp(carried, risen, t)
-            grip = max(0.0, 1.0 - k / 7) if k < 8 else 0.0
-            obj = list(target)
+            eef, grip = _lerp(lifted_eef, carried, t), 1.0
+            obj = held(eef)
+        elif k < 8:  # lower onto the target while still grasped
+            eef, grip = _lerp(carried, placed, k / 7), 1.0
+            obj = held(eef)
+        elif k < 11:  # open in place
+            eef, grip, obj = list(placed), 1.0 - (k - 7) / 3, list(target)
+        else:  # retreat
+            eef, grip, obj = _lerp(placed, risen, (k - 10) / 5), 0.0, list(target)
         if miss:
             grip, obj = 0.0, list(start)
         frames.append({
@@ -118,7 +136,7 @@ def generate(tasks: list[dict], twin: dict, episodes: int, seed: int = 0):
     successes = 0
     i = 0
     while successes < episodes and i < 2 * episodes:
-        att = make_attempt(i, order[i % len(order)], twin, seeds)
+        att = make_attempt(i, order[task_slot(i) % len(order)], twin, seeds)
         successes += att["success"]
         yield att
         i += 1

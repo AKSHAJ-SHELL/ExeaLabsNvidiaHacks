@@ -1,12 +1,15 @@
 import copy
 import json
+import math
 import struct
 import zlib
+from pathlib import Path
 
 import pytest
 
 from arrival.scan import bundle, roomplan
 from arrival.scan.four_photo import bundle_from_photos
+from arrival.twin.compile import compile_twin
 
 from conftest import SCANS
 
@@ -77,3 +80,47 @@ def test_four_photo_slot(tmp_path):
     assert len(list((scans / "my_room" / "photos").iterdir())) == 4
     with pytest.raises(ValueError):
         bundle_from_photos(photos[:3], "my_room", scans_dir=scans)
+
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "roomplan"
+REAL = sorted(FIXTURES.glob("*.json"))
+
+
+def _closed(walls, tol=0.05):
+    ends = [tuple(p) for w in walls for p in (w["start"], w["end"])]
+    return all(sum(math.dist(e, o) <= tol for o in ends) >= 2 for e in ends)
+
+
+@pytest.mark.parametrize("path", REAL, ids=[p.stem for p in REAL])
+def test_real_export_normalizes_and_compiles(path):
+    raw = json.loads(path.read_text())
+    b = roomplan.load(path, path.stem)
+    assert all(isinstance(f["category"], str) for f in b["fixtures"])
+    n_low = sum(1 for o in raw["objects"] if "low" in o.get("confidence", {}))
+    assert len(b["fixtures"]) == len(raw["objects"]) - n_low
+    for f in b["fixtures"]:
+        assert f["position"][2] - f["size"][2] / 2 >= -0.05, f  # resting on/above the floor
+        assert f["position"][2] >= 0
+    xs = [p[0] for w in b["walls"] for p in (w["start"], w["end"])]
+    ys = [p[1] for w in b["walls"] for p in (w["start"], w["end"])]
+    assert min(xs) == pytest.approx(0, abs=1e-6) and min(ys) == pytest.approx(0, abs=1e-6)
+    longest = max(b["walls"], key=lambda w: math.dist(w["start"], w["end"]))
+    assert longest["start"][1] == pytest.approx(longest["end"][1], abs=1e-6)  # runs along X
+    assert _closed(b["walls"])
+    twin = compile_twin(b)
+    assert all(f["position"][2] >= 0 for f in twin["fixtures"])
+
+
+def test_keyed_enum_camelcase_and_low_confidence():
+    eye = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, -1.0, -1, 1]
+    rp = {"floors": [{"transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1.5, 0, 1]}],
+          "walls": [{"identifier": "w", "dimensions": [4, 2.5, 0], "transform":
+                     [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, -0.25, 0, 1]}],
+          "objects": [{"identifier": "a", "category": {"washerDryer": {}}, "confidence": {"high": {}},
+                       "dimensions": [0.6, 0.9, 0.6], "transform": eye},
+                      {"identifier": "b", "category": {"sink": {}}, "confidence": {"low": {}},
+                       "dimensions": [0.6, 0.2, 0.5], "transform": eye}]}
+    b = roomplan.to_bundle(rp, "r")
+    assert [f["category"] for f in b["fixtures"]] == ["washer_dryer"]
+    assert b["fixtures"][0]["position"][2] == pytest.approx(0.5)
+    assert b["walls"][0]["thickness"] > 0

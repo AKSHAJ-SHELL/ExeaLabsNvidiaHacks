@@ -16,11 +16,13 @@ These were built before the hackathon, in <https://github.com/AvnehSBhatia/Walk-
 
 ## Built in this repo for Arrival
 
-- RoomPlan normalization: Apple RoomPlan `CapturedRoom` JSON goes to a ScanBundle, converting ARKit Y-up to Z-up (`arrival/scan/`).
+- RoomPlan normalization: a subset of Apple RoomPlan `CapturedRoom` JSON (keyed-enum categories, confidence filter, floor offset, room alignment) goes to a ScanBundle, converting ARKit Y-up to Z-up (`arrival/scan/`). Tested against 2 public real exports from other GitHub repos (`tests/fixtures/roomplan/README.md`).
 - A RoboCasa-subset layout compiler that turns the ScanBundle into `twin.json` and `layout.yaml`, including the fixture category map and counter synthesis (`arrival/twin/`, `arrival/catalog/`).
 - Task variations for two families (`counter_to_sink`, `counter_to_counter`) across object, start pose, lighting, and instruction wording (`arrival/tasks/`).
 - Scripted retargeting of seed trajectories, plus a distance oracle that drops misses, exported as a GR00T LeRobot v2 dataset with `meta/modality.json` and `meta/embodiment.json` (`arrival/generate/`, `arrival/export/`).
 - 64×64 `sim_texture` schematic frames (`arrival/render/`).
+- Seeded placement of catalog objects on a scanned counter, since RoomPlan captures no small objects (`arrival/twin/compile.py`).
+- A MuJoCo simulation built fresh in this repo (`arrival/sim/`): articulated kitchen with drawers and doors, a procedural 7-DoF arm, kinematic moving people. It does not reuse Walk-In's MuJoCo room or robot rigs.
 - A local page for pre-scanned rooms, a dataset zip download, and a queued upload endpoint (`arrival/web/`, `arrival/jobs/`).
 
 ## Carried over as ideas only
@@ -30,4 +32,4 @@ These were built before the hackathon, in <https://github.com/AvnehSBhatia/Walk-
 
 ## Not claimed
 
-Arrival tonight does not run MimicGen or contact physics. It does not train a Gaussian splat or GR00T, and it has no real-robot result. See [09-later.md](09-later.md).
+Arrival does not run MimicGen, and the scripted `demo` path has no contact physics (the separate `sim` path does). It does not train a Gaussian splat or GR00T, and it has no real-robot result. See [09-later.md](09-later.md).

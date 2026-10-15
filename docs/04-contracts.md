@@ -104,7 +104,8 @@ Input is a subset of Apple's CapturedRoom JSON. Extra keys are ignored.
   "objects": [
     {
       "identifier": "sink_1",
-      "category": "sink",
+      "category": {"sink": {}},
+      "confidence": {"high": {}},
       "dimensions": [0.6, 0.25, 0.5],
       "transform": [1,0,0,0, 0,1,0,0, 0,0,1,0, 1.6,0.85,-0.40, 1]
     }
@@ -112,7 +113,7 @@ Input is a subset of Apple's CapturedRoom JSON. Extra keys are ignored.
 }
 ```
 
-`transform` is 16 numbers, column-major, ARKit Y-up. Translation is indexes 12, 13, 14.
+`transform` is 16 numbers, column-major, ARKit Y-up. Translation is indexes 12, 13, 14. Apple encodes Swift enums as keyed objects (`{"sink": {}}`, `{"washerDryer": {}}`, `{"high": {}}`); the normalizer also accepts plain strings, snake-cases camelCase categories, drops `low`-confidence objects, subtracts the floor height (`floors[].transform[13]`, else the lowest wall bottom), rotates the room so the longest wall runs along +X, translates the wall bounding box to (0, 0), and snaps yaws within 5° of a multiple of 90°. Walls with zero thickness get 0.1 m.
 
 Conversion:
 

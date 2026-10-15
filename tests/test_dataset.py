@@ -90,7 +90,11 @@ def test_demo_4_episodes(tmp_path):
     assert [modality["state"]["gripper"]["start"], modality["state"]["gripper"]["end"]] == [7, 8]
     emb = json.loads((ds / "meta" / "embodiment.json").read_text())
     assert emb["joints_are_placeholder"] is True
-    assert (ds / "meta" / emb["cartesian_sidecar"]).resolve().is_file()
+    assert emb["cartesian_sidecar"] == "walkin_cartesian.jsonl"
+    assert (ds / "meta" / emb["cartesian_sidecar"]).is_file()
+    assert info["features"]["observation.images.ego_view"]["info"]["video.height"] == 64
+    assert len((ds / "meta" / "episodes_stats.jsonl").read_text().splitlines()) == 4
+    assert json.loads((ds / "meta" / "stats.json").read_text())["observation.state"]["count"] == [320]
     assert len(list(ds.glob("videos/chunk-000/observation.images.ego_view/*.mp4"))) == 4
     t = pq.read_table(ds / "data" / "chunk-000" / "episode_000003.parquet")
     assert t.column("index")[0].as_py() == 240
@@ -125,7 +129,8 @@ def test_validator_rejects_broken(tmp_path):
 def test_cli_usage_errors(tmp_path):
     assert main([]) == 2
     assert main(["bogus"]) == 2
-    assert main(["demo", "--episodes", "100", "--out", str(tmp_path), "--scans", str(SCANS)]) == 2
+    assert main(["demo", "--episodes", "0", "--out", str(tmp_path), "--scans", str(SCANS)]) == 2
+    assert main(["demo", "--videos", "bogus"]) == 2
 
 
 def test_from_roomplan(tmp_path):
@@ -135,3 +140,85 @@ def test_from_roomplan(tmp_path):
     sink = next(f for f in twin["fixtures"] if f["id"] == "sink_1")
     assert sink["position"] == pytest.approx([1.6, 0.4, 0.85])
     assert any(f["source_category"] == "synthesized" for f in twin["fixtures"])
+
+
+def test_release_is_smooth_and_offset_constant(hero_twin, hero_tasks):
+    from arrival.generate.scripted import GRASP, SEG, build_seeds, make_attempt
+    seeds = build_seeds(hero_tasks, hero_twin)
+    for t in hero_tasks[:6]:
+        fr = make_attempt(0, t, hero_twin, seeds)["frames"]
+        for a, b in zip(fr, fr[1:]):
+            assert math.dist(a["object_position"], b["object_position"]) < 0.12
+        for f in fr[2 * SEG + 1:4 * SEG]:
+            assert f["eef"][2] - f["object_position"][2] == pytest.approx(GRASP, abs=1e-5)
+
+
+def test_misses_hit_both_families(hero_twin, hero_tasks):
+    dropped = [a["task"]["family"] for a in generate(hero_tasks, hero_twin, episodes=1000) if not a["success"]]
+    assert len(dropped) == 111
+    assert {"counter_to_sink", "counter_to_counter"} <= set(dropped)
+    assert min(dropped.count(f) for f in set(dropped)) > 30
+
+
+def test_sparse_policy_declares_no_video(tmp_path):
+    res = run_demo("hero_kitchen", 3, "sparse", out_dir=tmp_path, scans_dir=SCANS, log=lambda *a: None)
+    ds = res["dataset"]
+    info = json.loads((ds / "meta" / "info.json").read_text())
+    assert not any(v["dtype"] == "video" for v in info["features"].values())
+    assert "video" not in json.loads((ds / "meta" / "modality.json").read_text())
+    assert not list(ds.glob("videos/**/*.mp4"))
+    assert (tmp_path / "datasets" / "hero_kitchen_previews" / "ego_view" / "episode_000000.mp4").is_file()
+    assert validate(ds) == []
+
+
+def test_chunking_1001(tmp_path):
+    res = run_demo("hero_kitchen", 1001, "none", out_dir=tmp_path, scans_dir=SCANS, log=lambda *a: None)
+    ds = res["dataset"]
+    assert res["info"]["total_chunks"] == 2
+    assert (ds / "data" / "chunk-001" / "episode_001000.parquet").is_file()
+    assert not (ds / "data" / "chunk-000" / "episode_001000.parquet").exists()
+    assert validate(ds) == []
+    (ds / "data" / "chunk-001" / "episode_001000.parquet").unlink()
+    assert any("episode_001000" in e for e in validate(ds))
+
+
+def test_validator_catches_corruption(tmp_path):
+    import pyarrow as pa
+    res = run_demo("hero_kitchen", 3, "all", out_dir=tmp_path, scans_dir=SCANS, log=lambda *a: None)
+    ds = res["dataset"]
+    p = ds / "data" / "chunk-000" / "episode_000001.parquet"
+    t = pq.read_table(p)
+    done = t.column("next.done").to_pylist()
+    done[0] = True
+    pq.write_table(t.set_column(t.schema.get_field_index("next.done"), "next.done", pa.array(done)), p)
+    assert any("next.done" in e for e in validate(ds))
+    pq.write_table(t.slice(0, 40), p)
+    assert any("rows" in e for e in validate(ds))
+    (ds / "videos" / "chunk-000" / "observation.images.ego_view" / "episode_000002.mp4").write_bytes(b"junk")
+    assert any("episode_000002.mp4" in e for e in validate(ds))
+
+
+def test_generic_writer(tmp_path):
+    import numpy as np
+    from arrival.export.lerobot import LeRobotWriter
+    modality = {"state": {"arm": {"start": 0, "end": 5}, "base": {"start": 5, "end": 7}},
+                "action": {"arm": {"start": 0, "end": 5, "absolute": True}},
+                "annotation": {"human.task_description": {}}}
+    w = LeRobotWriter(tmp_path / "ds", "r", "all", state_dim=7, action_dim=5, modality=modality,
+                      video_keys=["front", "wrist"], embodiment={"embodiment": "test"},
+                      extra_info={"walkin_generator": "mujoco_test", "walkin_physically_valid": True})
+    T = 12
+    for ep in range(3):
+        vids = {k: np.full((T, 32, 48, 3), 40 * ep, dtype=np.uint8) for k in ("front", "wrist")}
+        w.add_episode(np.zeros((T, 7)), np.ones((T, 5)), np.arange(T) / 20, f"task {ep % 2}", True,
+                      videos=vids, extra={"walkin_family": "f"})
+    with pytest.raises(ValueError):
+        w.add_episode(np.zeros((T, 6)), np.ones((T, 5)), np.arange(T) / 20, "x", True)
+    info = w.finish(3)
+    assert info["walkin_generator"] == "mujoco_test" and info["total_videos"] == 6
+    assert info["features"]["observation.images.wrist"]["shape"] == [32, 48, 3]
+    assert validate(tmp_path / "ds") == []
+    m = json.loads((tmp_path / "ds" / "meta" / "modality.json").read_text())
+    m["state"]["base"]["end"] = 8
+    (tmp_path / "ds" / "meta" / "modality.json").write_text(json.dumps(m))
+    assert any("slices cover 8" in e for e in validate(tmp_path / "ds"))

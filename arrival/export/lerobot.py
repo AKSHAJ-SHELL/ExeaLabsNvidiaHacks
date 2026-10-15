@@ -1,8 +1,28 @@
-"""GR00T LeRobot v2 writer: parquet per episode, mp4 per selected episode, meta/*."""
+"""GR00T LeRobot v2.1 writer: parquet per episode, mp4 per episode per camera, meta/*.
+
+Generic API (reused by the sim package):
+
+    w = LeRobotWriter(root, room_id, video_policy="all", fps=20,
+                      state_dim=S, action_dim=A, modality={...},     # modality.json state/action/annotation
+                      video_keys=["ego_view", ...],                  # camera names; frames supplied by caller
+                      embodiment={...}, extra_info={"walkin_generator": ..., ...})
+    for ...:
+        videos = {"ego_view": uint8[T,H,W,3]} if w.wants_video(w.next_episode) else None
+        w.add_episode(states[T,S], actions[T,A], timestamps[T], instruction, success,
+                      videos=videos, extra={"walkin_family": ...},   # extra -> episodes.jsonl row
+                      sidecar={...})                                 # optional row in meta/walkin_cartesian.jsonl
+    info = w.finish(attempts)
+
+video_policy "all": every episode must supply every camera; the video features are declared.
+"sparse"/"none": no video feature is declared (GR00T never looks for missing mp4s); sparse episodes'
+frames go to <root>/../<room>_previews/<camera>/episode_XXXXXX.mp4 for humans only.
+`add(attempt)` is the scripted-generator path and delegates to add_episode.
+"""
 
 from __future__ import annotations
 
 import json
+import math
 import shutil
 from pathlib import Path
 
@@ -14,6 +34,10 @@ from arrival.render import sim_texture
 
 VIDEO_KEY = "observation.images.ego_view"
 SPARSE_EVERY = 125
+CHUNKS_SIZE = 1000
+SIDECAR = "walkin_cartesian.jsonl"
+DATA_PATH = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet"
+VIDEO_PATH = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4"
 
 MODALITY = {
     "state": {"single_arm": {"start": 0, "end": 7}, "gripper": {"start": 7, "end": 8}},
@@ -23,6 +47,16 @@ MODALITY = {
     },
     "video": {"ego_view": {"original_key": VIDEO_KEY}},
     "annotation": {"human.task_description": {}},
+}
+
+SCRIPTED_EMBODIMENT = {
+    "embodiment": "robocasa_panda",
+    "dof_arm": 7,
+    "dof_gripper": 1,
+    "control": "absolute_joint_position",
+    "joints_are_placeholder": True,
+    "note": "single_arm values are zeros until a physics generator fills them. "
+            "Do not fine-tune on this dataset while joints_are_placeholder is true.",
 }
 
 SCHEMA = pa.schema([
@@ -36,6 +70,18 @@ SCHEMA = pa.schema([
     ("next.reward", pa.float32()),
     ("next.done", pa.bool_()),
 ])
+SCALAR_FEATURES = {
+    "timestamp": "float32", "annotation.human.task_description": "int64", "task_index": "int64",
+    "episode_index": "int64", "index": "int64", "next.reward": "float32", "next.done": "bool",
+}
+
+
+def video_key(name: str) -> str:
+    return name if name.startswith("observation.images.") else f"observation.images.{name}"
+
+
+def chunk_of(episode_index: int, chunks_size: int = CHUNKS_SIZE) -> int:
+    return episode_index // chunks_size
 
 
 def wants_video(policy: str, episode_index: int) -> bool:
@@ -56,62 +102,164 @@ def write_video(path: Path, frames: np.ndarray, fps: int) -> None:
             w.append_data(f)
 
 
+def _stats(x: np.ndarray) -> dict:
+    x = x.astype(np.float64).reshape(len(x), -1)
+    return {"min": x.min(0).tolist(), "max": x.max(0).tolist(), "mean": x.mean(0).tolist(),
+            "std": x.std(0).tolist(), "count": [len(x)]}
+
+
+def _merge_stats(items: list[dict]) -> dict:
+    n = np.array([s["count"][0] for s in items], dtype=np.float64)
+    mean = np.array([s["mean"] for s in items])
+    var = np.array([s["std"] for s in items]) ** 2
+    tot = n.sum()
+    gmean = (mean * n[:, None]).sum(0) / tot
+    gvar = ((var + (mean - gmean) ** 2) * n[:, None]).sum(0) / tot
+    return {"min": np.min([s["min"] for s in items], 0).tolist(), "max": np.max([s["max"] for s in items], 0).tolist(),
+            "mean": gmean.tolist(), "std": np.sqrt(gvar).tolist(), "count": [int(tot)]}
+
+
 class LeRobotWriter:
     def __init__(self, root: str | Path, room_id: str, video_policy: str, fps: int = 20,
-                 room_center_x: float = 2.0):
+                 room_center_x: float = 2.0, state_dim: int = 8, action_dim: int = 8,
+                 modality: dict | None = None, video_keys: list[str] | None = None,
+                 embodiment: dict | None = None, extra_info: dict | None = None,
+                 robot_type: str = "robocasa_panda", chunks_size: int = CHUNKS_SIZE):
+        if video_policy not in ("all", "sparse", "none"):
+            raise ValueError(f"unknown video policy {video_policy!r}")
         self.root = Path(root)
         self.room_id = room_id
         self.video_policy = video_policy
         self.fps = fps
         self.room_center_x = room_center_x
+        self.state_dim, self.action_dim = state_dim, action_dim
+        self.video_keys = list(video_keys if video_keys is not None else ["ego_view"])
+        base = modality if modality is not None else MODALITY
+        self.modality = {k: v for k, v in base.items() if k != "video"}
+        self.embodiment = dict(embodiment if embodiment is not None else SCRIPTED_EMBODIMENT)
+        self.extra_info = {"walkin_generator": "scripted_retarget", "walkin_physically_valid": False,
+                           "walkin_appearance": sim_texture.APPEARANCE, **(extra_info or {})}
+        self.robot_type = robot_type
+        self.chunks_size = chunks_size
         if self.root.exists():
             shutil.rmtree(self.root)
         (self.root / "meta").mkdir(parents=True)
-        (self.root / "data" / "chunk-000").mkdir(parents=True)
-        self.sidecar_path = self.root.parent / f"{room_id}.cartesian.jsonl"
+        self.previews_dir = self.root.parent / f"{room_id}_previews"
+        if self.previews_dir.exists():
+            shutil.rmtree(self.previews_dir)
+        self.sidecar_path = self.root / "meta" / SIDECAR
         self._sidecar = open(self.sidecar_path, "w")
         self.task_index: dict[str, int] = {}
         self.episodes: list[dict] = []
+        self.ep_stats: list[dict] = []
         self.families: set[str] = set()
+        self.video_shapes: dict[str, list[int]] = {}
         self.total_frames = 0
         self.videos = 0
+        self.previews = 0
 
-    def add(self, attempt: dict) -> int:
+    @property
+    def next_episode(self) -> int:
+        return len(self.episodes)
+
+    def wants_video(self, episode_index: int) -> bool:
+        return wants_video(self.video_policy, episode_index)
+
+    def add_episode(self, states: np.ndarray, actions: np.ndarray, timestamps, instruction: str,
+                    success: bool, videos: dict[str, np.ndarray] | None = None, extra: dict | None = None,
+                    sidecar: dict | None = None) -> int:
         ep = len(self.episodes)
-        task = attempt["task"]
-        instr = task["instruction"]
-        ti = self.task_index.setdefault(instr, len(self.task_index))
-        frames = attempt["frames"]
-        n = len(frames)
-        state = np.array([f["joint"] + [f["gripper"]] for f in frames], dtype=np.float32)
+        states = np.asarray(states, dtype=np.float32)
+        actions = np.asarray(actions, dtype=np.float32)
+        n = len(states)
+        if states.shape != (n, self.state_dim) or actions.shape != (n, self.action_dim) or n == 0:
+            raise ValueError(f"episode {ep}: states {states.shape} / actions {actions.shape} "
+                             f"!= (T,{self.state_dim}) / (T,{self.action_dim})")
+        ts = np.asarray(timestamps, dtype=np.float32)
+        if ts.shape != (n,):
+            raise ValueError(f"episode {ep}: timestamps shape {ts.shape} != ({n},)")
+        ti = self.task_index.setdefault(instruction, len(self.task_index))
         reward = np.zeros(n, dtype=np.float32)
-        if attempt["success"]:
+        if success:
             reward[-1] = 1.0
         done = np.zeros(n, dtype=bool)
         done[-1] = True
-        state_list = pa.array(list(state), type=pa.list_(pa.float32()))
+        cols = {
+            "observation.state": states, "action": actions, "timestamp": ts,
+            "annotation.human.task_description": np.full(n, ti, dtype=np.int64),
+            "task_index": np.full(n, ti, dtype=np.int64), "episode_index": np.full(n, ep, dtype=np.int64),
+            "index": np.arange(self.total_frames, self.total_frames + n, dtype=np.int64),
+            "next.reward": reward, "next.done": done,
+        }
         table = pa.Table.from_arrays([
-            state_list,
-            state_list,  # absolute targets: action[i] == state[i]
-            pa.array(np.array([f["t"] for f in frames], dtype=np.float32)),
-            pa.array(np.full(n, ti, dtype=np.int64)),
-            pa.array(np.full(n, ti, dtype=np.int64)),
-            pa.array(np.full(n, ep, dtype=np.int64)),
-            pa.array(np.arange(self.total_frames, self.total_frames + n, dtype=np.int64)),
-            pa.array(reward),
-            pa.array(done),
+            pa.array(list(states), type=pa.list_(pa.float32())),
+            pa.array(list(actions), type=pa.list_(pa.float32())),
+            *[pa.array(cols[c]) for c in SCHEMA.names[2:]],
         ], schema=SCHEMA)
-        pq.write_table(table, self.root / "data" / "chunk-000" / f"episode_{ep:06d}.parquet")
-        if wants_video(self.video_policy, ep):
-            imgs = sim_texture.render_episode(frames, task["lighting"], self.room_center_x)
-            write_video(self.root / "videos" / "chunk-000" / VIDEO_KEY / f"episode_{ep:06d}.mp4", imgs, self.fps)
-            self.videos += 1
-        self._sidecar.write(json.dumps({"episode_index": ep, "task_id": task["task_id"], "frames": frames}) + "\n")
-        self.episodes.append({"episode_index": ep, "tasks": [instr], "length": n,
-                              "walkin_family": task["family"], "walkin_lighting": task["lighting"]})
-        self.families.add(task["family"])
+        chunk = chunk_of(ep, self.chunks_size)
+        path = self.root / DATA_PATH.format(episode_chunk=chunk, episode_index=ep)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(table, path)
+
+        if self.video_policy == "all":
+            missing = [k for k in self.video_keys if not videos or k not in videos]
+            if missing:
+                raise ValueError(f"episode {ep}: video policy 'all' needs frames for {missing}")
+        for name, frames in (videos or {}).items():
+            frames = np.asarray(frames, dtype=np.uint8)
+            if frames.ndim != 4 or frames.shape[0] != n or frames.shape[3] != 3:
+                raise ValueError(f"episode {ep}: video {name} shape {frames.shape} != ({n},H,W,3)")
+            if self.video_policy == "all":
+                shape = list(frames.shape[1:])
+                if self.video_shapes.setdefault(name, shape) != shape:
+                    raise ValueError(f"episode {ep}: video {name} shape changed to {shape}")
+                write_video(self.root / VIDEO_PATH.format(episode_chunk=chunk, video_key=video_key(name),
+                                                          episode_index=ep), frames, self.fps)
+                self.videos += 1
+            elif self.wants_video(ep):
+                write_video(self.previews_dir / name / f"episode_{ep:06d}.mp4", frames, self.fps)
+                self.previews += 1
+
+        self.ep_stats.append({"episode_index": ep, "stats": {
+            k: _stats(v.astype(np.float64) if v.dtype == bool else v) for k, v in cols.items()}})
+        self._sidecar.write(json.dumps({"episode_index": ep, **(sidecar or {})}) + "\n")
+        row = {"episode_index": ep, "tasks": [instruction], "length": n, **(extra or {})}
+        self.episodes.append(row)
+        if "walkin_family" in row:
+            self.families.add(row["walkin_family"])
         self.total_frames += n
         return ep
+
+    def add(self, attempt: dict) -> int:
+        """Scripted path: absolute joint targets, action[i] == state[i]."""
+        task, frames = attempt["task"], attempt["frames"]
+        state = np.array([f["joint"] + [f["gripper"]] for f in frames], dtype=np.float32)
+        ep = self.next_episode
+        videos = None
+        if self.wants_video(ep):
+            videos = {"ego_view": sim_texture.render_episode(frames, task["lighting"], self.room_center_x)}
+        return self.add_episode(state, state, [f["t"] for f in frames], task["instruction"], attempt["success"],
+                                videos=videos,
+                                extra={"walkin_family": task["family"], "walkin_lighting": task["lighting"]},
+                                sidecar={"task_id": task["task_id"], "frames": frames})
+
+    def features(self) -> dict:
+        feats = {
+            "observation.state": {"dtype": "float32", "shape": [self.state_dim]},
+            "action": {"dtype": "float32", "shape": [self.action_dim]},
+        }
+        if self.video_policy == "all":
+            for name in self.video_keys:
+                h, w, c = self.video_shapes.get(name, [sim_texture.SIZE, sim_texture.SIZE, 3])
+                feats[video_key(name)] = {
+                    "dtype": "video", "shape": [h, w, c], "names": ["height", "width", "channel"],
+                    "info": {"video.height": h, "video.width": w, "video.codec": "h264",
+                             "video.pix_fmt": "yuv420p", "video.fps": self.fps, "video.channels": c,
+                             "video.is_depth_map": False, "has_audio": False},
+                }
+        for k, dt in SCALAR_FEATURES.items():
+            feats[k] = {"dtype": dt, "shape": [1]}
+        return feats
 
     def finish(self, attempts: int) -> dict:
         self._sidecar.close()
@@ -122,53 +270,40 @@ class LeRobotWriter:
         with open(meta / "episodes.jsonl", "w") as f:
             for e in self.episodes:
                 f.write(json.dumps(e) + "\n")
-        (meta / "modality.json").write_text(json.dumps(MODALITY, indent=2))
-        (meta / "embodiment.json").write_text(json.dumps({
-            "embodiment": "robocasa_panda",
-            "dof_arm": 7,
-            "dof_gripper": 1,
-            "control": "absolute_joint_position",
-            "joints_are_placeholder": True,
-            "cartesian_sidecar": f"../../{self.room_id}.cartesian.jsonl",
-            "note": "single_arm values are zeros until a physics generator fills them. "
-                    "Do not fine-tune on this dataset while joints_are_placeholder is true.",
-        }, indent=2))
+        with open(meta / "episodes_stats.jsonl", "w") as f:
+            for s in self.ep_stats:
+                f.write(json.dumps(s) + "\n")
+        if self.ep_stats:
+            stats = {k: _merge_stats([s["stats"][k] for s in self.ep_stats]) for k in self.ep_stats[0]["stats"]}
+            (meta / "stats.json").write_text(json.dumps(stats, indent=2))
+        modality = dict(self.modality)
+        if self.video_policy == "all":
+            modality["video"] = {name: {"original_key": video_key(name)} for name in self.video_keys}
+        (meta / "modality.json").write_text(json.dumps(modality, indent=2))
+        (meta / "embodiment.json").write_text(json.dumps({**self.embodiment, "cartesian_sidecar": SIDECAR},
+                                                         indent=2))
         n = len(self.episodes)
         info = {
             "codebase_version": "v2.1",
-            "robot_type": "robocasa_panda",
+            "robot_type": self.robot_type,
             "fps": self.fps,
             "total_episodes": n,
             "total_frames": self.total_frames,
             "total_tasks": len(self.task_index),
             "total_videos": self.videos,
-            "total_chunks": 1,
-            "chunks_size": 1000,
+            "total_chunks": max(1, math.ceil(n / self.chunks_size)),
+            "chunks_size": self.chunks_size,
             "splits": {"train": f"0:{n}"},
-            "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
-            "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
-            "walkin_generator": "scripted_retarget",
-            "walkin_physically_valid": False,
+            "data_path": DATA_PATH,
+            "video_path": VIDEO_PATH if self.video_policy == "all" else None,
+            **self.extra_info,
             "walkin_successes": n,
             "walkin_attempts": attempts,
             "walkin_video_policy": self.video_policy,
-            "walkin_appearance": sim_texture.APPEARANCE,
+            "walkin_previews": self.previews,
             "walkin_room_id": self.room_id,
             "walkin_families": sorted(self.families),
-            "features": {
-                "observation.state": {"dtype": "float32", "shape": [8]},
-                "action": {"dtype": "float32", "shape": [8]},
-                VIDEO_KEY: {"dtype": "video", "shape": [64, 64, 3],
-                            "names": ["height", "width", "channel"],
-                            "video_info": {"video.fps": self.fps, "video.codec": "h264"}},
-                "timestamp": {"dtype": "float32", "shape": [1]},
-                "annotation.human.task_description": {"dtype": "int64", "shape": [1]},
-                "task_index": {"dtype": "int64", "shape": [1]},
-                "episode_index": {"dtype": "int64", "shape": [1]},
-                "index": {"dtype": "int64", "shape": [1]},
-                "next.reward": {"dtype": "float32", "shape": [1]},
-                "next.done": {"dtype": "bool", "shape": [1]},
-            },
+            "features": self.features(),
         }
         (meta / "info.json").write_text(json.dumps(info, indent=2))
         return info

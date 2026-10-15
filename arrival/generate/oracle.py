@@ -10,7 +10,7 @@ TOLERANCE = 0.05
 def judge(attempt: dict) -> bool:
     frames, target = attempt["frames"], attempt["target"]
     obj = frames[-1]["object_position"]
-    dist = math.hypot(obj[0] - target[0], obj[1] - target[1])
+    dist = math.dist(obj, target)  # 3D: the object must be lowered onto the target, not left hovering
     closed = max(f["gripper"] for f in frames) > 0.5
     return dist <= TOLERANCE and closed
 

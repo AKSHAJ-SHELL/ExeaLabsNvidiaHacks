@@ -42,3 +42,43 @@ def test_start_poses(hero_twin):
     tasks = propose(hero_twin)["tasks"]
     poses = {tuple(t["start_position"]) for t in tasks if t["object_id"] == "mug_1"}
     assert poses == {(1.0, 0.35, 0.97), (1.08, 0.35, 0.97), (0.92, 0.35, 0.97), (1.0, 0.43, 0.97)}
+
+
+def _apple_obj(ident, cat, dims, x, y_up, z, yaw_deg=0.0):
+    import math
+
+    c, s = math.cos(math.radians(yaw_deg)), math.sin(math.radians(yaw_deg))
+    return {"identifier": ident, "category": {cat: {}}, "confidence": {"high": {}}, "dimensions": dims,
+            "transform": [c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, y_up, z, 1]}
+
+
+def test_real_format_kitchen_produces_tasks():
+    """Synthetic kitchen in Apple's keyed-enum encoding, floor at ARKit y=-1.4, rotated 30 degrees."""
+    import math
+
+    from arrival.scan import roomplan
+    from arrival.twin.compile import compile_twin, place_default_objects
+
+    rot = 30.0
+    c, s = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+
+    def place(x, z):  # rotate an ARKit (x, z) floor point about Y
+        return c * x + s * z, -s * x + c * z
+
+    walls = []
+    for i, (x, z, length, yaw) in enumerate([(2, 0, 4, 0), (2, -3, 4, 0), (0, -1.5, 3, 90), (4, -1.5, 3, 90)]):
+        px, pz = place(x, z)
+        walls.append({**_apple_obj(f"w{i}", "wall", [length, 2.5, 0], px, -0.15, pz, yaw + rot)})
+    sx, sz = place(1.5, -0.35)
+    tx, tz = place(3.0, -0.35)
+    rp = {"floors": [{"transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, -1.4, 0, 1]}], "walls": walls,
+          "objects": [_apple_obj("sink", "sink", [0.6, 0.25, 0.5], sx, -0.55, sz, rot),
+                      _apple_obj("stove", "stove", [0.7, 0.9, 0.65], tx, -0.95, tz, rot),
+                      _apple_obj("ghost", "dishwasher", [0.6, 0.8, 0.6], 1, -1, -1, rot) | {"confidence": {"low": {}}}]}
+    b = roomplan.to_bundle(rp, "k")
+    assert {f["category"] for f in b["fixtures"]} == {"sink", "stove"}
+    assert all(f["yaw"] == 0.0 for f in b["fixtures"])  # aligned + snapped
+    twin = compile_twin(b)
+    assert len(place_default_objects(twin, seed=0)) == 2
+    tasks = propose(twin)["tasks"]
+    assert {t["family"] for t in tasks} == {"counter_to_sink", "counter_to_counter"}
