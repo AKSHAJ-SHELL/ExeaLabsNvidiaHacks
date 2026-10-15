@@ -84,7 +84,7 @@ def cmd_demo(a) -> int:
     print(f"report:  {res['report']}")
     print(f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped) in "
           f"{r['seconds']:.1f}s, {res['info']['total_videos']} videos, families={r['tasks']}")
-    print("NOTE: scripted placeholder motion; walkin_physically_valid=false. Do not fine-tune on it.")
+    print("NOTE: scripted placeholder motion; arrival_physically_valid=false. Do not fine-tune on it.")
     return EXIT_OK
 
 
@@ -99,8 +99,8 @@ def cmd_validate(a) -> int:
     info = json.loads((Path(a.dataset_dir) / "meta" / "info.json").read_text())
     print(f"OK: {a.dataset_dir} — {info['total_episodes']} episodes, {info['total_frames']} frames, "
           f"{info['total_tasks']} tasks, {info['total_chunks']} chunk(s), {info['total_videos']} videos, "
-          f"video_policy={info['walkin_video_policy']}, "
-          f"physically_valid={info['walkin_physically_valid']}")
+          f"video_policy={info['arrival_video_policy']}, "
+          f"physically_valid={info['arrival_physically_valid']}")
     return EXIT_OK
 
 
@@ -149,7 +149,7 @@ def cmd_sim(a) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="arrival", description="WALK·IN Arrival: room scan -> GR00T LeRobot v2 dataset")
+    p = argparse.ArgumentParser(prog="arrival", description="Arrival: room scan -> GR00T LeRobot v2 dataset")
     sub = p.add_subparsers(dest="cmd")
     d = sub.add_parser("demo", help="compile the room and write the dataset")
     d.add_argument("--episodes", type=int, default=4)

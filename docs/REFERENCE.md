@@ -1,17 +1,17 @@
 # Reference
 
-Detailed usage for WALK·IN Arrival. The overview is in the [README](../README.md).
+Detailed usage for Arrival. The overview is in the [README](../README.md).
 
 ## Honest label: the `demo` dataset
 
 These bullets are about the `demo` dataset (`out/datasets/<room>`). The MuJoCo `sim` dataset is described under [Simulation (MuJoCo)](#simulation-mujoco) and carries its own flags in `meta/info.json`.
 
 - The dataset folder is a real GR00T LeRobot v2 layout (parquet, mp4, `meta/*.json`).
-- **The motion inside it is a scripted placeholder in simulation.** It comes from `walkin_generator = "scripted_retarget"`: seed trajectories retargeted to new object poses. It is **not physically valid**: the `demo` path uses no MuJoCo and no contact physics. It is **not MimicGen** output.
+- **The motion inside it is a scripted placeholder in simulation.** It comes from `arrival_generator = "scripted_retarget"`: seed trajectories retargeted to new object poses. It is **not physically valid**: the `demo` path uses no MuJoCo and no contact physics. It is **not MimicGen** output.
 - Frames are 64×64 `sim_texture` schematics. **No Gaussian splat** is trained or composited.
 - **No GR00T training** was run, and there is **no real-robot result**.
-- `meta/info.json` records `"walkin_physically_valid": false`. `meta/embodiment.json` records `"joints_are_placeholder": true`, because the `single_arm` joint values are zeros until a physics generator fills them.
-- **Do not fine-tune GR00T (or any policy) on this data while `walkin_physically_valid` is false or `joints_are_placeholder` is true.**
+- `meta/info.json` records `"arrival_physically_valid": false`. `meta/embodiment.json` records `"joints_are_placeholder": true`, because the `single_arm` joint values are zeros until a physics generator fills them.
+- **Do not fine-tune GR00T (or any policy) on this data while `arrival_physically_valid` is false or `joints_are_placeholder` is true.**
 
 ## Install
 
@@ -50,12 +50,12 @@ python -m arrival serve        # http://127.0.0.1:8000
 | Route | What it does |
 |---|---|
 | `GET /` | Lists rooms under `scans/` with `geometry_source`, task counts per family, dataset path, and download link. Has an upload form |
-| `GET /rooms/<id>` | Fixtures, the two task families, `walkin_physically_valid`, and the run report |
+| `GET /rooms/<id>` | Fixtures, the two task families, `arrival_physically_valid`, and the run report |
 | `GET /download/<id>` | Zip of `out/datasets/<id>` |
 | `POST /jobs` | Multipart upload with file field `scan` (max 200 MB, larger gets 413). Writes `out/jobs/<id>/` and returns `202 {"status":"queued",...}`. Nothing is compiled or generated in the request, and no worker drains the queue yet |
 | `GET /jobs/<id>` | The job's `status.json` |
 
-The server binds `127.0.0.1` only and has no authentication. Uploads are streamed to a temp file; a body shorter than `Content-Length`, a missing closing boundary, an empty file, or a part with no filename gets 400. If `out/datasets/<room>_sim` exists, the room page links it and shows its `walkin_generator`, `walkin_physically_valid`, episode count and families.
+The server binds `127.0.0.1` only and has no authentication. Uploads are streamed to a temp file; a body shorter than `Content-Length`, a missing closing boundary, an empty file, or a part with no filename gets 400. If `out/datasets/<room>_sim` exists, the room page links it and shows its `arrival_generator`, `arrival_physically_valid`, episode count and families.
 
 From a RoomPlan export instead of the authored scan (`scans/<room>/roomplan.json`):
 
@@ -95,7 +95,7 @@ Status as of Oct 14 (scripted expert, friction grasps, physics-checked):
 
 Defaults are `counter_to_sink,open_drawer`. `--families all` includes the broken ones (their failures are dropped and counted). The VLM planner is not yet wired into `collect()`, and the VLA client has never run against a real GR00T server.
 
-What this is not: MuJoCo frames are not a Gaussian splat of the room, episodes are not MimicGen output, and no policy was trained on them. Read `walkin_generator` and `walkin_physically_valid` in the sim dataset's `meta/info.json` before using it.
+What this is not: MuJoCo frames are not a Gaussian splat of the room, episodes are not MimicGen output, and no policy was trained on them. Read `arrival_generator` and `arrival_physically_valid` in the sim dataset's `meta/info.json` before using it.
 
 ## Output layout
 
@@ -105,13 +105,13 @@ What this is not: MuJoCo frames are not a Gaussian splat of the room, episodes a
 out/
   twins/hero_kitchen/       twin.json, layout.yaml (RoboCasa subset), tasks.json
   datasets/hero_kitchen/    GR00T LeRobot v2
-    meta/info.json          walkin_generator, walkin_physically_valid, walkin_successes, ...
+    meta/info.json          arrival_generator, arrival_physically_valid, arrival_successes, ...
     meta/tasks.jsonl
     meta/episodes.jsonl
     meta/modality.json      single_arm [0,7], gripper [7,8], ego_view, task description
     meta/embodiment.json
     meta/episodes_stats.jsonl, meta/stats.json
-    meta/walkin_cartesian.jsonl   cartesian sidecar (eef/object traces)
+    meta/arrival_cartesian.jsonl   cartesian sidecar (eef/object traces)
     data/chunk-XXX/episode_XXXXXX.parquet   (1,000 episodes per chunk)
     videos/chunk-XXX/observation.images.ego_view/episode_XXXXXX.mp4
   datasets/hero_kitchen_sim/ MuJoCo sim dataset (same layout, ego_view + wrist videos)
@@ -154,7 +154,7 @@ None of the Nebius products below were called. The only measured number is the l
 
 ## Later: GR00T fine-tune (not run)
 
-This step comes later. It was **not** run, and nothing in this repo was trained. **Do not run this while `joints_are_placeholder` is true** (or while `walkin_physically_valid` is false). It needs 40 GB+ VRAM and the Isaac-GR00T repo:
+This step comes later. It was **not** run, and nothing in this repo was trained. **Do not run this while `joints_are_placeholder` is true** (or while `arrival_physically_valid` is false). It needs 40 GB+ VRAM and the Isaac-GR00T repo:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python gr00t/experiment/launch_finetune.py \

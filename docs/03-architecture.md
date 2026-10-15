@@ -54,7 +54,7 @@ Video policy:
 
 - `--videos all`: an mp4 for every successful episode.
 - `--videos sparse` (required for the 1,000 run): an mp4 when `episode_index % 125 == 0`, so episodes 0, 125, …, 875 (8 files).
-- `--videos none`: no mp4. Validator then requires `info.json` field `walkin_video_policy = "none"`. The done command does not use this.
+- `--videos none`: no mp4. Validator then requires `info.json` field `arrival_video_policy = "none"`. The done command does not use this.
 
 ## Composite renderer (specified, not run)
 

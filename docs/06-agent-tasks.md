@@ -54,7 +54,7 @@ Done when: a dim frame's pixel `(0, 0)` is `(28, 32, 38)`, and frame 0 differs f
 
 Implement the LeRobot writer and validator.
 
-Done when: `tests/test_dataset.py` runs `demo` logic in-process for 4 episodes (call the library, do not shell out), writes to `tmp_path`, validator exits 0, `walkin_physically_valid` is false, both families appear in `tasks.json`, modality gripper slice is `[7, 8]`, and a sparse policy is not required for this 4-episode test (`--videos all`, 4 mp4s).
+Done when: `tests/test_dataset.py` runs `demo` logic in-process for 4 episodes (call the library, do not shell out), writes to `tmp_path`, validator exits 0, `arrival_physically_valid` is false, both families appear in `tasks.json`, modality gripper slice is `[7, 8]`, and a sparse policy is not required for this 4-episode test (`--videos all`, 4 mp4s).
 
 ## T09 — report
 
@@ -80,20 +80,15 @@ Done when: validator exits 0, `total_episodes == 1000`, at least 8 mp4 files exi
 
 ## T12 — web
 
-Implement the four routes in [02-mvp-tonight.md](02-mvp-tonight.md). HTML can be minimal: one document per page, no frontend build. Show `walkin_physically_valid` as text on the room page.
+Implement the four routes in [02-mvp-tonight.md](02-mvp-tonight.md). HTML can be minimal: one document per page, no frontend build. Show `arrival_physically_valid` as text on the room page.
 
 `POST /jobs` accepts `multipart/form-data` with a file field `scan`. It stores the file and writes status `queued`. It does not import the compiler.
 
 Done when: `tests/test_web.py` uses `http.client` against a server on port 0 (pick a free port) and checks GET `/` contains `hero_kitchen`, POST returns 202 and `queued`, and a 201-MB body is not required. Check the 413 path with a limit override in the handler if generating a 201-MB body is slow: call the limit function with `content_length=201*1024*1024` and expect rejection. Also POST a small file and expect 202.
 
-## T13 — README, license note, prior art
+## T13 — README and license note
 
 Rewrite root `README.md` for a reviewer. Keep one line that future work happens on a branch and a pull request.
-
-`docs/PRIOR-ART.md` states:
-
-- Already existed before this hackathon, in <https://github.com/AvnehSBhatia/Walk-In>: four-photo capture, Marble reconstruction, MuJoCo room, Spot and humanoid rigs, skill-level pick that attaches the object to the hand, scripted oracle, chat JSONL.
-- Built in this repo for Arrival: RoomPlan normalization, RoboCasa-subset layout compiler, task variations, scripted retarget into GR00T LeRobot v2, sim-texture frames, local pre-scanned room page, queued upload.
 
 README cost table columns: Step, Nebius product, Measured USD. Use the rows in [03-architecture.md](03-architecture.md). All measured cells say "not measured" except local generation, which says `$0` and points at the report file.
 

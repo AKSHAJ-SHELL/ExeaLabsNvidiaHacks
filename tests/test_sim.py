@@ -48,7 +48,7 @@ def test_collect_writes_valid_dataset(twin, tmp_path):
     r = res["report_data"]
     assert r["attempts"] == 2 and r["successes"] >= 1
     info = json.loads((res["dataset"] / "meta" / "info.json").read_text())
-    assert info["walkin_generator"] == "mujoco_scripted_ik" and info["walkin_physically_valid"] is True
+    assert info["arrival_generator"] == "mujoco_scripted_ik" and info["arrival_physically_valid"] is True
     emb = json.loads((res["dataset"] / "meta" / "embodiment.json").read_text())
     assert emb["joints_are_placeholder"] is False
     import pyarrow.parquet as pq

@@ -15,17 +15,17 @@ python mimicgen/scripts/generate_dataset_multicore.py \
   --config mimicgen/exps/templates/robocasa/single_stage/kitchen_pnp/PnPCounterToSink.json
 ```
 
-Seeds are either RoboCasa's human demonstrations for that task or about ten teleoperated episodes in the compiled twin. Map successful MimicGen trajectories into the same LeRobot contract. Set `joints_are_placeholder` to false only when `single_arm` holds real joint positions. Set `walkin_generator` to `mimicgen` and `walkin_physically_valid` to true.
+Seeds are either RoboCasa's human demonstrations for that task or about ten teleoperated episodes in the compiled twin. Map successful MimicGen trajectories into the same LeRobot contract. Set `joints_are_placeholder` to false only when `single_arm` holds real joint positions. Set `arrival_generator` to `mimicgen` and `arrival_physically_valid` to true.
 
 `counter_to_counter` needs a real template name from the RoboCasa task list, or ten teleop seeds and a custom MimicGen config. Until then its template stays `null`.
 
-The oracle stays: drop an attempt when the final object is more than 0.05 m horizontally from the target, or the grasp never closed. Relabeling failures into chat JSONL is the old Walk-In behavior and is not this pipeline.
+The oracle stays: drop an attempt when the final object is more than 0.05 m horizontally from the target, or the grasp never closed. Failures are not relabeled into chat JSONL.
 
 Wire `arrival.generate.mimicgen` to call this. Tonight that module only reports whether the import works.
 
 ## Splat composite
 
-Train a Gaussian splat on scan frames that include camera poses. Implement the depth composite in [03-architecture.md](03-architecture.md). Set `walkin_appearance` to `splat_composite`. If the layers do not line up, fall back to texturing the simulator meshes from the scan photos, and record `walkin_appearance = "mesh_texture"`.
+Train a Gaussian splat on scan frames that include camera poses. Implement the depth composite in [03-architecture.md](03-architecture.md). Set `arrival_appearance` to `splat_composite`. If the layers do not line up, fall back to texturing the simulator meshes from the scan photos, and record `arrival_appearance = "mesh_texture"`.
 
 ## Cosmos
 
@@ -57,4 +57,4 @@ Drop a real RoomPlan JSON and RGB-D frames with poses into `scans/hero_kitchen/`
 
 ## Fine-tune
 
-Only after `walkin_physically_valid` is true and joints are real. Command is in the README from task T13. Modality config keys must match `meta/modality.json`: video `ego_view`, state and action `single_arm` and `gripper`, language `annotation.human.task_description`. Hardware: 40 GB+ VRAM. Fallback policy: the LeRobot cookbook job.
+Only after `arrival_physically_valid` is true and joints are real. Command is in the README from task T13. Modality config keys must match `meta/modality.json`: video `ego_view`, state and action `single_arm` and `gripper`, language `annotation.human.task_description`. Hardware: 40 GB+ VRAM. Fallback policy: the LeRobot cookbook job.

@@ -22,7 +22,7 @@ Deviations from the contract, one paragraph each.
 
 **`--scans` default.** A relative `--scans` that does not exist in the cwd resolves against the repo root (`arrival.cli.resolve_scans`). A missing room or a missing `roomplan.json` exits with a message naming the path.
 
-**Upload hardening.** `POST /jobs` streams the body to a temp file in 1 MB chunks, then finds the `scan` part by boundary scanning over an mmap (no `email` parser, no full in-memory copy). A body shorter than `Content-Length`, a missing closing boundary, an empty file, or no filename returns 400. The handler has a 30 s socket timeout. The room page links `out/datasets/<room>_sim` when it exists and shows its `walkin_generator`, `walkin_physically_valid`, `total_episodes` and families (`walkin_families` or `families`).
+**Upload hardening.** `POST /jobs` streams the body to a temp file in 1 MB chunks, then finds the `scan` part by boundary scanning over an mmap (no `email` parser, no full in-memory copy). A body shorter than `Content-Length`, a missing closing boundary, an empty file, or no filename returns 400. The handler has a 30 s socket timeout. The room page links `out/datasets/<room>_sim` when it exists and shows its `arrival_generator`, `arrival_physically_valid`, `total_episodes` and families (`arrival_families` or `families`).
 
 **`.env` for Token Factory.** `arrival.models.token_factory.config()` reads `.env` from the cwd or repo root with a small stdlib parser, only when `TOKEN_FACTORY_API_KEY` is unset, and never overrides set variables. Nothing else loads `.env`.
 

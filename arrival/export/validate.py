@@ -68,8 +68,8 @@ def validate(root: str | Path) -> list[str]:
     info = json.loads((root / "meta" / "info.json").read_text())
     modality = json.loads((root / "meta" / "modality.json").read_text())
     features = info.get("features", {})
-    if not isinstance(info.get("walkin_physically_valid"), bool):
-        errors.append("info.walkin_physically_valid must be a bool")
+    if not isinstance(info.get("arrival_physically_valid"), bool):
+        errors.append("info.arrival_physically_valid must be a bool")
     for c in DTYPES:
         if c not in features:
             errors.append(f"info.features missing {c}")
@@ -165,6 +165,6 @@ def validate(root: str | Path) -> list[str]:
                             errors.append(err)
     elif list(root.glob("videos/**/*.mp4")):
         errors.append("mp4s under videos/ but no video feature is declared in info.features")
-    if info.get("walkin_video_policy") not in ("all", "sparse", "none"):
-        errors.append(f"unknown walkin_video_policy {info.get('walkin_video_policy')!r}")
+    if info.get("arrival_video_policy") not in ("all", "sparse", "none"):
+        errors.append(f"unknown arrival_video_policy {info.get('arrival_video_policy')!r}")
     return errors

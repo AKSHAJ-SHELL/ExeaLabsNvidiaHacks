@@ -1,4 +1,4 @@
-"""Render the ~30 s WALK·IN Arrival intro video from the real code.
+"""Render the ~30 s Arrival intro video from the real code.
 
 Everything on screen comes from running the repo: the floor plan is drawn from the compiled twin,
 the 3D footage is MuJoCo rendering of real scripted-expert episodes (physics-checked), the joint
@@ -79,7 +79,7 @@ def centered(d: ImageDraw.ImageDraw, y: int, text: str, font, fill) -> None:
 def title_card() -> Image.Image:
     im = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(im)
-    centered(d, 175, "WALK·IN Arrival", _font(72, bold=True), FG)
+    centered(d, 175, "Arrival", _font(72, bold=True), FG)
     d.rectangle([W / 2 - 60, 272, W / 2 + 60, 276], fill=ACCENT)
     centered(d, 300, "One room scan → robot training data in that room", _font(30), (215, 220, 228))
     centered(d, 460, "Exea Labs · NVIDIA × Nebius hackathon", _font(20), DIM)
@@ -93,7 +93,7 @@ def outro_card() -> Image.Image:
     centered(d, 225, "github.com/AvnehSBhatia/ExeaLabsNvidiaHacks", _font(36, bold=True), FG)
     centered(d, 320, "Help wanted: door opening · mobile base · real iPhone scans · fine-tune",
              _font(23), (205, 210, 218))
-    centered(d, 460, "WALK·IN Arrival · Exea Labs", _font(18), DIM)
+    centered(d, 460, "Arrival · Exea Labs", _font(18), DIM)
     return im
 
 

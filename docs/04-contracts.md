@@ -143,7 +143,7 @@ Checked-in `roomplan.json` does not have to rebuild every fixture. The authored 
 - Return a ScanBundle that copies the hero kitchen geometry.
 - Set `geometry_source` to `four_photo_unmeasured`.
 - Set `blocks_claims` to `["geometry", "realism"]`.
-- Do not call the network. Do not import Walk-In.
+- Do not call the network.
 
 ## Fixture map
 
@@ -429,12 +429,12 @@ Include at least:
   "total_episodes": 1000,
   "total_frames": 80000,
   "total_tasks": 0,
-  "walkin_generator": "scripted_retarget",
-  "walkin_physically_valid": false,
-  "walkin_successes": 1000,
-  "walkin_attempts": 1111,
-  "walkin_video_policy": "sparse",
-  "walkin_appearance": "sim_texture",
+  "arrival_generator": "scripted_retarget",
+  "arrival_physically_valid": false,
+  "arrival_successes": 1000,
+  "arrival_attempts": 1111,
+  "arrival_video_policy": "sparse",
+  "arrival_appearance": "sim_texture",
   "features": {
     "observation.state": {"dtype": "float32", "shape": [8]},
     "action": {"dtype": "float32", "shape": [8]},
@@ -512,8 +512,8 @@ Include at least:
 - Parquet columns exist and `observation.state` length is 8.
 - Episode count equals `total_episodes`.
 - Sum of episode lengths equals `total_frames`.
-- If `walkin_video_policy` is `sparse`, at least 8 mp4s exist for a 1,000-episode dataset, and at least 1 mp4 exists for a dataset with fewer than 125 episodes.
-- `walkin_physically_valid` is a bool.
+- If `arrival_video_policy` is `sparse`, at least 8 mp4s exist for a 1,000-episode dataset, and at least 1 mp4 exists for a dataset with fewer than 125 episodes.
+- `arrival_physically_valid` is a bool.
 - Exits 0 when a required file is missing or a slice is wrong.
 
 It does not download GR00T.

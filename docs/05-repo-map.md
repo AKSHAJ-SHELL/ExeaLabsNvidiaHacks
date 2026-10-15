@@ -5,7 +5,6 @@ Create these paths. Do not create packages outside this list unless a task says 
 ```
 LICENSE                          Apache-2.0
 README.md                        runner-facing, task T13
-docs/PRIOR-ART.md                task T13
 pyproject.toml
 .gitignore                       includes out/
 scans/hero_kitchen/scan.json
@@ -40,7 +39,7 @@ tests/test_web.py
 
 `pyproject.toml`:
 
-- Name `walkin-arrival`, version `0.1.0`.
+- Name `arrival-sim`, version `0.1.0`.
 - Package is the `arrival` directory.
 - Script is optional. `python -m arrival` must work via `__main__.py`.
 - Dependencies listed in [01-decisions.md](01-decisions.md).

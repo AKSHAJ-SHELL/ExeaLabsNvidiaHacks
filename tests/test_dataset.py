@@ -80,17 +80,17 @@ def test_demo_4_episodes(tmp_path):
     ds = res["dataset"]
     assert validate(ds) == []
     info = json.loads((ds / "meta" / "info.json").read_text())
-    assert info["walkin_physically_valid"] is False
-    assert info["walkin_generator"] == "scripted_retarget"
+    assert info["arrival_physically_valid"] is False
+    assert info["arrival_generator"] == "scripted_retarget"
     assert info["total_episodes"] == 4 and info["total_frames"] == 320
     tasks = json.loads((out / "twins" / "hero_kitchen" / "tasks.json").read_text())
     assert {t["family"] for t in tasks["tasks"]} == {"counter_to_sink", "counter_to_counter"}
-    assert set(info["walkin_families"]) == {"counter_to_sink", "counter_to_counter"}
+    assert set(info["arrival_families"]) == {"counter_to_sink", "counter_to_counter"}
     modality = json.loads((ds / "meta" / "modality.json").read_text())
     assert [modality["state"]["gripper"]["start"], modality["state"]["gripper"]["end"]] == [7, 8]
     emb = json.loads((ds / "meta" / "embodiment.json").read_text())
     assert emb["joints_are_placeholder"] is True
-    assert emb["cartesian_sidecar"] == "walkin_cartesian.jsonl"
+    assert emb["cartesian_sidecar"] == "arrival_cartesian.jsonl"
     assert (ds / "meta" / emb["cartesian_sidecar"]).is_file()
     assert info["features"]["observation.images.ego_view"]["info"]["video.height"] == 64
     assert len((ds / "meta" / "episodes_stats.jsonl").read_text().splitlines()) == 4
@@ -206,16 +206,16 @@ def test_generic_writer(tmp_path):
                 "annotation": {"human.task_description": {}}}
     w = LeRobotWriter(tmp_path / "ds", "r", "all", state_dim=7, action_dim=5, modality=modality,
                       video_keys=["front", "wrist"], embodiment={"embodiment": "test"},
-                      extra_info={"walkin_generator": "mujoco_test", "walkin_physically_valid": True})
+                      extra_info={"arrival_generator": "mujoco_test", "arrival_physically_valid": True})
     T = 12
     for ep in range(3):
         vids = {k: np.full((T, 32, 48, 3), 40 * ep, dtype=np.uint8) for k in ("front", "wrist")}
         w.add_episode(np.zeros((T, 7)), np.ones((T, 5)), np.arange(T) / 20, f"task {ep % 2}", True,
-                      videos=vids, extra={"walkin_family": "f"})
+                      videos=vids, extra={"arrival_family": "f"})
     with pytest.raises(ValueError):
         w.add_episode(np.zeros((T, 6)), np.ones((T, 5)), np.arange(T) / 20, "x", True)
     info = w.finish(3)
-    assert info["walkin_generator"] == "mujoco_test" and info["total_videos"] == 6
+    assert info["arrival_generator"] == "mujoco_test" and info["total_videos"] == 6
     assert info["features"]["observation.images.wrist"]["shape"] == [32, 48, 3]
     assert validate(tmp_path / "ds") == []
     m = json.loads((tmp_path / "ds" / "meta" / "modality.json").read_text())

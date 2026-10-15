@@ -50,10 +50,10 @@ class SimDatasetWriter:
         for cam in self.cameras:
             write_video(self.root / "videos" / "chunk-000" / f"observation.images.{cam}" / f"episode_{i:06d}.mp4",
                         ep["videos"][cam], self.fps)
-        self.episodes.append({"episode_index": i, "tasks": [instr], "length": n, "walkin_family": task["family"],
-                              "walkin_lighting": task["lighting"], "walkin_people": task.get("people", 0),
-                              "walkin_success_detail": ep["detail"],
-                              "walkin_people_xy": ep["people_xy"][:: max(1, n // 20)]})
+        self.episodes.append({"episode_index": i, "tasks": [instr], "length": n, "arrival_family": task["family"],
+                              "arrival_lighting": task["lighting"], "arrival_people": task.get("people", 0),
+                              "arrival_success_detail": ep["detail"],
+                              "arrival_people_xy": ep["people_xy"][:: max(1, n // 20)]})
         self.stats.append({"episode_index": i, "stats": {"observation.state": _stats(s), "action": _stats(a)}})
         self.total_frames += n
         return i
@@ -71,7 +71,7 @@ class SimDatasetWriter:
         modality["video"] = {c: {"original_key": f"observation.images.{c}"} for c in self.cameras}
         (meta / "modality.json").write_text(json.dumps(modality, indent=2))
         (meta / "embodiment.json").write_text(json.dumps({
-            "embodiment": "walkin_sim_panda", "dof_arm": 7, "dof_gripper": 1,
+            "embodiment": "arrival_sim_panda", "dof_arm": 7, "dof_gripper": 1,
             "control": "absolute_joint_position", "joints_are_placeholder": False,
             "note": "Procedural Panda-like arm (Franka link offsets, capsule geometry) in MuJoCo. Gripper state = "
                     "mean finger opening in meters (0..0.05). Base is fixed per episode; pose in episodes.jsonl is "
@@ -83,16 +83,16 @@ class SimDatasetWriter:
                                             "video_info": {"video.fps": self.fps, "video.codec": "h264"}}
                for c in self.cameras}
         info = {
-            "codebase_version": "v2.1", "robot_type": "walkin_sim_panda", "fps": self.fps,
+            "codebase_version": "v2.1", "robot_type": "arrival_sim_panda", "fps": self.fps,
             "total_episodes": n, "total_frames": self.total_frames, "total_tasks": len(self.task_index),
             "total_videos": n * len(self.cameras), "total_chunks": 1, "chunks_size": 1000,
             "splits": {"train": f"0:{n}"},
             "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
             "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
-            "walkin_generator": "mujoco_scripted_ik", "walkin_physically_valid": True, "walkin_grasp": "friction",
-            "walkin_success_check": "physics", "walkin_successes": n, "walkin_attempts": attempts,
-            "walkin_video_policy": "all", "walkin_appearance": "mujoco_raster", "walkin_room_id": self.room_id,
-            "walkin_families": sorted({e["walkin_family"] for e in self.episodes}),
+            "arrival_generator": "mujoco_scripted_ik", "arrival_physically_valid": True, "arrival_grasp": "friction",
+            "arrival_success_check": "physics", "arrival_successes": n, "arrival_attempts": attempts,
+            "arrival_video_policy": "all", "arrival_appearance": "mujoco_raster", "arrival_room_id": self.room_id,
+            "arrival_families": sorted({e["arrival_family"] for e in self.episodes}),
             "features": {"observation.state": {"dtype": "float32", "shape": [8]},
                          "action": {"dtype": "float32", "shape": [8]}, **vid,
                          "timestamp": {"dtype": "float32", "shape": [1]},

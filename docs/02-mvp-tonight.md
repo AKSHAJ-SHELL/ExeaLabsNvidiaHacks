@@ -19,7 +19,7 @@ python -m arrival serve
 `serve` listens on `127.0.0.1:8000`. These URLs work:
 
 - `GET /` lists `hero_kitchen` and shows `geometry_source`, task counts, and dataset path.
-- `GET /rooms/hero_kitchen` shows fixtures, the two tasks, and `walkin_physically_valid: false`.
+- `GET /rooms/hero_kitchen` shows fixtures, the two tasks, and `arrival_physically_valid: false`.
 - `GET /download/hero_kitchen` returns a `.zip` of `out/datasets/hero_kitchen`.
 - `POST /jobs` with a multipart file field named `scan` returns HTTP 202 and `{"status":"queued",...}`. The process does not compile or generate inside that request.
 
@@ -31,7 +31,7 @@ python -m arrival serve
 - 1,000 successful episodes in parquet under `data/chunk-000/`
 - At least 8 mp4 files under `videos/chunk-000/observation.images.ego_view/`
 - Both task families present
-- `info.json` fields: `walkin_generator = "scripted_retarget"`, `walkin_physically_valid = false`, `walkin_successes = 1000`
+- `info.json` fields: `arrival_generator = "scripted_retarget"`, `arrival_physically_valid = false`, `arrival_successes = 1000`
 - `out/reports/hero_kitchen.json` has attempts, successes, wall seconds, demos per hour, and a dollars object whose values are 0 with `"measured": false` except `"local_cpu"`, which is measured as 0 dollars
 - The 1,000-episode command finishes in under 15 minutes on a laptop. If video encoding breaks that budget, keep `--videos sparse` as the required path and say so in the README.
 
@@ -41,7 +41,7 @@ The 4-episode command writes a dataset the validator accepts, with at least one 
 
 ## README bar
 
-Root `README.md` tells a stranger how to install, run the smoke demo, run the 1,000-episode demo, open the page, and where credentials would go. It states that the motion is not physically valid. It links `docs/08-access.md` and `docs/PRIOR-ART.md`. It contains a cost table with one row per Nebius product from the spec, filled with "not measured" where no call was made.
+Root `README.md` tells a stranger how to install, run the smoke demo, run the 1,000-episode demo, open the page, and where credentials would go. It states that the motion is not physically valid. It links `docs/08-access.md`. It contains a cost table with one row per Nebius product from the spec, filled with "not measured" where no call was made.
 
 ## Not done if
 

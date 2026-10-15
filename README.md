@@ -1,8 +1,8 @@
-# WALK·IN Arrival
+# Arrival
 
 **Scan a room once. Get robot training data for that exact room.**
 
-[![WALK·IN Arrival demo: scan → digital twin → MuJoCo simulation → GR00T dataset](docs/media/demo.gif)](docs/media/demo.mp4)
+[![Arrival demo: scan → digital twin → MuJoCo simulation → GR00T dataset](docs/media/demo.gif)](docs/media/demo.mp4)
 
 *30-second demo, rendered from the real code. Click for the full-quality mp4. Regenerate it with `python scripts/make_demo_video.py`.*
 
@@ -10,7 +10,7 @@
 
 ## What this is
 
-General robot policies like NVIDIA GR00T are trained on generic kitchens. When a robot arrives in *your* kitchen, it has never seen your counters, your sink or your drawers. WALK·IN Arrival closes that gap:
+General robot policies like NVIDIA GR00T are trained on generic kitchens. When a robot arrives in *your* kitchen, it has never seen your counters, your sink or your drawers. Arrival closes that gap:
 
 1. **Scan.** An iPhone LiDAR scan (Apple RoomPlan) describes the room: walls, counters, sink, stove, fridge.
 2. **Twin.** We compile the scan into a digital twin: a RoboCasa-style layout and a MuJoCo scene with working drawers and doors.
@@ -35,7 +35,7 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of about 35. Th
 | VLM planner (Nemotron) / VLA client (GR00T server) | ⚠️ The interfaces exist. Neither is wired in or tested against a live service |
 | GR00T fine-tune, MimicGen, splats, Cosmos, Nebius scale-out | ❌ Not built yet |
 
-There are two datasets. `python -m arrival sim` writes **physics-simulated** data with real joint states (`walkin_physically_valid: true`). `python -m arrival demo` writes a fast **scripted placeholder** with zero joint values (`walkin_physically_valid: false`). Never train on the placeholder.
+There are two datasets. `python -m arrival sim` writes **physics-simulated** data with real joint states (`arrival_physically_valid: true`). `python -m arrival demo` writes a fast **scripted placeholder** with zero joint values (`arrival_physically_valid: false`). Never train on the placeholder.
 
 ## Get started (5 minutes)
 
@@ -143,7 +143,7 @@ Good first tasks, roughly in priority order:
 1. **Work on a branch and open a PR into `main`**, e.g. `feat/sim-door-opening`. Keep PRs small, with one module per PR.
 2. **Run `python -m pytest -q` before you push.** If you touch data, also run `sim` or `demo` and then `validate`.
 3. **Follow the schemas** in [docs/04-contracts.md](docs/04-contracts.md). Don't invent parallel formats.
-4. **Keep the labels honest.** `walkin_physically_valid`, `walkin_generator` and `joints_are_placeholder` must describe what really happened. Never call scripted data MimicGen, trained, or real-robot.
+4. **Keep the labels honest.** `arrival_physically_valid`, `arrival_generator` and `joints_are_placeholder` must describe what really happened. Never call scripted data MimicGen, trained, or real-robot.
 5. **Never commit secrets or `out/`.** Put API keys in `.env`, which is gitignored. See [docs/REFERENCE.md#credentials](docs/REFERENCE.md#credentials).
 
 ## Docs
@@ -153,7 +153,6 @@ Good first tasks, roughly in priority order:
 - [docs/04-contracts.md](docs/04-contracts.md): data schemas
 - [docs/09-later.md](docs/09-later.md): designs for MimicGen, splat, Cosmos and fine-tune
 - [docs/BUILD-LOG.md](docs/BUILD-LOG.md): what changed and why
-- [docs/PRIOR-ART.md](docs/PRIOR-ART.md): what came from the earlier Walk-In project
 - [docs/00-START-HERE.md](docs/00-START-HERE.md): the original MVP build contract
 
 ## License

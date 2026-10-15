@@ -84,7 +84,7 @@ button { padding:6px 12px; border-radius:6px; border:1px solid var(--line);
 
 PLACEHOLDER_NOTE = (
     "Motion in this dataset is a scripted placeholder in simulation "
-    "(walkin_generator = scripted_retarget). It is not physically valid, not "
+    "(arrival_generator = scripted_retarget). It is not physically valid, not "
     "MimicGen, and not a real-robot result."
 )
 
@@ -124,7 +124,7 @@ class ArrivalServer(ThreadingHTTPServer):
 
 class Handler(BaseHTTPRequestHandler):
     server: ArrivalServer
-    server_version = "WalkInArrival/0.1"
+    server_version = "Arrival/0.1"
     timeout = 30  # seconds per socket read; a stalled upload is dropped instead of pinning a thread
 
     # ---- helpers -------------------------------------------------------
@@ -237,12 +237,12 @@ class Handler(BaseHTTPRequestHandler):
             "in the request; no worker drains the queue yet.</p></div>"
         )
         body = (
-            "<h1>WALK·IN Arrival</h1><p class='muted'>Pre-scanned rooms → GR00T LeRobot v2 "
+            "<h1>Arrival</h1><p class='muted'>Pre-scanned rooms → GR00T LeRobot v2 "
             "datasets, generated locally.</p>"
             f"<div class='warn'>{esc(PLACEHOLDER_NOTE)}</div>"
             "<h2>Rooms</h2>" + table + upload
         )
-        self._html(200, "WALK·IN Arrival", body)
+        self._html(200, "Arrival", body)
 
     def _room(self, room: str):
         scan_path = self.scans_dir / room / "scan.json"
@@ -295,15 +295,15 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         info = _read_json(self.out_dir / "datasets" / room / "meta" / "info.json") or {}
-        valid = info.get("walkin_physically_valid", False)
+        valid = info.get("arrival_physically_valid", False)
         valid_text = "true" if valid is True else "false"
         info_bits = ""
         if info:
             info_bits = "".join(
                 f"<tr><th>{esc(k)}</th><td><code>{esc(info.get(k))}</code></td></tr>"
-                for k in ("walkin_generator", "walkin_appearance", "walkin_video_policy",
-                          "total_episodes", "total_frames", "walkin_successes",
-                          "walkin_attempts", "robot_type", "fps")
+                for k in ("arrival_generator", "arrival_appearance", "arrival_video_policy",
+                          "total_episodes", "total_frames", "arrival_successes",
+                          "arrival_attempts", "robot_type", "fps")
                 if k in info
             )
             info_bits = f"<div class='scroll'><table>{info_bits}</table></div>"
@@ -337,12 +337,12 @@ class Handler(BaseHTTPRequestHandler):
         sim_info = _read_json(sim_dir / "meta" / "info.json") if sim_dir.is_dir() else None
         if sim_dir.is_dir():
             si = sim_info if isinstance(sim_info, dict) else {}
-            fams = si.get("walkin_families") or si.get("families") or []
+            fams = si.get("arrival_families") or si.get("families") or []
             sim_html = (
                 f"<p><a href='/download/{esc(room)}_sim'>Download {esc(room)}_sim.zip</a></p>"
                 "<div class='scroll'><table>"
-                f"<tr><td>walkin_generator</td><td class='mono'>{esc(si.get('walkin_generator', 'unknown'))}</td></tr>"
-                f"<tr><td>walkin_physically_valid</td><td class='mono'>{esc(si.get('walkin_physically_valid', 'unknown'))}</td></tr>"
+                f"<tr><td>arrival_generator</td><td class='mono'>{esc(si.get('arrival_generator', 'unknown'))}</td></tr>"
+                f"<tr><td>arrival_physically_valid</td><td class='mono'>{esc(si.get('arrival_physically_valid', 'unknown'))}</td></tr>"
                 f"<tr><td>episodes</td><td class='mono'>{esc(si.get('total_episodes', 'unknown'))}</td></tr>"
                 f"<tr><td>families</td><td class='mono'>{esc(', '.join(map(str, fams)) if isinstance(fams, list) else fams)}</td></tr>"
                 "</table></div>"
@@ -354,7 +354,7 @@ class Handler(BaseHTTPRequestHandler):
         body = (
             f"<p><a href='/'>← All rooms</a></p><h1>{esc(room)}</h1>"
             f"<p class='muted'>geometry_source: <code>{esc(scan.get('geometry_source', 'unknown'))}</code></p>"
-            f"<div class='warn'><strong class='mono'>walkin_physically_valid: {valid_text}</strong>"
+            f"<div class='warn'><strong class='mono'>arrival_physically_valid: {valid_text}</strong>"
             f"<br>{esc(PLACEHOLDER_NOTE)} Do not fine-tune on it while this flag is false.</div>"
             "<h2>Fixtures</h2>" + fx_table
             + "<h2>Tasks</h2>" + tasks_html
@@ -362,7 +362,7 @@ class Handler(BaseHTTPRequestHandler):
             + "<h2>Simulation dataset (MuJoCo)</h2>" + sim_html
             + "<h2>Report</h2>" + report_html
         )
-        self._html(200, f"{room} · WALK·IN Arrival", body)
+        self._html(200, f"{room} · Arrival", body)
 
     def _download(self, room: str):
         ds = self.out_dir / "datasets" / room
@@ -437,7 +437,7 @@ def make_server(host: str = "127.0.0.1", port: int = 8000,
 def serve(port: int = 8000, out_dir: Path = Path("out"), scans_dir: Path = Path("scans")) -> None:
     server = make_server("127.0.0.1", port, out_dir, scans_dir)
     host, real_port = server.server_address[:2]
-    print(f"WALK·IN Arrival serving on http://{host}:{real_port}/  (Ctrl+C to stop)", flush=True)
+    print(f"Arrival serving on http://{host}:{real_port}/  (Ctrl+C to stop)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -1,10 +1,10 @@
-# WALK·IN Arrival — start here
+# Arrival — start here
 
 You are the implementing agent. The product spec is `plan.pdf` at the repo root. This `docs/` suite is the build contract. It is already decided. Do not re-plan, do not ask the user to pick an architecture, and do not wait on Nebius, GR00T, or a real iPhone scan.
 
 Paste this to yourself and start at task T01 in [06-agent-tasks.md](06-agent-tasks.md):
 
-> Build the WALK·IN Arrival MVP described in `docs/`. Follow `docs/06-agent-tasks.md` in order. `docs/01-decisions.md` wins over every other doc. `docs/06-agent-tasks.md` wins over the reference docs. Stop when `docs/02-mvp-tonight.md` definition of done passes. Do not implement items in `docs/09-later.md`.
+> Build the Arrival MVP described in `docs/`. Follow `docs/06-agent-tasks.md` in order. `docs/01-decisions.md` wins over every other doc. `docs/06-agent-tasks.md` wins over the reference docs. Stop when `docs/02-mvp-tonight.md` definition of done passes. Do not implement items in `docs/09-later.md`.
 
 ## Read order
 
@@ -19,8 +19,8 @@ Paste this to yourself and start at task T01 in [06-agent-tasks.md](06-agent-tas
 
 ## What this repo is
 
-WALK·IN Arrival turns one room scan into robot demonstrations in that room. Tonight's code is a new pipeline in this repo. The older project at <https://github.com/AvnehSBhatia/Walk-In> is prior art (four photos, World Labs Marble, Spot, skill attach, chat JSONL). Do not clone it, do not import it, and do not call Marble.
+Arrival turns one room scan into robot demonstrations in that room. Tonight's code is a new pipeline in this repo. Do not call World Labs Marble.
 
 ## Honest label
 
-The dataset written tonight is a real GR00T LeRobot v2 folder. The motion inside it is a scripted placeholder, not MimicGen and not contact physics. `info.json` must say `"walkin_physically_valid": false`. The README must say not to fine-tune GR00T on it until that flag is true.
+The dataset written tonight is a real GR00T LeRobot v2 folder. The motion inside it is a scripted placeholder, not MimicGen and not contact physics. `info.json` must say `"arrival_physically_valid": false`. The README must say not to fine-tune GR00T on it until that flag is true.

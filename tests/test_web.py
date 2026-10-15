@@ -45,7 +45,7 @@ def test_room_page_shows_flag(server):
     srv, _ = server
     status, body = _get(srv, "/rooms/hero_kitchen")
     assert status == 200
-    assert b"walkin_physically_valid: false" in body
+    assert b"arrival_physically_valid: false" in body
 
 
 def test_post_job_queues(server):
@@ -110,7 +110,7 @@ def test_download_zip(server):
     srv, out = server
     meta = out / "datasets" / "hero_kitchen" / "meta"
     meta.mkdir(parents=True)
-    (meta / "info.json").write_text('{"walkin_physically_valid": false}')
+    (meta / "info.json").write_text('{"arrival_physically_valid": false}')
     status, body = _get(srv, "/download/hero_kitchen")
     assert status == 200
     names = zipfile.ZipFile(io.BytesIO(body)).namelist()
@@ -161,9 +161,9 @@ def test_room_page_links_sim_dataset(server):
     srv, out = server
     meta = out / "datasets" / "hero_kitchen_sim" / "meta"
     meta.mkdir(parents=True)
-    (meta / "info.json").write_text(json.dumps({"walkin_generator": "mujoco_sim", "total_episodes": 3,
-                                                "walkin_physically_valid": True,
-                                                "walkin_families": ["counter_to_sink", "open_drawer"]}))
+    (meta / "info.json").write_text(json.dumps({"arrival_generator": "mujoco_sim", "total_episodes": 3,
+                                                "arrival_physically_valid": True,
+                                                "arrival_families": ["counter_to_sink", "open_drawer"]}))
     status, body = _get(srv, "/rooms/hero_kitchen")
     assert status == 200
     assert b"/download/hero_kitchen_sim" in body and b"mujoco_sim" in body and b"open_drawer" in body

@@ -5,12 +5,12 @@ Generic API (reused by the sim package):
     w = LeRobotWriter(root, room_id, video_policy="all", fps=20,
                       state_dim=S, action_dim=A, modality={...},     # modality.json state/action/annotation
                       video_keys=["ego_view", ...],                  # camera names; frames supplied by caller
-                      embodiment={...}, extra_info={"walkin_generator": ..., ...})
+                      embodiment={...}, extra_info={"arrival_generator": ..., ...})
     for ...:
         videos = {"ego_view": uint8[T,H,W,3]} if w.wants_video(w.next_episode) else None
         w.add_episode(states[T,S], actions[T,A], timestamps[T], instruction, success,
-                      videos=videos, extra={"walkin_family": ...},   # extra -> episodes.jsonl row
-                      sidecar={...})                                 # optional row in meta/walkin_cartesian.jsonl
+                      videos=videos, extra={"arrival_family": ...},   # extra -> episodes.jsonl row
+                      sidecar={...})                                 # optional row in meta/arrival_cartesian.jsonl
     info = w.finish(attempts)
 
 video_policy "all": every episode must supply every camera; the video features are declared.
@@ -35,7 +35,7 @@ from arrival.render import sim_texture
 VIDEO_KEY = "observation.images.ego_view"
 SPARSE_EVERY = 125
 CHUNKS_SIZE = 1000
-SIDECAR = "walkin_cartesian.jsonl"
+SIDECAR = "arrival_cartesian.jsonl"
 DATA_PATH = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet"
 VIDEO_PATH = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4"
 
@@ -137,8 +137,8 @@ class LeRobotWriter:
         base = modality if modality is not None else MODALITY
         self.modality = {k: v for k, v in base.items() if k != "video"}
         self.embodiment = dict(embodiment if embodiment is not None else SCRIPTED_EMBODIMENT)
-        self.extra_info = {"walkin_generator": "scripted_retarget", "walkin_physically_valid": False,
-                           "walkin_appearance": sim_texture.APPEARANCE, **(extra_info or {})}
+        self.extra_info = {"arrival_generator": "scripted_retarget", "arrival_physically_valid": False,
+                           "arrival_appearance": sim_texture.APPEARANCE, **(extra_info or {})}
         self.robot_type = robot_type
         self.chunks_size = chunks_size
         if self.root.exists():
@@ -225,8 +225,8 @@ class LeRobotWriter:
         self._sidecar.write(json.dumps({"episode_index": ep, **(sidecar or {})}) + "\n")
         row = {"episode_index": ep, "tasks": [instruction], "length": n, **(extra or {})}
         self.episodes.append(row)
-        if "walkin_family" in row:
-            self.families.add(row["walkin_family"])
+        if "arrival_family" in row:
+            self.families.add(row["arrival_family"])
         self.total_frames += n
         return ep
 
@@ -240,7 +240,7 @@ class LeRobotWriter:
             videos = {"ego_view": sim_texture.render_episode(frames, task["lighting"], self.room_center_x)}
         return self.add_episode(state, state, [f["t"] for f in frames], task["instruction"], attempt["success"],
                                 videos=videos,
-                                extra={"walkin_family": task["family"], "walkin_lighting": task["lighting"]},
+                                extra={"arrival_family": task["family"], "arrival_lighting": task["lighting"]},
                                 sidecar={"task_id": task["task_id"], "frames": frames})
 
     def features(self) -> dict:
@@ -297,12 +297,12 @@ class LeRobotWriter:
             "data_path": DATA_PATH,
             "video_path": VIDEO_PATH if self.video_policy == "all" else None,
             **self.extra_info,
-            "walkin_successes": n,
-            "walkin_attempts": attempts,
-            "walkin_video_policy": self.video_policy,
-            "walkin_previews": self.previews,
-            "walkin_room_id": self.room_id,
-            "walkin_families": sorted(self.families),
+            "arrival_successes": n,
+            "arrival_attempts": attempts,
+            "arrival_video_policy": self.video_policy,
+            "arrival_previews": self.previews,
+            "arrival_room_id": self.room_id,
+            "arrival_families": sorted(self.families),
             "features": self.features(),
         }
         (meta / "info.json").write_text(json.dumps(info, indent=2))
