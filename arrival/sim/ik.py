@@ -1,14 +1,20 @@
-"""Damped least-squares IK on the eef site (position + gripper-down orientation)."""
+"""Damped least-squares IK on the eef site (position + gripper-down orientation), nullspace-biased to a rest pose."""
 
 from __future__ import annotations
 
 import mujoco
 import numpy as np
 
+from arrival.sim.robot import HOME
+
 
 def solve(model, data, target_pos, R_t, q0, qadr: list[int], dofadr: list[int],
-          iters: int = 200, damping: float = 0.05, tol: float = 2e-3) -> tuple[np.ndarray, float]:
-    """Returns (q, position error). Works on a scratch MjData; R_t is the target eef rotation matrix."""
+          iters: int = 200, damping: float = 0.05, tol: float = 2e-3,
+          rest=HOME, k_rest: float = 0.2) -> tuple[np.ndarray, float]:
+    """Returns (q, position error). Works on a scratch MjData; R_t is the target eef rotation matrix.
+
+    The redundant DoF are pulled toward `rest` (gain k_rest) through the Jacobian nullspace, so the elbow/wrist
+    stay near the ready posture; iteration stops once the task is met and the posture has settled."""
     d = mujoco.MjData(model)
     d.qpos[:] = data.qpos
     d.qpos[qadr] = q0
@@ -24,13 +30,16 @@ def solve(model, data, target_pos, R_t, q0, qadr: list[int], dofadr: list[int],
         ep = np.asarray(target_pos) - d.site_xpos[sid]
         er = 0.5 * (np.cross(R[:, 0], R_t[:, 0]) + np.cross(R[:, 1], R_t[:, 1]) + np.cross(R[:, 2], R_t[:, 2]))
         err = float(np.linalg.norm(ep))
-        if err < tol and np.linalg.norm(er) < 0.02:
-            break
         mujoco.mj_jacSite(model, d, jp, jr, sid)
         J = np.vstack([jp[:, dofadr], jr[:, dofadr]])
         e = np.concatenate([ep, 0.5 * er])
+        q = d.qpos[qadr].copy()
         dq = J.T @ np.linalg.solve(J @ J.T + damping ** 2 * np.eye(6), e)
-        d.qpos[qadr] = np.clip(d.qpos[qadr] + dq, lo, hi)
+        dq += k_rest * (np.eye(len(qadr)) - np.linalg.pinv(J) @ J) @ (np.asarray(rest) - q)
+        q_new = np.clip(q + dq, lo, hi)
+        if err < tol and np.linalg.norm(er) < 0.02 and np.abs(q_new - q).max() < 1e-4:
+            break
+        d.qpos[qadr] = q_new
     return d.qpos[qadr].copy(), err
 
 
