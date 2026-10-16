@@ -29,7 +29,7 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 | Robot: pick mug → sink | ✅ 100% success, friction grasp, physics-checked |
 | Robot: open drawer | ✅ 100% success |
 | Robot: open door | ❌ 0%. The arm's arc path doesn't move the door yet (task MAN-2) |
-| Robot: counter → counter | ❌ Skipped. The counters are 2.2 m apart and the base doesn't move |
+| Robot: counter → counter | ❌ Skipped. The pick point and the target counter are about 2 m apart and the base doesn't move |
 | GR00T-format dataset + validator | ✅ Passes our validator, and the layout matches GR00T's loader source. ⚠️ Not yet loaded by GR00T itself since the latest fixes |
 | Local web page: browse, download, upload | ✅ Works. ⚠️ Uploads are queued; nothing processes them yet |
 | VLM planner (Nemotron) / VLA client (GR00T server) | ⚠️ The interfaces exist. Neither is wired in or tested against a live service |
@@ -152,7 +152,7 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 - **TWN-3: RoomPlan coverage.** Handle doors, windows, openings, `polygonCorners` floors, islands, multi-story `story`, and every object category Apple emits (`dishwasher`, `oven`, `washerDryer`, `storage`, `table`, …). Add a test per category.
 - **TWN-4: RoboCasa-native layout.** Make `layout.yaml` load in real RoboCasa (half extents, `wall_side`, groups). This needs a Linux machine with RoboCasa installed.
 - **TWN-5: Object detection.** RoomPlan doesn't see mugs or bowls. Detect objects in CAP-2 photos (Nemotron Nano Omni via Token Factory, or any detector) and place them in the twin.
-- **TWN-6: Fix the sample kitchen.** In `scans/hero_kitchen/scan.json` the fridge overlaps `counter_a` and the stove overlaps `counter_b`. Fix the numbers and the tests that encode them.
+- **TWN-6: Fix the sample kitchen.** Done: fridge, counters and stove now tile the north wall with no overlap, the bowl is on the counter instead of inside the fridge, and `tests/test_roomplan.py` checks footprints (see `docs/BUILD-LOG.md`).
 
 ### SIM: Scene & realism (4)
 
@@ -167,7 +167,7 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 
 - **MAN-1: Make the arm look and move like a Panda.** Real link shapes and proportions, a Franka-style hand, a low mount, IK biased to the Panda "ready" posture so the elbow doesn't flip, smooth min-jerk motion, and no clipping. Code is in `arrival/sim/robot.py` and `ik.py`. **The arm currently looks buggy. This is a top priority.**
 - **MAN-2: Open doors.** `open_door` is at 0%. Fix the handle grasp and arc path in `arrival/sim/policy.py`, and test with `python -m arrival sim --families open_door --episodes 4 --save-preview`.
-- **MAN-3: Mobile base.** Add an actuated base so `counter_to_counter` (2.2 m apart) is reachable, and add base joints to the state/action spec.
+- **MAN-3: Mobile base.** Add an actuated base so `counter_to_counter` (about 2 m between pick point and target) is reachable, and add base joints to the state/action spec.
 - **MAN-4: Grasp everything.** Bowls are wider than the gripper today. Add grasp planning by object shape (rim grasp, side grasp).
 - **MAN-5: New tasks.** Load and unload the dishwasher, put away into a drawer, close drawers and doors, turn on the faucet, and wipe the counter with the sponge.
 - **MAN-6: Real Franka model** *(optional).* Swap in the MuJoCo Menagerie Panda (Apache-2.0) behind a flag, keeping tests offline.
