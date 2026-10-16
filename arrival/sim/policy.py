@@ -28,19 +28,27 @@ class Policy:
 
 
 class ScriptedExpert(Policy):
-    """Plans eef waypoints for the task, solves IK per waypoint, then interpolates joint targets."""
+    """Plans eef waypoints for the task, solves IK per waypoint (biased toward HOME), then plays joint targets
+    with min-jerk timing; waypoints flagged `via` are passed through without stopping."""
 
     def __init__(self, seg_steps: int = 20, hold_steps: int = 8):
         self.seg_steps, self.hold_steps = seg_steps, hold_steps
 
+    @staticmethod
+    def _grip_yaw(env, yaw: float) -> float:
+        """Parallel jaws are symmetric under a half turn: use yaw + pi when yaw is >120 deg from the hand's
+        current heading, so the wrist never spins half a turn for an equivalent grasp."""
+        x = env.data.site("eef").xmat.reshape(3, 3)[:, 0]
+        return yaw + np.pi if np.cos(yaw - np.arctan2(x[1], x[0])) < -0.5 else yaw
+
     def _waypoints(self, env, task: dict) -> list[tuple]:
-        """(pos, R, gripper, steps) list."""
+        """(pos, R, gripper, steps[, via]) list."""
         fam, o, c = task["family"], FINGER_OPEN, 0.0
         if fam in ("counter_to_sink", "counter_to_counter"):
             p = env.body_pos(task["object_id"])
             gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
             tgt = env.place_point(task)
-            R = ik.down(0.0)
+            R = ik.down(self._grip_yaw(env, 0.0))
             s = self.seg_steps
             return [((p[0], p[1], gz + 0.18), R, o, s), ((p[0], p[1], gz + 0.02), R, o, s),
                     ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps),
@@ -49,12 +57,12 @@ class ScriptedExpert(Policy):
                     ((tgt[0], tgt[1], tgt[2] + 0.2), R, o, s)]
         if fam == "open_drawer":
             h, axis = env.site_pos(task["handle"]), env.pull_axis(task)
-            R = ik.down(np.arctan2(axis[1], axis[0]))  # fingers close across the pull axis
+            R = ik.down(self._grip_yaw(env, np.arctan2(axis[1], axis[0])))  # fingers close across the pull axis
             h = h + np.array([0, 0, 0.0])
             pre = h + np.array([0, 0, 0.12])
             s = self.seg_steps
             return [(pre, R, o, s), (h + 0.005 * axis, R, o, s), (h + 0.005 * axis, R, c, self.hold_steps)] + [
-                (h + (0.005 + 0.32 * k / 6) * axis, R, c, s // 2) for k in range(1, 7)] + [
+                (h + (0.005 + 0.32 * k / 6) * axis, R, c, s // 2, k < 6) for k in range(1, 7)] + [
                 (h + 0.325 * axis, R, o, self.hold_steps), (h + 0.325 * axis + np.array([0, 0, 0.15]), R, o, s)]
         if fam == "open_door":
             hinge, h, R0 = env.door_geometry(task)
@@ -79,13 +87,22 @@ class ScriptedExpert(Policy):
         self.plan: list[np.ndarray] = []
         prev = np.concatenate([q, [FINGER_OPEN]])
         self.ik_error = 0.0
-        for pos, R, g, steps in self._waypoints(env, task):
+        chain: list[tuple[np.ndarray, int]] = []
+        for pos, R, g, steps, *via in self._waypoints(env, task):
             q, err = ik.solve(env.model, env.data, pos, R, q, env.qadr, env.dofadr)
             self.ik_error = max(self.ik_error, err)
             nxt = np.concatenate([q, [g]])
-            for k in range(1, steps + 1):
-                self.plan.append(prev + (nxt - prev) * min(1.0, k / max(1, steps - 2)))
-            prev = nxt
+            chain.append((nxt, steps))
+            if via and via[0]:
+                continue
+            total = sum(n for _, n in chain)
+            knots = np.cumsum([0] + [n for _, n in chain]) / total
+            pts = np.array([prev] + [p for p, _ in chain])
+            for k in range(1, total + 1):
+                t = min(1.0, k / max(1, total - 2))
+                s = t ** 3 * (10 - 15 * t + 6 * t * t)
+                self.plan.append(np.array([np.interp(s, knots, pts[:, j]) for j in range(pts.shape[1])]))
+            prev, chain = nxt, []
         self.t = 0
 
     def done(self) -> bool:
