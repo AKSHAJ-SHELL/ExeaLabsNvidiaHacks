@@ -195,26 +195,43 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
 
 def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path = "out", people: int = 2,
             policy_name: str = "scripted", res: int = 128, seed: int = 0, save_preview: bool = False,
+            planner_name: str = "rule", cache_path: str | Path | None = None,
+            split: str = "train", use_generated_instructions: bool = False,
             log=print) -> dict:
     """Collect `episodes` attempts; failed attempts are dropped and counted."""
     from arrival.sim.export import SimDatasetWriter
-    from arrival.sim.policy import ScriptedExpert, VLAClient
+    from arrival.sim.policy import ScriptedExpert, VLAClient, VLMPlanner
     from arrival.sim.tasks import make_tasks
 
     out_dir = Path(out_dir)
     room = twin["room_id"]
-    tasks = make_tasks(twin, families, episodes, seed=seed, people=people, log=log)
+    tasks = make_tasks(twin, families, episodes, seed=seed, people=people,
+                       split=split, use_generated_instructions=use_generated_instructions, log=log)
     for t in tasks:
         if t["family"] == "open_drawer":
             t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
         elif t["family"] == "open_door":
             t["joint"] = f'{t["fixture"]}_door'
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
+    planner = VLMPlanner(log=log, cache_path=cache_path) if planner_name == "vlm" else None
     writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"))
     t0 = time.perf_counter()
     per = {}
     preview = [] if save_preview else None
     for i, task in enumerate(tasks):
+        if planner is not None:
+            obj_ids = [o["id"] for o in twin.get("objects", [])]
+            fx_ids = [f["id"] for f in twin.get("fixtures", [])]
+            plan = planner.plan(task["instruction"], obj_ids, fx_ids)
+            task["vlm_plan"] = plan
+            task["planned_by"] = planner.source
+            if plan.get("family") and plan["family"] in families:
+                task["family"] = plan["family"]
+            if plan.get("object") and plan["object"] in obj_ids:
+                task["object_id"] = plan["object"]
+            if plan.get("target") and plan["target"] in fx_ids:
+                task["target"] = plan["target"]
+            log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
         env = SimEnv(twin, task, res=res, overview=save_preview and i == 0)
         ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
         fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0})
@@ -228,7 +245,8 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     seconds = time.perf_counter() - t0
     info = writer.finish(len(tasks))
     succ = sum(f["successes"] for f in per.values())
-    report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name, "attempts": len(tasks),
+    report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name,
+              "planner": planner_name, "attempts": len(tasks),
               "successes": succ, "dropped": len(tasks) - succ, "seconds": round(seconds, 2),
               "demos_per_hour": round(succ / seconds * 3600, 1) if seconds else 0.0,
               "families": {k: {**v, "success_rate": round(v["successes"] / v["attempts"], 3)} for k, v in per.items()},

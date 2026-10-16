@@ -32,7 +32,7 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 | Robot: counter → counter | ❌ Skipped. The counters are 2.2 m apart and the base doesn't move |
 | GR00T-format dataset + validator | ✅ Passes our validator, and the layout matches GR00T's loader source. ⚠️ Not yet loaded by GR00T itself since the latest fixes |
 | Local web page: browse, download, upload | ✅ Works. ⚠️ Uploads are queued; nothing processes them yet |
-| VLM planner (Nemotron) / VLA client (GR00T server) | ⚠️ The interfaces exist. Neither is wired in or tested against a live service |
+| VLM planner (Nemotron) / VLA client (GR00T server) | ✅ VLM planner (Nemotron) wired into sim collection with Token Factory and offline cache fixture (POL-1); dynamic instruction generation with held-out eval set (POL-2). ⚠️ VLA client tested offline |
 | GR00T fine-tune, MimicGen, splats, Cosmos, Nebius scale-out | ❌ Not built yet |
 
 There are two datasets. `python -m arrival sim` writes **physics-simulated** data with real joint states (`arrival_physically_valid: true`). `python -m arrival demo` writes a fast **scripted placeholder** with zero joint values (`arrival_physically_valid: false`). Never train on the placeholder.

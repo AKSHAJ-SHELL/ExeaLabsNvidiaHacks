@@ -136,7 +136,9 @@ def cmd_sim(a) -> int:
 
         twin = compile_twin(scan_bundle.load_room(a.room, Path(a.scans)))
     res = collect(twin, fams, a.episodes, a.out, people=a.people, policy_name=a.policy, res=a.res,
-                  seed=a.seed, save_preview=a.save_preview)
+                  seed=a.seed, save_preview=a.save_preview,
+                  planner_name=a.planner, split=a.split,
+                  use_generated_instructions=(a.instructions == "nemotron"))
     r = res["report_data"]
     print(f"dataset: {res['dataset']}")
     print(f"report:  {res['report']}")
@@ -176,6 +178,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door")
     m.add_argument("--people", type=int, default=2)
     m.add_argument("--policy", choices=["scripted", "vla"], default="scripted")
+    m.add_argument("--planner", choices=["rule", "vlm"], default="rule",
+                   help="Task planner: rule (deterministic) or vlm (Nemotron via Nebius Token Factory)")
+    m.add_argument("--instructions", choices=["template", "nemotron"], default="template",
+                   help="Instruction source: template (fixed wordings) or nemotron (varied wordings with train/eval split)")
+    m.add_argument("--split", choices=["train", "eval"], default="train",
+                   help="Dataset instruction split: train or held-out eval")
     m.add_argument("--res", type=int, default=128)
     m.add_argument("--out", default="out")
     m.add_argument("--scans", default="scans")

@@ -21,6 +21,7 @@ def _fx(twin: dict, fid: str) -> dict:
 
 
 def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: int = 0,
+               split: str = "train", use_generated_instructions: bool = False,
                log=print) -> list[dict]:
     """n task variations cycling through the requested families; unreachable families are skipped and logged."""
     rng = random.Random(seed)
@@ -62,10 +63,18 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
         fam = fams[i % len(fams)]
         v = dict(rng.choice(pools[fam]))
         light = rng.choice(LIGHTING)
-        w = rng.randrange(len(SIM_WORDINGS[fam]))
         name = v.get("object_label") or v.get("name")
+        if use_generated_instructions:
+            from arrival.tasks.instructions import generate_instructions
+            gen = generate_instructions(fam, object_name=v.get("object_label"), fixture_name=v.get("name"))
+            options = gen.get(split, gen.get("train", SIM_WORDINGS[fam]))
+            w = rng.randrange(len(options))
+            instr = options[w]
+        else:
+            w = rng.randrange(len(SIM_WORDINGS[fam]))
+            instr = SIM_WORDINGS[fam][w].format(name=name)
         t = {"family": fam, "lighting": light, "wording_index": w, "people": people, "seed": seed * 1000 + i,
-             "instruction": SIM_WORDINGS[fam][w].format(name=name), **v}
+             "instruction": instr, "split": split, **v}
         if "start" in v:
             off = rng.choice(POSE_OFFSETS)
             t["start"] = [v["start"][0] + off[0], v["start"][1] + off[1] * 0.5,
