@@ -90,7 +90,7 @@ Status as of Oct 14 (scripted expert, friction grasps, physics-checked):
 |---|---|---|
 | `counter_to_sink` | 100% | mug only; the bowl is wider than the gripper |
 | `open_drawer` | 100% | both counters |
-| `open_door` | 0% | arc trajectory doesn't move the door yet. **Help wanted** |
+| `open_door` | 100% | both cabinet doors, 8/8 over two seeds; the door ends at about 70° (threshold 60°) |
 | `counter_to_counter` | skipped | targets ~2.2 m apart, base is fixed per episode. Needs a mobile base |
 
 Defaults are `counter_to_sink,open_drawer`. `--families all` includes the broken ones (their failures are dropped and counted). The VLM planner is not yet wired into `collect()`, and the VLA client has never run against a real GR00T server.

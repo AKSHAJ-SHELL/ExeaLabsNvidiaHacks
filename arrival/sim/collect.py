@@ -84,9 +84,11 @@ class SimEnv:
                 along = 0.0
                 h = 0.72
             else:
+                # stand just left of the handle (away from the hinge), outside the door's swing, far enough out
+                # that the far end of the handle arc stays within reach of the tilted-down grasp
                 lx, lz = sx / 2 - 0.02 - door_w(c, self.twin["fixtures"]) + 0.06, 0.53
-                along = 0.3
-                h = 0.5
+                along = -0.1
+                h = 0.65
             yaw = c.get("yaw", 0.0)
             hx = c["position"][0] + np.cos(yaw) * (lx + along)
             hy = c["position"][1] + np.sin(yaw) * (lx + along) + n[1] * (sy / 2 + h)
