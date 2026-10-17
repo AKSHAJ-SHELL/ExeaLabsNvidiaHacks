@@ -61,6 +61,20 @@ def test_collect_writes_valid_dataset(twin, tmp_path):
     assert not errors, errors
 
 
+@pytest.mark.parametrize("fixture", ["counter_a", "counter_b"])
+def test_scripted_expert_opens_cabinet_door(twin, fixture):
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+
+    task = {"family": "open_door", "fixture": fixture, "joint": f"{fixture}_door", "lighting": "neutral", "people": 0,
+            "seed": 0}
+    env = SimEnv(twin, task, res=32)
+    ep = run_episode(env, ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+    assert ep["detail"]["qpos"] > np.radians(65)  # success threshold is 60 deg; keep a margin
+    assert ep["ik_error"] < 0.02
+
+
 def test_vla_requires_server(monkeypatch):
     monkeypatch.delenv("GR00T_POLICY_URL", raising=False)
     with pytest.raises(VLANotConfigured):

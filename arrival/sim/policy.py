@@ -65,20 +65,40 @@ class ScriptedExpert(Policy):
                 (h + (0.005 + 0.32 * k / 6) * axis, R, c, s // 2, k < 6) for k in range(1, 7)] + [
                 (h + 0.325 * axis, R, o, self.hold_steps), (h + 0.325 * axis + np.array([0, 0, 0.15]), R, o, s)]
         if fam == "open_door":
-            hinge, h, R0 = env.door_geometry(task)
+            # The bar handle sits 2-3 cm below the counter-top overhang, so the hand comes down nearly vertical
+            # (10 deg tilt keeps the hand body clear of the slab) with the fingers closing along the panel.
+            # Segments interpolate in joint space, so the hand first goes out in front of the counter and high,
+            # then straight down in front, then in to the bar; a direct move from HOME sweeps through the slab.
+            hinge, h, _ = env.door_geometry(task)
             r = np.linalg.norm((h - hinge)[:2])
             a0 = np.arctan2(*(h - hinge)[[1, 0]])
-            out = []
-            s = self.seg_steps
-            normal = -np.array([-np.sin(a0), np.cos(a0), 0.0])  # outward from the closed panel
-            out += [(h + 0.1 * normal, ik.facing(-normal[:2]), o, s), (h + 0.005 * normal, ik.facing(-normal[:2]), o, s),
-                    (h + 0.005 * normal, ik.facing(-normal[:2]), c, self.hold_steps)]
-            for k in range(1, 9):
-                a = a0 - np.radians(85) * k / 8  # right-hinged cabinet door swings outward (clockwise from above)
-                pt = hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]])
-                n = -np.array([-np.sin(a), np.cos(a), 0.0])
-                out.append((pt + 0.005 * n, ik.facing(-n[:2]), c, s // 2))
+            s, up = self.seg_steps, np.array([0, 0, 1.0])
+            grasp = np.array([0, 0, 0.04])  # hold the bar near its top: a higher wrist reaches further along the arc
+
+            def pt(a):
+                return hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]]) + grasp
+
+            def nrm(a):  # outward normal of the panel at door angle a (swings outward, clockwise from above)
+                return -np.array([-np.sin(a), np.cos(a), 0.0])
+
+            along = np.array([-nrm(a0)[1], nrm(a0)[0], 0.0])
+            if np.dot(along, env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
+                along = -along  # equivalent parallel-jaw grasp that does not spin the wrist half a turn
+
+            def ori(a):
+                rot = a - a0
+                ax = np.array([np.cos(rot) * along[0] - np.sin(rot) * along[1],
+                               np.sin(rot) * along[0] + np.cos(rot) * along[1]])
+                return ik.tilted(nrm(a)[:2], ax, np.radians(10))
+
+            n0, g = nrm(a0), pt(a0)
+            out = [(g + 0.2 * n0 + 0.35 * up, ori(a0), o, s), (g + 0.2 * n0, ori(a0), o, s),
+                   (g + 0.005 * n0, ori(a0), o, s), (g + 0.005 * n0, ori(a0), c, self.hold_steps)]
+            for k in range(1, 9):  # one smooth via-point pull: stop-and-go pulses let the bar slide off the pads
+                a = a0 - np.radians(75) * k / 8
+                out.append((pt(a) + 0.005 * nrm(a), ori(a), c, s // 2, k < 8))
             out.append((out[-1][0], out[-1][1], o, self.hold_steps))
+            out.append((out[-1][0] + 0.15 * up, out[-1][1], o, s))
             return out
         raise ValueError(f"unknown family {fam}")
 

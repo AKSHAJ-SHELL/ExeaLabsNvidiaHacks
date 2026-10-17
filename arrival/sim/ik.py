@@ -49,6 +49,17 @@ def down(yaw: float = 0.0) -> np.ndarray:
     return np.array([[c, s, 0], [s, -c, 0], [0, 0, -1.0]])
 
 
+def tilted(normal_xy, along_xy, theta: float) -> np.ndarray:
+    """Gripper pointing down, tilted `theta` rad from vertical toward -normal_xy (into a vertical panel whose
+    outward normal is normal_xy); fingers close horizontally along along_xy (a bar handle sits between them)."""
+    n = np.array([normal_xy[0], normal_xy[1], 0.0])
+    n /= np.linalg.norm(n)
+    z = -np.sin(theta) * n + np.array([0, 0, -np.cos(theta)])
+    y = np.array([along_xy[0], along_xy[1], 0.0])
+    y /= np.linalg.norm(y)
+    return np.column_stack([np.cross(y, z), y, z])
+
+
 def facing(direction_xy) -> np.ndarray:
     """Gripper pointing horizontally along direction_xy, fingers closing horizontally (vertical bar handles)."""
     z = np.array([direction_xy[0], direction_xy[1], 0.0])

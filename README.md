@@ -28,7 +28,7 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 | Simulation: kitchen, drawers, doors, people | ✅ Works. MuJoCo, built from the twin |
 | Robot: pick mug → sink | ✅ 100% success, friction grasp, physics-checked |
 | Robot: open drawer | ✅ 100% success |
-| Robot: open door | ❌ 0%. The arm's arc path doesn't move the door yet (task MAN-2) |
+| Robot: open door | ✅ 100% on both cabinet doors (8/8, two seeds, with and without people). Opens to about 70°: the arm is mounted at 0.75 m, so the far end of the handle arc sits at its reach limit. A mobile base (MAN-3) is what lifts that |
 | Robot: counter → counter | ❌ Skipped. The counters are 2.2 m apart and the base doesn't move |
 | GR00T-format dataset + validator | ✅ Passes our validator, and the layout matches GR00T's loader source. ⚠️ Not yet loaded by GR00T itself since the latest fixes |
 | Local web page: browse, download, upload | ✅ Works. ⚠️ Uploads are queued; nothing processes them yet |
@@ -39,7 +39,7 @@ There are two datasets. `python -m arrival sim` writes **physics-simulated** dat
 
 ## Get started (5 minutes)
 
-Requires Python 3.11+ on macOS or Linux. No GPU and no API keys needed.
+Requires Python 3.11+ on macOS, Linux or Windows (the suite and the MuJoCo sim run as is on Windows; use `.venv\Scriptsctivate` there). No GPU and no API keys needed.
 
 ```bash
 git clone https://github.com/AvnehSBhatia/ExeaLabsNvidiaHacks.git
@@ -166,7 +166,7 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 ### MAN: Robot & manipulation (5)
 
 - **MAN-1: Make the arm look and move like a Panda.** Real link shapes and proportions, a Franka-style hand, a low mount, IK biased to the Panda "ready" posture so the elbow doesn't flip, smooth min-jerk motion, and no clipping. Code is in `arrival/sim/robot.py` and `ik.py`. **The arm currently looks buggy. This is a top priority.**
-- **MAN-2: Open doors.** `open_door` is at 0%. Fix the handle grasp and arc path in `arrival/sim/policy.py`, and test with `python -m arrival sim --families open_door --episodes 4 --save-preview`.
+- **MAN-2: Open doors.** Done (see `docs/BUILD-LOG.md`). Both cabinet doors open at 100%; the fridge door is not a task yet (MAN-5). Check with `python -m arrival sim --families open_door --episodes 4 --save-preview`.
 - **MAN-3: Mobile base.** Add an actuated base so `counter_to_counter` (2.2 m apart) is reachable, and add base joints to the state/action spec.
 - **MAN-4: Grasp everything.** Bowls are wider than the gripper today. Add grasp planning by object shape (rim grasp, side grasp).
 - **MAN-5: New tasks.** Load and unload the dishwasher, put away into a drawer, close drawers and doors, turn on the faucet, and wipe the counter with the sponge.
