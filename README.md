@@ -37,6 +37,7 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 | GR00T-format dataset + validator | ✅ Passes our validator, and the layout matches GR00T's loader source. ⚠️ Not yet loaded by GR00T itself since the latest fixes |
 | Local web page: browse, download, upload | ✅ Works. Uploads are processed by `python -m arrival work` on the same machine (twin, sim dataset, zip). ⚠️ One local worker, no cloud fan-out yet |
 | VLM planner (Nemotron) / VLA client (GR00T server) | ✅ VLM planner (Nemotron) wired into sim collection with Token Factory and offline cache fixture (POL-1); dynamic instruction generation with held-out eval set (POL-2). ⚠️ VLA client tested offline |
+| Tavily web research agent | ✅ Tavily research agent implemented (TAV-1): queries appliance manuals, clearances, and safety guidelines for digital twins and enriches Nemotron VLM planning; offline cache in `arrival/models/tavily_cache.json` |
 | GR00T fine-tune, MimicGen, splats, Cosmos, Nebius scale-out | ❌ Not built yet |
 
 There are two datasets. `python -m arrival sim` writes **physics-simulated** data with real joint states (`arrival_physically_valid: true`). `python -m arrival demo` writes a fast **scripted placeholder** with zero joint values (`arrival_physically_valid: false`). Never train on the placeholder.
@@ -74,6 +75,8 @@ Other commands:
 python -m arrival demo --episodes 1000                         # fast scripted placeholder dataset
 python -m arrival demo --room hero_kitchen --from-roomplan     # build from a RoomPlan JSON export
 python -m arrival sim --families all                           # include the not-yet-working tasks
+python -m arrival sim --planner vlm --tavily                   # sim with Tavily-informed Nemotron planning
+python -m arrival research --room hero_kitchen                 # query Tavily for appliance manuals and safety specs
 python -m arrival eval --episodes 4 --people 2                 # score a policy closed-loop, no dataset written
 ```
 

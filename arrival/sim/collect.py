@@ -316,9 +316,18 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
         if planner is not None:
             obj_ids = [o["id"] for o in twin.get("objects", [])]
             fx_ids = [f["id"] for f in twin.get("fixtures", [])]
-            plan = planner.plan(task["instruction"], obj_ids, fx_ids)
+            research_ctx = None
+            if "tavily_research" in twin:
+                target_fx = task.get("target") or task.get("fixture") or ""
+                target_type = next((f.get("type", "") for f in twin.get("fixtures", []) if f.get("id") == target_fx), "")
+                if target_type and target_type in twin["tavily_research"]:
+                    r_info = twin["tavily_research"][target_type]
+                    research_ctx = f"{r_info.get('summary', '')} {' '.join(r_info.get('safety_guidelines', []))}"
+            plan = planner.plan(task["instruction"], obj_ids, fx_ids, research_context=research_ctx)
             task["vlm_plan"] = plan
             task["planned_by"] = planner.source
+            if research_ctx:
+                task["tavily_enriched"] = True
             if plan.get("family") and plan["family"] in families:
                 task["family"] = plan["family"]
             if plan.get("object") and plan["object"] in obj_ids:

@@ -242,8 +242,12 @@ class VLMPlanner:
         self.cache_path = Path(cache_path) if cache_path else Path(__file__).resolve().parents[1] / "models" / "nemotron_cache.json"
         self._cache = self._load_cache()
 
-    def _cache_key(self, instruction: str, objects: list[str], fixtures: list[str]) -> str:
-        return f"{instruction.strip().lower()}::{sorted(objects)}::{sorted(fixtures)}"
+    def _cache_key(self, instruction: str, objects: list[str], fixtures: list[str],
+                   research_context: str | None = None) -> str:
+        base = f"{instruction.strip().lower()}::{sorted(objects)}::{sorted(fixtures)}"
+        if research_context:
+            return f"{base}::tavily={hash(research_context)}"
+        return base
 
     def _load_cache(self) -> dict:
         if self.cache_path and self.cache_path.is_file():
@@ -263,19 +267,22 @@ class VLMPlanner:
         except Exception as e:
             self.log(f"[sim] VLMPlanner: warning, could not write cache to {self.cache_path}: {e}")
 
-    def plan(self, instruction: str, objects: list[str], fixtures: list[str]) -> dict:
+    def plan(self, instruction: str, objects: list[str], fixtures: list[str],
+             research_context: str | None = None) -> dict:
         from arrival.models.token_factory import TokenFactoryNotConfigured, complete
 
-        key = self._cache_key(instruction, objects, fixtures)
+        key = self._cache_key(instruction, objects, fixtures, research_context)
         if key in self._cache:
             self.source = "cache"
             return dict(self._cache[key])
 
         try:
+            user_payload = {"instruction": instruction, "objects": objects, "fixtures": fixtures}
+            if research_context:
+                user_payload["research_context"] = research_context
             txt = complete([{"role": "system", "content": "Return only JSON: {\"family\": one of counter_to_sink|"
                              "counter_to_counter|open_drawer|open_door, \"object\": id|null, \"target\": id|null}"},
-                            {"role": "user", "content": json.dumps({"instruction": instruction, "objects": objects,
-                                                                    "fixtures": fixtures})}], role="super")
+                            {"role": "user", "content": json.dumps(user_payload)}], role="super")
             plan = json.loads(re.search(r"\{.*\}", txt, re.S).group(0))
             self.source = "token_factory"
             self._cache[key] = plan

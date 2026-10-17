@@ -24,6 +24,7 @@ The implementing agent does not open these accounts and does not block on them. 
 | RoboCasa | <https://github.com/robocasa/robocasa> | Layout format and atomic tasks |
 | MimicGen guide | <https://github.com/robocasa/robocasa/blob/main/docs/use_cases/mimicgen.md> | `PnPCounterToSink` template path |
 | Layout example | <https://github.com/robocasa/robocasa/blob/main/robocasa/models/assets/scenes/kitchen_layouts/train/layout011.yaml> | Full layout the subset emitter is aiming at |
+| Tavily Search API | <https://tavily.com/> | Appliance manual and safety clearance research ($3,000 sponsor prize) |
 
 ## What to request
 
@@ -32,6 +33,7 @@ The implementing agent does not open these accounts and does not block on them. 
 3. Serverless Jobs quota for at least one GPU preset. The jobs quickstart uses platform `gpu-l40s-a` and preset `1gpu-8vcpu-32gb`. Confirm those ids in the console; do not assume they are still current.
 4. Hugging Face access: `nvidia/GR00T-N1.7-3B` is not gated, but the Cosmos-Reason2-2B backbone it loads is; accept that model's license first. Record whether `NEW_EMBODIMENT` is the supported path for a 7-DoF arm. It was, in the public README, via `--embodiment-tag NEW_EMBODIMENT` and a modality config. Recheck before writing that config.
 5. An Object Storage bucket, S3-compatible, only when artifacts leave the laptop.
+6. Tavily Search API key. Put it in an untracked `.env` as `TAVILY_API_KEY` (optional; offline cached fixture is checked in).
 
 ## What not to do
 

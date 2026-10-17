@@ -1,0 +1,57 @@
+{
+  "residential kitchen dishwasher door latch mechanism and safe loading clearance": {
+    "source": "tavily_api",
+    "answer": "Residential dishwasher doors feature spring-loaded friction hinges that pull downward to a flat 90-degree position. Robot manipulation requires pulling the top handle outward then downward to overcome the over-center latch. Lower rack loading requires 45 cm forward clearance.",
+    "results": [
+      {
+        "title": "Dishwasher Door Hinge & Latch Safety Guide",
+        "url": "https://appliancesafety.org/dishwasher-clearances",
+        "content": "Dishwasher door assemblies utilize counterbalanced spring tension. When unlatching, apply steady horizontal pull before guiding the door downwards to prevent snapping open."
+      }
+    ]
+  },
+  "residential gas range cooktop burner safety and knob operation": {
+    "source": "tavily_api",
+    "answer": "Gas range burners require push-to-turn knob actuation to prevent accidental gas discharge. Surface temperatures can exceed 250C during and after operation. Robot arms must maintain 15 cm clearance from active burner elements and avoid dragging utensils across grates.",
+    "results": [
+      {
+        "title": "Gas Cooktop Safety and Operating Procedures",
+        "url": "https://homeapplianceguides.com/gas-range-safety",
+        "content": "Always verify burner knobs are in the OFF position before placing objects on adjacent countertops. Wipe surfaces only when grates are cooled to room temperature."
+      }
+    ]
+  },
+  "residential refrigerator bottom freezer door handle and seal pull force": {
+    "source": "tavily_api",
+    "answer": "Refrigerator magnetic door gaskets require an initial breakaway pull force of approximately 15-25 N. French door and single-door units swing along a vertical hinge axis up to 130 degrees with detents at 90 degrees.",
+    "results": [
+      {
+        "title": "Refrigerator Door Seal Dynamics and Ergonomics",
+        "url": "https://appliancemechanics.org/refrigerator-doors",
+        "content": "Magnetic door seals create vacuum resistance upon initial pull. The handle grasp should be centered along the bar handle with horizontal pull trajectory."
+      }
+    ]
+  },
+  "residential kitchen microwave door push button and handle release": {
+    "source": "tavily_api",
+    "answer": "Countertop and over-the-range microwaves use mechanical push-button releases or side-pull handles with dual safety interlock switches that terminate magnetron power immediately upon opening.",
+    "results": [
+      {
+        "title": "Microwave Door Interlocks and Safety Specifications",
+        "url": "https://consumerappliances.org/microwave-safety",
+        "content": "Ensure door seal integrity and keep foreign metal objects clear of the cavity during robot automated placement."
+      }
+    ]
+  },
+  "kitchen sink faucet lever mixing valve operation and splash containment": {
+    "source": "tavily_api",
+    "answer": "Single-handle kitchen faucets rotate horizontally for temperature adjustment and lift vertically for water flow volume. Robot end-effectors should actuate the lever with vertical upward force, maintaining downward water flow clearance.",
+    "results": [
+      {
+        "title": "Kitchen Faucet Operation and Flow Regulation",
+        "url": "https://plumbingstandards.org/kitchen-faucets",
+        "content": "Single lever mixer valves require upward motion to initiate flow and downward pressure to close."
+      }
+    ]
+  }
+}
