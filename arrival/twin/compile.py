@@ -17,6 +17,13 @@ COUNTER_HEIGHT = 0.92
 SYNTH_RADIUS = 0.3
 DEFAULT_OBJECTS = (("mug", [0.08, 0.08, 0.1]), ("bowl", [0.14, 0.14, 0.06]))
 PLACE_MARGIN = 0.08
+# A kitchen island: counter-height block (RoomPlan calls it a table) clear of every wall.
+# Dining tables measure about 0.75 m, so the band starts above them. Storage stays a cabinet
+# wherever it stands, so a freestanding sideboard is not retyped.
+ISLAND_CATEGORIES = ("counter", "table")
+ISLAND_HEIGHT = (0.85, 1.15)
+ISLAND_CLEARANCE = 0.3
+PASS_THROUGH = ("doors", "windows", "openings", "floors")
 
 
 def to_local(xy, fixture: dict) -> tuple[float, float]:
@@ -60,7 +67,26 @@ def _synth_counters(fixtures: list[dict]) -> list[dict]:
     return out
 
 
+def wall_distance(fixture: dict, walls: list[dict], step: float = 0.05) -> float:
+    """Horizontal distance from a fixture's footprint to the nearest wall segment (points sampled every `step`)."""
+    best = math.inf
+    for w in walls:
+        (x0, y0), (x1, y1) = w["start"], w["end"]
+        n = max(1, math.ceil(math.hypot(x1 - x0, y1 - y0) / step))
+        for i in range(n + 1):
+            t = i / n
+            best = min(best, _rect_distance([x0 + t * (x1 - x0), y0 + t * (y1 - y0)], fixture))
+    return best
+
+
+def is_island(fixture: dict, walls: list[dict]) -> bool:
+    lo, hi = ISLAND_HEIGHT
+    return (fixture["source_category"] in ISLAND_CATEGORIES and lo <= fixture["size"][2] <= hi
+            and bool(walls) and wall_distance(fixture, walls) > ISLAND_CLEARANCE)
+
+
 def compile_twin(bundle: dict) -> dict:
+    walls = [dict(w) for w in bundle.get("walls", [])]
     fixtures = []
     for f in bundle.get("fixtures", []):
         fx = {
@@ -71,9 +97,13 @@ def compile_twin(bundle: dict) -> dict:
             "yaw": float(f.get("yaw", 0.0)),
             "source_category": f["category"],
         }
-        cfg = default_config_name(f["category"])
-        if cfg and fx["type"] == "counter":
-            fx["default_config_name"] = cfg
+        if is_island(fx, walls):
+            fx["type"] = "counter"
+            fx["island"] = True
+        else:
+            cfg = default_config_name(f["category"])
+            if cfg and fx["type"] == "counter":
+                fx["default_config_name"] = cfg
         fixtures.append(fx)
     fixtures += _synth_counters(fixtures)
     objects = [
@@ -87,16 +117,23 @@ def compile_twin(bundle: dict) -> dict:
         }
         for o in bundle.get("objects", [])
     ]
-    return {
+    twin = {
         "room_id": bundle["room_id"],
         "geometry_source": bundle["geometry_source"],
         "blocks_claims": list(bundle.get("blocks_claims", [])),
         "frame": "z_up",
         "units": "meters",
-        "walls": [dict(w) for w in bundle.get("walls", [])],
+        "walls": walls,
         "fixtures": fixtures,
         "objects": objects,
     }
+    for key in PASS_THROUGH:
+        if key in bundle:
+            twin[key] = [dict(item) for item in bundle[key]]
+    for key in ("story", "story_count"):
+        if key in bundle:
+            twin[key] = bundle[key]
+    return twin
 
 
 def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
@@ -155,6 +192,9 @@ def layout_dict(twin: dict) -> dict:
         ys += [y0, y1]
         walls.append(_wall_entry(w))
     room: dict = {"walls": walls}
+    corners = [c for fl in twin.get("floors", []) for c in fl["corners"]]
+    if corners:  # a scanned floor polygon sets the floor extent; otherwise the wall bounding box does
+        xs, ys = [c[0] for c in corners], [c[1] for c in corners]
     if xs:
         room["floor"] = [{"name": "floor", "type": "floor",
                           "size": _r([max(xs) - min(xs), max(ys) - min(ys), 0.02]),
@@ -166,6 +206,8 @@ def layout_dict(twin: dict) -> dict:
             entry["z_rot"] = round(f["yaw"], 6)
         if f.get("default_config_name"):
             entry["default_config_name"] = f["default_config_name"]
+        if f.get("island"):
+            entry["island"] = True
         bottom_row.append(entry)
     return {
         "room": room,

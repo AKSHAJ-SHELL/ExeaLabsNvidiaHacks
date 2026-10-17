@@ -51,6 +51,7 @@ Rules:
 - `walls[].start` and `end` are `[x, y]` on the floor. The wall runs from start to end. Thickness extends toward the room interior. Tonight's sample walls use the rectangle below; do not infer interior from a polygon library. Store thickness and use it as the wall box Y or X size in the layout.
 - `geometry_source` is one of `authored_sample`, `roomplan`, `four_photo_unmeasured`.
 - `blocks_claims` is a list of strings. Four-photo bundles set it to `["geometry", "realism"]`. Others use `[]`.
+- Optional keys, written by the RoomPlan normalizer and absent from authored scans; loaders accept their absence. `doors`, `windows` and `openings` are lists of `{"id", "wall_id", "size", "position", "yaw"}` (doors also carry `"is_open"`); `wall_id` is the id of the wall the surface sits in, or `null` when the export's parent is not one of the walls; `size` is `[width, 0, height]` as scanned. `floors` is a list of `{"id", "z", "corners"}` with `corners` a list of `[x, y]` floor-polygon points in the room frame and `z` the floor's height above z = 0. `story` and `story_count` are integers (which story this bundle holds, and how many the export had).
 - Reject files with `schema_version` other than `"1"`, or `units` other than `"meters"`, or `frame` other than `"z_up"`.
 
 ### Hero kitchen that must be committed
@@ -128,7 +129,13 @@ Yaw: the local +X axis (first column) mapped the same way, then `atan2` of its h
 
 Walls: treat each wall as a Y-up box whose center converts like an object. Project the box onto the floor and store `start` and `end` as the two endpoints of the long horizontal edge. `height` is `dimensions[1]`. `thickness` is the smaller of `dimensions[0]` and `dimensions[2]`.
 
-Object categories pass through unchanged (`sink`, `refrigerator`, `stove`, `oven`, `dishwasher`, `storage`, `table`, and the rest of RoomPlan's list). Counters are not a RoomPlan category. The compiler synthesizes counters; the normalizer does not invent them from nothing. If the sample RoomPlan fixture has no counters, the compiler still emits counter boxes for `sink` and `stove` as specified in the compiler section.
+Doors, windows and openings: each is a Surface with `dimensions [width, height, 0]`, a `transform` like a wall's, and `parentIdentifier` naming the wall it sits in. They convert like objects (center, size, yaw, then the same rotation and translation as the room) into `doors`, `windows` and `openings`. `wall_id` is the parent identifier when it matches a wall in the export, else `null`. A door's category is `{"door": {"isOpen": bool}}`; that becomes `is_open`.
+
+Floors: `polygonCorners` (iOS 17) lists the floor outline in the floor's local plane coordinates `[x, y, ~0]`, and the floor's `transform` maps them into the room. Each floor with 3 or more corners becomes a `floors` entry with the corners in the aligned Z-up frame and `z` relative to the floor height. On both public exports the polygon bounding box equals the wall bounding box. A floor without `polygonCorners` adds nothing, and the compiler falls back to the wall bounding box.
+
+Stories: `story` is an integer on the room, on every surface and on every object (iOS 17). A `CapturedStructure` export (several scans merged) carries a `rooms` array of CapturedRooms; the normalizer flattens it, tagging each element with its room's `story`. One story is kept per bundle: `to_bundle(..., story=n)` or `load(path, room_id, story=n)`, default the story with the most objects (lowest index on a tie). The floor height is measured on the kept story only. `story` and `story_count` are recorded in the bundle.
+
+Object categories pass through unchanged after snake-casing: `sink`, `refrigerator`, `stove`, `oven`, `dishwasher`, `storage`, `table`, `washer_dryer`, `chair`, `sofa`, `bed`, `bathtub`, `toilet`, `television`, `fireplace`, `stairs` (the full `CapturedRoom.Object.Category` list as of iOS 17). An object whose `dimensions` are missing or not positive gets the category's default size from `arrival.catalog.fixtures.DEFAULT_SIZES`. Counters are not a RoomPlan category. The compiler synthesizes counters; the normalizer does not invent them from nothing. If the sample RoomPlan fixture has no counters, the compiler still emits counter boxes for `sink` and `stove` as specified in the compiler section.
 
 Commit `scans/hero_kitchen/roomplan.json` containing the sink object above (translation x=1.6, y=0.85, z=-0.40) plus the four walls of the hero kitchen. A unit test normalizes it and checks the sink center equals `[1.6, 0.40, 0.85]` within `1e-6`, and size equals `[0.6, 0.5, 0.25]`.
 
@@ -157,9 +164,26 @@ Checked-in `roomplan.json` does not have to rebuild every fixture. The authored 
 | dishwasher | dishwasher |
 | storage | hinge_cabinet |
 | table | counter |
+| washer_dryer, chair, sofa, bed, bathtub, toilet, television, fireplace, stairs | box |
 | anything else | box |
 
-`table` uses `default_config_name: dining` when the type is counter. Unknown categories still appear in the layout so the scan is not silently dropped.
+`table` uses `default_config_name: dining` when the type is counter. Unknown categories still appear in the layout so the scan is not silently dropped. RoboCasa has no bed, sofa or bathtub fixture, so those categories stay `box` with their scanned size; `source_category` keeps the name.
+
+Default sizes (full extents `[x, y, z]`, meters), used when a scan object has no usable dimensions:
+
+| category | size | category | size |
+|---|---|---|---|
+| counter | 1.8, 0.65, 0.92 | washer_dryer | 0.6, 0.6, 0.85 |
+| sink | 0.6, 0.5, 0.25 | chair | 0.5, 0.5, 0.9 |
+| refrigerator | 0.75, 0.7, 1.8 | sofa | 2.0, 0.9, 0.85 |
+| stove | 0.7, 0.65, 0.9 | bed | 1.6, 2.0, 0.5 |
+| oven | 0.6, 0.6, 0.6 | bathtub | 1.7, 0.75, 0.55 |
+| dishwasher | 0.6, 0.6, 0.85 | toilet | 0.4, 0.7, 0.8 |
+| storage | 0.9, 0.5, 2.0 | television | 1.2, 0.1, 0.7 |
+| table | 1.4, 0.8, 0.75 | fireplace | 1.2, 0.4, 1.0 |
+| | | stairs | 1.0, 3.0, 2.7 |
+
+Island: a `counter` or `table` fixture between 0.85 m and 1.15 m tall whose footprint is more than 0.3 m from every wall compiles to type `counter` with `island: true` and no `default_config_name`. Dining tables (about 0.75 m) stay `counter` with `dining`. `storage` is never an island; a freestanding sideboard stays `hinge_cabinet`. The rule needs walls; a bundle without walls never flags an island.
 
 Object labels:
 
@@ -225,11 +249,13 @@ main_group:
       pos: [1.2, 0.4, 0.46]
 ```
 
-Wall `pos` is the segment midpoint at half height: `[ (start.x+end.x)/2, (start.y+end.y)/2, height/2 ]`. Wall `size` is `[length, thickness, height]` for walls whose long axis is X, and `[thickness, length, height]` for walls whose long axis is Y. Floor `size` is `[width, depth, 0.02]` from the wall bounding box, `pos` at the bbox center with z `0`.
+Wall `pos` is the segment midpoint at half height: `[ (start.x+end.x)/2, (start.y+end.y)/2, height/2 ]`. Wall `size` is `[length, thickness, height]` for walls whose long axis is X, and `[thickness, length, height]` for walls whose long axis is Y. Floor `size` is `[width, depth, 0.02]` from the wall bounding box, `pos` at the bbox center with z `0`. When the twin has `floors` with corners, the bounding box of those corners is used instead.
 
 Counter synthesis (only when the scan has a sink or stove and no counter within 0.3 m horizontally): emit a counter of size `[max(fixture.size[0] + 0.4, 1.2), 0.65, 0.92]`, centered on the fixture's x,y, with z `0.46`. The authored sample already has counters, so this branch is covered by a unit test with a sink-only bundle, not by the hero scan.
 
 Do not emit backing walls.
+
+The twin copies `doors`, `windows`, `openings`, `floors`, `story` and `story_count` from the bundle when present, unchanged, and a fixture flagged as an island carries `island: true`; that flag is also written on its `layout.yaml` row. Doors and windows are not written to `layout.yaml` and the sim does not draw them yet.
 
 ## Tasks
 
