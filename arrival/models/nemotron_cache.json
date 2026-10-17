@@ -1,0 +1,32 @@
+{
+  "pick up the mug from the counter and place it in the sink.::['bowl_1', 'mug_1']::['counter_a', 'counter_b', 'fridge_1', 'sink_1', 'stove_1']": {
+    "family": "counter_to_sink",
+    "object": "mug_1",
+    "target": "sink_1"
+  },
+  "move the mug off the counter into the sink.::['bowl_1', 'mug_1']::['counter_a', 'counter_b', 'fridge_1', 'sink_1', 'stove_1']": {
+    "family": "counter_to_sink",
+    "object": "mug_1",
+    "target": "sink_1"
+  },
+  "open the top drawer.::['bowl_1', 'mug_1']::['counter_a', 'counter_b', 'fridge_1', 'sink_1', 'stove_1']": {
+    "family": "open_drawer",
+    "object": null,
+    "target": null
+  },
+  "pull the top drawer of the counter a open.::['bowl_1', 'mug_1']::['counter_a', 'counter_b', 'fridge_1', 'sink_1', 'stove_1']": {
+    "family": "open_drawer",
+    "object": null,
+    "target": null
+  },
+  "open the cabinet door.::['bowl_1', 'mug_1']::['counter_a', 'counter_b', 'fridge_1', 'sink_1', 'stove_1']": {
+    "family": "open_door",
+    "object": null,
+    "target": null
+  },
+  "put the bowl onto the other counter.::['bowl_1', 'mug_1']::['counter_a', 'counter_b', 'fridge_1', 'sink_1', 'stove_1']": {
+    "family": "counter_to_counter",
+    "object": "bowl_1",
+    "target": "counter_b"
+  }
+}

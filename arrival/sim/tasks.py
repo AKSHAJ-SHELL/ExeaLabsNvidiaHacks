@@ -31,10 +31,12 @@ def _fx(twin: dict, fid: str) -> dict:
 
 
 def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: int = 0, holdout: bool = False,
+               split: str = "train", use_generated_instructions: bool = False,
                log=print) -> list[dict]:
     """n task variations cycling through the requested families; unreachable families are skipped and logged.
     holdout=False draws the training set: wording HOLDOUT_WORDING (families with 4 templates) and HOLDOUT_OFFSET
-    are excluded. holdout=True draws only those; families with 3 templates keep all 3 either way."""
+    are excluded. holdout=True draws only those; families with 3 templates keep all 3 either way.
+    use_generated_instructions draws from the Nemotron cache (or the template fallback) for `split` instead."""
     rng = random.Random(seed)
     counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
     sinks = [f for f in twin["fixtures"] if f["type"] == "sink"]
@@ -93,11 +95,19 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
         fam = fams[i % len(fams)]
         v = dict(rng.choice(pools[fam]))
         light = rng.choice(LIGHTING)
-        words = SIM_WORDINGS[fam]
-        w = rng.choice([k for k in range(len(words)) if len(words) <= HOLDOUT_WORDING or (k == HOLDOUT_WORDING) == holdout])
         name = v.get("object_label") or v.get("name")
+        if use_generated_instructions:
+            from arrival.tasks.instructions import generate_instructions
+            gen = generate_instructions(fam, object_name=v.get("object_label"), fixture_name=v.get("name"))
+            options = gen.get(split, gen.get("train", SIM_WORDINGS[fam]))
+            w = rng.randrange(len(options))
+            instr = options[w]
+        else:
+            words = SIM_WORDINGS[fam]
+            w = rng.choice([k for k in range(len(words)) if len(words) <= HOLDOUT_WORDING or (k == HOLDOUT_WORDING) == holdout])
+            instr = words[w].format(name=name)
         t = {"family": fam, "lighting": light, "wording_index": w, "people": people, "seed": seed * 1000 + i,
-             "holdout": holdout, "instruction": words[w].format(name=name), **v}
+             "holdout": holdout, "instruction": instr, "split": split, **v}
         if "start" in v:
             off = rng.choice([o for o in POSE_OFFSETS if (list(o) == HOLDOUT_OFFSET) == holdout])
             t["start"] = [v["start"][0] + off[0], v["start"][1] + off[1] * 0.5,

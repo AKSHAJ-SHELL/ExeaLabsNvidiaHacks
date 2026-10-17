@@ -12,6 +12,7 @@ import json
 import os
 import re
 import urllib.request
+from pathlib import Path
 
 import numpy as np
 
@@ -232,14 +233,43 @@ def rule_plan(instruction: str, objects: list[str], fixtures: list[str]) -> dict
 
 
 class VLMPlanner:
-    """Turns an instruction + scene inventory into a plan JSON with Nemotron; falls back to rule_plan."""
+    """Turns an instruction + scene inventory into a plan JSON with Nemotron; falls back to rule_plan.
+    Maintains a response cache so tests and repeated runs execute offline without network."""
 
-    def __init__(self, log=print):
+    def __init__(self, log=print, cache_path: Path | str | None = None):
         self.log = log
         self.source = None
+        self.cache_path = Path(cache_path) if cache_path else Path(__file__).resolve().parents[1] / "models" / "nemotron_cache.json"
+        self._cache = self._load_cache()
+
+    def _cache_key(self, instruction: str, objects: list[str], fixtures: list[str]) -> str:
+        return f"{instruction.strip().lower()}::{sorted(objects)}::{sorted(fixtures)}"
+
+    def _load_cache(self) -> dict:
+        if self.cache_path and self.cache_path.is_file():
+            try:
+                return json.loads(self.cache_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                self.log(f"[sim] VLMPlanner: cache load failed ({e!r}); starting with empty cache")
+                return {}
+        return {}
+
+    def _save_cache(self) -> None:
+        if not self.cache_path:
+            return
+        try:
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self.cache_path.write_text(json.dumps(self._cache, indent=2) + "\n", encoding="utf-8")
+        except Exception as e:
+            self.log(f"[sim] VLMPlanner: warning, could not write cache to {self.cache_path}: {e}")
 
     def plan(self, instruction: str, objects: list[str], fixtures: list[str]) -> dict:
         from arrival.models.token_factory import TokenFactoryNotConfigured, complete
+
+        key = self._cache_key(instruction, objects, fixtures)
+        if key in self._cache:
+            self.source = "cache"
+            return dict(self._cache[key])
 
         try:
             txt = complete([{"role": "system", "content": "Return only JSON: {\"family\": one of counter_to_sink|"
@@ -248,6 +278,8 @@ class VLMPlanner:
                                                                     "fixtures": fixtures})}], role="super")
             plan = json.loads(re.search(r"\{.*\}", txt, re.S).group(0))
             self.source = "token_factory"
+            self._cache[key] = plan
+            self._save_cache()
         except TokenFactoryNotConfigured as e:
             self.log(f"[sim] VLMPlanner: Token Factory not configured ({e}); using rule-based parser")
             plan, self.source = rule_plan(instruction, objects, fixtures), "rule_based"
