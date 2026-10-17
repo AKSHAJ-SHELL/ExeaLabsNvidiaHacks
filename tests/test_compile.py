@@ -85,7 +85,8 @@ def test_place_default_objects_seeded():
     fx = [{"id": "s", "category": "sink", "size": [0.6, 0.5, 0.25], "position": [1.6, 0.4, 0.85], "yaw": 0}]
     a, b = compile_twin(_bundle(fx)), compile_twin(_bundle(fx))
     pa, pb = place_default_objects(a, seed=3), place_default_objects(b, seed=3)
-    assert pa == pb and {o["label"] for o in pa} == {"mug", "bowl"}
+    assert pa == pb and {o["label"] for o in pa} == {"mug", "bowl", "plate", "cup", "apple"}
+    assert pa[0]["size"] != [0.08, 0.08, 0.1] and 0.07 < pa[0]["size"][0] < 0.09  # seeded size, not the nominal
     counter = next(f for f in a["fixtures"] if f["type"] == "counter")
     assert all(on_counter(o, counter) for o in pa)
 

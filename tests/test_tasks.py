@@ -79,6 +79,6 @@ def test_real_format_kitchen_produces_tasks():
     assert {f["category"] for f in b["fixtures"]} == {"sink", "stove"}
     assert all(f["yaw"] == 0.0 for f in b["fixtures"])  # aligned + snapped
     twin = compile_twin(b)
-    assert len(place_default_objects(twin, seed=0)) == 2
+    assert {o["label"] for o in place_default_objects(twin, seed=0)} >= {"mug", "bowl"}  # plus whatever else fits
     tasks = propose(twin)["tasks"]
     assert {t["family"] for t in tasks} == {"counter_to_sink", "counter_to_counter"}
