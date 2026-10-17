@@ -71,7 +71,7 @@ The normalizer unwraps Apple's keyed enums (`{"sink": {}}` -> `sink`, `washerDry
 
 - **Articulated kitchen** from the twin: counters, sink, stove, fridge, cabinets, with drawers on slide joints and doors on hinge joints.
 - **Arm**: a procedurally built 7-DoF Panda-like arm (not the Franka asset) driven through IK, so joint states in the dataset are the simulated joint positions, plus a parallel gripper that holds objects by friction contact.
-- **People**: kinematic bodies walking scripted paths through the room. They move and occlude; they are not simulated humans.
+- **People**: kinematic bodies walking seeded loops through the room: a free point, a lane that crosses behind the robot base, a 2 to 4 s stop at the counter, back out. They move and occlude; they are not simulated humans and they do not collide. `arrival/sim/safety.py` measures the horizontal clearance between every robot collision geom and each person every control step; an episode whose minimum reaches 0 is a human contact and is dropped from the dataset even when the task succeeded. The value is written per episode as `arrival_min_human_distance_m` and `arrival_human_contact` in `meta/episodes.jsonl`.
 - **Cameras**: rendered with MuJoCo's offscreen renderer.
 - **Policies** behind one interface: a scripted expert (default), a VLM planner via Nebius Token Factory (needs `TOKEN_FACTORY_API_KEY`; placeholder until a key is set), and a VLA client for a GR00T policy server (placeholder; no server is shipped or run here).
 - **Success is checked in physics** (object resting in the target region, drawer/door joint past threshold), not asserted by the script.
@@ -95,6 +95,16 @@ Status as of Oct 14 (scripted expert, friction grasps, physics-checked):
 
 Defaults are `counter_to_sink,open_drawer`. `--families all` includes the broken ones (their failures are dropped and counted). The VLM planner is not yet wired into `collect()`, and the VLA client has never run against a real GR00T server.
 
+### Closed-loop eval
+
+```bash
+python -m arrival eval --policy scripted --families counter_to_sink,open_drawer --episodes 4 --people 2
+python -m arrival eval --holdout            # wording template 4 and the [0, +0.08] start offset (docs/07-eval.md)
+python -m arrival eval --policy vla         # needs GR00T_POLICY_URL; exits 2 with a message when unset or unreachable
+```
+
+`eval` runs `--episodes` episodes per family through the same `SimEnv` and `run_episode` as `sim`, writes no dataset, prints a table, and writes `out/eval/<room>_<policy>.json` (shape in [04-contracts.md](04-contracts.md)). Per family: episodes, successes, success rate with a Wilson 95% interval, mean sim seconds (frames / 20), mean wall seconds, human contacts, the smallest robot-human distance seen, and the largest IK residual. A human contact counts as a failure. The eval is sim-in-the-twin only; nothing here scores a real robot.
+
 What this is not: MuJoCo frames are not a Gaussian splat of the room, episodes are not MimicGen output, and no policy was trained on them. Read `arrival_generator` and `arrival_physically_valid` in the sim dataset's `meta/info.json` before using it.
 
 ## Output layout
@@ -117,6 +127,7 @@ out/
   datasets/hero_kitchen_sim/ MuJoCo sim dataset (same layout, ego_view + wrist videos)
   previews/                 sim contact sheets and overview mp4s (--save-preview)
   reports/hero_kitchen.json attempts, successes, dropped, seconds, demos/hour, dollars
+  eval/hero_kitchen_scripted.json   closed-loop eval: per-family success, Wilson 95%, time, human contacts
   jobs/<job_id>/            upload.bin, status.json
 ```
 
@@ -177,6 +188,6 @@ Not built yet, and not claimed anywhere in the outputs:
 - Gaussian splat training or compositing (`arrival/render/splat.py` is a stub).
 - Cosmos restyle of frames.
 - Nebius Serverless fan-out of generation jobs.
-- GR00T fine-tune (command above, not run) and any policy evaluation.
+- GR00T fine-tune (command above, not run). `python -m arrival eval` scores policies in the sim; it has only been run with the scripted expert.
 - RoboCasa-native layout conventions: `layout.yaml` is a subset emitter (world-frame `pos`, `z_rot` on oblique walls), not loadable by RoboCasa as-is.
 

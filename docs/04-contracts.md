@@ -417,6 +417,8 @@ One file per episode. `index` counts successful-episode frames only, starting at
 
 Unique instruction strings get unique task indexes, assigned in first-seen order.
 
+The `sim` dataset adds per-episode fields to `episodes.jsonl`: `arrival_family`, `arrival_lighting`, `arrival_people` (count), `arrival_success_detail`, `arrival_people_xy` (subsampled walker positions), `arrival_min_human_distance_m` (smallest horizontal clearance between a robot collision geom and a person over the episode, metres; `null` with no people) and `arrival_human_contact` (bool; always `false` in a written dataset because contact episodes are dropped before export).
+
 ### info.json
 
 Include at least:
@@ -502,6 +504,47 @@ Include at least:
 ```
 
 `demos_per_hour = successes / seconds * 3600`. `seconds` is wall time of the generate-and-export call.
+
+The `sim` report (`out/reports/<room_id>_sim.json`) adds `human_contacts` (total and per family): attempts dropped because a robot geom reached a person. Those attempts count in `attempts` and `dropped`, never in `successes`.
+
+## Eval
+
+`out/eval/<room_id>_<policy>.json`, written by `python -m arrival eval`.
+
+```json
+{
+  "room_id": "hero_kitchen",
+  "policy": "scripted",
+  "episodes_per_family": 4,
+  "seed": 0,
+  "people": 2,
+  "holdout": false,
+  "resolution": 128,
+  "families": {
+    "counter_to_sink": {
+      "episodes": 4,
+      "successes": 4,
+      "success_rate": 1.0,
+      "wilson_95": [0.5101, 1.0],
+      "mean_seconds": 8.8,
+      "mean_wall_seconds": 1.7,
+      "human_contacts": 0,
+      "min_human_distance_m": 0.222,
+      "ik_error_max": 0.0123
+    }
+  },
+  "totals": {
+    "episodes": 4,
+    "successes": 4,
+    "success_rate": 1.0,
+    "wilson_95": [0.5101, 1.0],
+    "human_contacts": 0,
+    "wall_seconds": 9.2
+  }
+}
+```
+
+`holdout: true` means every task used wording template 4 and the start offset `[0, +0.08]` where the family has them; `sim` datasets never contain those (the sim applies half the y offset, so the held-out start is +0.04 m in y). `success_rate = successes / episodes`, where an episode with a human contact is a failure whatever the physics check said. `wilson_95` is the Wilson score interval at z = 1.96. `mean_seconds` is sim time, frames / 20. `min_human_distance_m` is the minimum over episodes (`null` with `people` 0); a negative value is the depth of the worst overlap. `ik_error_max` is `null` for policies without an IK residual.
 
 ## Validator
 

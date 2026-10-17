@@ -26,6 +26,8 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 |---|---|
 | Scan → twin | ✅ Works on the sample kitchen and on 2 real public iPhone RoomPlan exports. ⚠️ No iPhone capture app yet |
 | Simulation: kitchen, drawers, doors, people | ✅ Works. MuJoCo, built from the twin |
+| People: interactions + safety metric | ✅ Walkers stop at the counter and cross behind the robot. Every episode records the minimum robot-human distance; episodes with contact are dropped. ⚠️ Nobody opens the fridge yet |
+| Closed-loop eval harness | ✅ `python -m arrival eval` scores N episodes per family (success, time, human contacts, Wilson 95%). ⚠️ Only the scripted expert has been scored; the VLA cell needs a GR00T server (POL-3) |
 | Robot: pick mug → sink | ✅ 100% success, friction grasp, physics-checked |
 | Robot: open drawer | ✅ 100% success |
 | Robot: open door | ❌ 0%. The arm's arc path doesn't move the door yet (task MAN-2) |
@@ -69,6 +71,7 @@ Other commands:
 python -m arrival demo --episodes 1000                         # fast scripted placeholder dataset
 python -m arrival demo --room hero_kitchen --from-roomplan     # build from a RoomPlan JSON export
 python -m arrival sim --families all                           # include the not-yet-working tasks
+python -m arrival eval --episodes 4 --people 2                 # score a policy closed-loop, no dataset written
 ```
 
 Full usage, output layout, credentials and cost tracking are in **[docs/REFERENCE.md](docs/REFERENCE.md)**.
@@ -175,14 +178,14 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 ### PPL: People & safety (2)
 
 - **PPL-1: Better humans.** Proportioned bodies with walking leg and arm swing, varied clothing colours and heights, and no clipping through counters.
-- **PPL-2: Interactions.** People who stop at the counter, open the fridge, and cross the robot's path. Add a safety metric (minimum robot–human distance) to the episode data, and drop episodes with contact.
+- **PPL-2: Interactions.** People who stop at the counter, open the fridge, and cross the robot's path. Add a safety metric (minimum robot–human distance) to the episode data, and drop episodes with contact. *Done except the fridge: walkers pause at the counter and cross behind the base, `arrival/sim/safety.py` records the distance, contact episodes are dropped. Opening the fridge needs the door hinge driven by a person, which is still open.*
 
 ### POL: Policy, VLA & VLM (4)
 
 - **POL-1: VLM planner in the loop.** Wire `VLMPlanner` (Nemotron via Token Factory) into `collect()`: instruction plus scene → task plan → expert. Cache responses so tests stay offline.
 - **POL-2: Instruction generation.** Use Nemotron Lightning to create varied instruction wordings per task. Keep a held-out set for evaluation.
 - **POL-3: GR00T policy server.** Run GR00T N1.7 inference (H100 or L40S), connect `VLAClient` via `GR00T_POLICY_URL`, and run closed-loop episodes in the sim.
-- **POL-4: Closed-loop eval harness.** Score N episodes per task for any policy (success rate, time, collisions) in the scanned room.
+- **POL-4: Closed-loop eval harness.** Score N episodes per task for any policy (success rate, time, collisions) in the scanned room. *Built: `python -m arrival eval` (`arrival/eval/harness.py`), see docs/07-eval.md. Still open: run it against a live GR00T server once POL-3 lands, and count arm-fixture collisions, not only human contact.*
 
 ### DAT: Data & training (3)
 

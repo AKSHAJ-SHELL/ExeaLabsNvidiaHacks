@@ -42,6 +42,12 @@ Blocked when `blocks_claims` contains `realism` (the four-photo bundle).
 
 Tonight: no scan frames with poses are in the repo. `realism` is `null`.
 
+## What runs today
+
+`python -m arrival eval --policy scripted|vla --families <list|all> --episodes N --seed S --people P [--holdout]` is the harness for the usefulness protocol, sim-in-the-twin only. It runs N episodes per family through the same MuJoCo env and physics success check as `sim`, writes no dataset, and reports per family: success rate with a Wilson 95% interval, mean sim time (frames / 20 Hz), mean wall time, human contacts, the smallest robot-human distance, and the largest IK residual. An episode in which the robot reaches a person is a failure. The split above is enforced in `arrival/sim/tasks.py`: `sim` datasets never contain wording template 4 or the start offset `[0, +0.08]`, and `--holdout` draws only those (`open_drawer` and `open_door` have three wordings and no start pose, so they keep all three either way). The sim applies half the y offset, so the held-out start is +0.04 m in y. The output is `out/eval/<room>_<policy>.json`, shape in [04-contracts.md](04-contracts.md).
+
+What it does not do yet: the success rule above (0.05 m of the target point, gripper open) is not what it checks; it uses the physics rule from `collect.py` (object resting inside the target fixture, or the joint past its threshold). It does not count arm-fixture collisions. `--policy vla` has only been run far enough to confirm it stops with a message when `GR00T_POLICY_URL` is unset; the three cells need a GR00T server (POL-3) and a fine-tune (DAT-2). With 4 episodes per family the Wilson interval is 0.5 wide; the protocol's 50 per cell brings it to about 0.1.
+
 ## What a demo video may say
 
 If a video is cut later, it may show the local page, the schematic frames, and the dataset folder. It must say the motion is a scripted placeholder in simulation. It must not show a physical robot, a splat, or a fine-tuned policy unless those were actually run.

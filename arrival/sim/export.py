@@ -53,6 +53,8 @@ class SimDatasetWriter:
         self.episodes.append({"episode_index": i, "tasks": [instr], "length": n, "arrival_family": task["family"],
                               "arrival_lighting": task["lighting"], "arrival_people": task.get("people", 0),
                               "arrival_success_detail": ep["detail"],
+                              "arrival_min_human_distance_m": ep["safety"]["min_human_distance_m"],
+                              "arrival_human_contact": ep["safety"]["human_contact"],
                               "arrival_people_xy": ep["people_xy"][:: max(1, n // 20)]})
         self.stats.append({"episode_index": i, "stats": {"observation.state": _stats(s), "action": _stats(a)}})
         self.total_frames += n
