@@ -96,7 +96,7 @@ def write_video(path: Path, frames: np.ndarray, fps: int) -> None:
     import imageio.v2 as imageio
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with imageio.get_writer(str(path), fps=fps, codec="libx264", pixelformat="yuv420p",
+    with imageio.get_writer(str(path), fps=fps, format="FFMPEG", codec="libx264", pixelformat="yuv420p",
                             macro_block_size=16, ffmpeg_log_level="error") as w:
         for f in frames:
             w.append_data(f)

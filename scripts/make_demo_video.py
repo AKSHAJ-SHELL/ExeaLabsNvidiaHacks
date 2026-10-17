@@ -328,7 +328,7 @@ def main() -> None:
     frames = [f for seg in segments for f in fade_in(seg)]
 
     mp4 = MEDIA / "demo.mp4"
-    with imageio.get_writer(mp4, fps=FPS, codec="libx264", pixelformat="yuv420p", macro_block_size=1,
+    with imageio.get_writer(mp4, fps=FPS, format="FFMPEG", codec="libx264", pixelformat="yuv420p", macro_block_size=1,
                             ffmpeg_params=["-crf", "20", "-preset", "slow", "-movflags", "+faststart"]) as w:
         for f in frames:
             w.append_data(np.asarray(f))
