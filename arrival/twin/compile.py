@@ -15,6 +15,7 @@ from arrival.catalog.objects import catalog_id
 COUNTER_DEPTH = 0.65
 COUNTER_HEIGHT = 0.92
 SYNTH_RADIUS = 0.3
+ADJACENT_GAP = 0.05  # an appliance this close to a counter's footprint is built in beside it
 DEFAULT_OBJECTS = (("mug", [0.08, 0.08, 0.1]), ("bowl", [0.14, 0.14, 0.06]))
 PLACE_MARGIN = 0.08
 
@@ -41,14 +42,22 @@ def _rect_distance(xy: list[float], fixture: dict) -> float:
     return math.hypot(max(abs(lx) - sx / 2, 0.0), max(abs(ly) - sy / 2, 0.0))
 
 
+def _footprint_gap(f: dict, counter: dict) -> float:
+    """Horizontal gap between a fixture's footprint (centre and corners) and a counter's footprint."""
+    hx, hy = f["size"][0] / 2, f["size"][1] / 2
+    pts = [f["position"][:2]] + [to_world((dx, dy), f) for dx in (-hx, hx) for dy in (-hy, hy)]
+    return min(_rect_distance(list(p), counter) for p in pts)
+
+
 def _synth_counters(fixtures: list[dict]) -> list[dict]:
     counters = [f for f in fixtures if f["type"] == "counter"]
     out = []
     for f in fixtures:
         if f["source_category"] not in ("sink", "stove"):
             continue
-        if any(_rect_distance(f["position"], c) <= SYNTH_RADIUS for c in counters + out):
-            continue
+        if any(_rect_distance(f["position"], c) <= SYNTH_RADIUS or _footprint_gap(f, c) <= ADJACENT_GAP
+               for c in counters + out):
+            continue  # set into a counter, or built in beside one (a stove between two counters)
         out.append({
             "id": f"counter_synth_{f['id']}",
             "type": "counter",

@@ -27,8 +27,8 @@ Implement these shapes. Field names are exact.
     {
       "id": "counter_a",
       "category": "counter",
-      "size": [2.0, 0.65, 0.92],
-      "position": [1.2, 0.4, 0.46],
+      "size": [1.45, 0.65, 0.92],
+      "position": [1.475, 0.4, 0.46],
       "yaw": 0.0
     }
   ],
@@ -68,18 +68,18 @@ Fixtures:
 
 | id | category | size | position | yaw |
 |---|---|---|---|---|
-| counter_a | counter | [2.0, 0.65, 0.92] | [1.2, 0.40, 0.46] | 0 |
+| counter_a | counter | [1.45, 0.65, 0.92] | [1.475, 0.40, 0.46] | 0 |
 | sink_1 | sink | [0.60, 0.50, 0.25] | [1.6, 0.40, 0.85] | 0 |
-| counter_b | counter | [1.6, 0.65, 0.92] | [3.2, 0.40, 0.46] | 0 |
-| fridge_1 | refrigerator | [0.75, 0.70, 1.80] | [0.45, 0.40, 0.90] | 0 |
-| stove_1 | stove | [0.70, 0.65, 0.90] | [2.6, 0.40, 0.45] | 0 |
+| counter_b | counter | [1.1, 0.65, 0.92] | [3.45, 0.40, 0.46] | 0 |
+| fridge_1 | refrigerator | [0.75, 0.70, 1.80] | [0.375, 0.40, 0.90] | 0 |
+| stove_1 | stove | [0.70, 0.65, 0.90] | [2.55, 0.40, 0.45] | 0 |
 
 Objects:
 
 | id | label | size | position |
 |---|---|---|---|
 | mug_1 | mug | [0.08, 0.08, 0.10] | [1.0, 0.35, 0.97] |
-| bowl_1 | bowl | [0.14, 0.14, 0.06] | [0.8, 0.45, 0.95] |
+| bowl_1 | bowl | [0.14, 0.14, 0.06] | [1.15, 0.45, 0.95] |
 | sponge_1 | sponge | [0.10, 0.06, 0.03] | [3.3, 0.35, 0.935] |
 
 `room_id` is `hero_kitchen`. `geometry_source` is `authored_sample`.
@@ -188,8 +188,8 @@ Object labels:
     {
       "id": "counter_a",
       "type": "counter",
-      "size": [2.0, 0.65, 0.92],
-      "position": [1.2, 0.4, 0.46],
+      "size": [1.45, 0.65, 0.92],
+      "position": [1.475, 0.4, 0.46],
       "yaw": 0.0,
       "source_category": "counter"
     }
@@ -221,13 +221,13 @@ main_group:
   bottom_row:
     - name: counter_a
       type: counter
-      size: [2.0, 0.65, 0.92]
-      pos: [1.2, 0.4, 0.46]
+      size: [1.45, 0.65, 0.92]
+      pos: [1.475, 0.4, 0.46]
 ```
 
 Wall `pos` is the segment midpoint at half height: `[ (start.x+end.x)/2, (start.y+end.y)/2, height/2 ]`. Wall `size` is `[length, thickness, height]` for walls whose long axis is X, and `[thickness, length, height]` for walls whose long axis is Y. Floor `size` is `[width, depth, 0.02]` from the wall bounding box, `pos` at the bbox center with z `0`.
 
-Counter synthesis (only when the scan has a sink or stove and no counter within 0.3 m horizontally): emit a counter of size `[max(fixture.size[0] + 0.4, 1.2), 0.65, 0.92]`, centered on the fixture's x,y, with z `0.46`. The authored sample already has counters, so this branch is covered by a unit test with a sink-only bundle, not by the hero scan.
+Counter synthesis (only when the scan has a sink or stove whose centre is more than 0.3 m from every counter footprint and whose own footprint is more than 0.05 m from every counter, so a stove built in between two counters gets none): emit a counter of size `[max(fixture.size[0] + 0.4, 1.2), 0.65, 0.92]`, centered on the fixture's x,y, with z `0.46`. The authored sample already has counters, so this branch is covered by a unit test with a sink-only bundle, not by the hero scan.
 
 Do not emit backing walls.
 

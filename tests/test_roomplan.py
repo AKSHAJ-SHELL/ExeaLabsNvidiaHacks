@@ -124,3 +124,40 @@ def test_keyed_enum_camelcase_and_low_confidence():
     assert [f["category"] for f in b["fixtures"]] == ["washer_dryer"]
     assert b["fixtures"][0]["position"][2] == pytest.approx(0.5)
     assert b["walls"][0]["thickness"] > 0
+
+
+def _footprint(f):
+    (cx, cy, _), (sx, sy, _) = f["position"], f["size"]
+    return cx - sx / 2, cx + sx / 2, cy - sy / 2, cy + sy / 2
+
+
+def _overlap(a, b, tol=1e-6):
+    ax0, ax1, ay0, ay1 = _footprint(a)
+    bx0, bx1, by0, by1 = _footprint(b)
+    return ax0 < bx1 - tol and bx0 < ax1 - tol and ay0 < by1 - tol and by0 < ay1 - tol
+
+
+def test_hero_fixtures_tile_without_overlap(hero_bundle):
+    fx = {f["id"]: f for f in hero_bundle["fixtures"]}
+    sink = fx.pop("sink_1")  # the sink is inset into counter_a by design
+    pairs = [(a, b) for i, a in enumerate(fx.values()) for b in list(fx.values())[i + 1:]]
+    clashes = [(a["id"], b["id"]) for a, b in pairs if _overlap(a, b)]
+    assert not clashes, clashes
+    cx0, cx1, _, _ = _footprint(fx["counter_a"])
+    sx0, sx1, _, _ = _footprint(sink)
+    assert cx0 <= sx0 and sx1 <= cx1
+    for f in fx.values():
+        x0, x1, _, _ = _footprint(f)
+        assert 0.0 <= x0 and x1 <= 4.0
+
+
+def test_hero_objects_rest_on_a_counter_outside_appliances(hero_bundle):
+    fixtures = hero_bundle["fixtures"]
+    counters = [f for f in fixtures if f["category"] == "counter"]
+    appliances = [f for f in fixtures if f["category"] in ("refrigerator", "stove")]
+    for o in hero_bundle["objects"]:
+        x0, x1, y0, y1 = _footprint(o)
+        inside = [c for c in counters if _footprint(c)[0] <= x0 and x1 <= _footprint(c)[1]
+                  and _footprint(c)[2] <= y0 and y1 <= _footprint(c)[3]]
+        assert inside, (o["id"], "not fully on a counter top")
+        assert not [a for a in appliances if _overlap(o, a)], (o["id"], "inside an appliance")

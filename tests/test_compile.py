@@ -88,3 +88,18 @@ def test_place_default_objects_seeded():
     assert pa == pb and {o["label"] for o in pa} == {"mug", "bowl"}
     counter = next(f for f in a["fixtures"] if f["type"] == "counter")
     assert all(on_counter(o, counter) for o in pa)
+
+
+def test_stove_between_counters_gets_no_synthesized_counter():
+    from arrival.twin.compile import compile_twin
+
+    bundle = {"schema_version": "1", "room_id": "r", "units": "meters", "frame": "z_up",
+              "geometry_source": "authored_sample", "blocks_claims": [], "walls": [], "objects": [],
+              "fixtures": [
+                  {"id": "left", "category": "counter", "size": [1.0, 0.65, 0.92], "position": [0.5, 0.4, 0.46], "yaw": 0},
+                  {"id": "stove", "category": "stove", "size": [0.7, 0.65, 0.9], "position": [1.35, 0.4, 0.45], "yaw": 0},
+                  {"id": "right", "category": "counter", "size": [1.0, 0.65, 0.92], "position": [2.2, 0.4, 0.46], "yaw": 0},
+                  {"id": "lone", "category": "stove", "size": [0.7, 0.65, 0.9], "position": [1.35, 2.5, 0.45], "yaw": 0}]}
+    ids = [f["id"] for f in compile_twin(bundle)["fixtures"]]
+    assert "counter_synth_stove" not in ids  # flanked by counters: no phantom counter over the neighbours
+    assert "counter_synth_lone" in ids  # a stove with nothing around it still gets a counter
