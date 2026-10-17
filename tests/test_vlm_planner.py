@@ -138,7 +138,7 @@ def _planner_with_reply(monkeypatch, tmp_path, reply):
 
 
 def test_planner_rejects_unknown_family_and_does_not_cache(monkeypatch, tmp_path):
-    planner = _planner_with_reply(monkeypatch, tmp_path, 'Sure {"family": "open_oven", "object": null, "target": null}')
+    planner = _planner_with_reply(monkeypatch, tmp_path, 'Sure {"family": "fold_laundry", "object": null, "target": null}')
     plan = planner.plan("Open the cabinet door", ["mug_1"], ["counter_a"])
     assert planner.source == "rule_based" and plan["family"] == "open_door"
     assert not (tmp_path / "c.json").exists()
