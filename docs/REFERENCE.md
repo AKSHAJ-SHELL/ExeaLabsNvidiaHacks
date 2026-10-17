@@ -88,10 +88,14 @@ Status as of Oct 14 (scripted expert, friction grasps, physics-checked):
 
 | Family | Success | Note |
 |---|---|---|
-| `counter_to_sink` | 100% | mug only; the bowl is wider than the gripper |
+| `counter_to_sink` | 100% | mug, and the bowl held by its rim |
 | `open_drawer` | 100% | both counters |
 | `open_door` | 100% | both cabinet doors, 8/8 over two seeds; the door ends at about 70° (threshold 60°) |
 | `counter_to_counter` | skipped | pick point and target about 2 m apart, base is fixed per episode. Needs a mobile base |
+| `close_drawer` | 100% | starts open 0.30 m, pushed shut on the handle bar; success is the slide joint under 0.03 m |
+| `close_door` | 100% | starts open 70°, pushed shut along its arc; success is the hinge under 5° |
+| `put_in_drawer` | 100% | drawer starts open 0.14 m, mug set on the exposed part of the tray; success is the mug resting inside the tray |
+| `wipe_counter` | 100% | sponge pinched and dragged two strokes; success needs 0.4 m travelled pressed to the top and the sponge back on it |
 
 Defaults are `counter_to_sink,open_drawer`. `--families all` includes the broken ones (their failures are dropped and counted). The VLM planner is not yet wired into `collect()`, and the VLA client has never run against a real GR00T server.
 
