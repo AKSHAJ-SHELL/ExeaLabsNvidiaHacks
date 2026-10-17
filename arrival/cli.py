@@ -1,9 +1,10 @@
-"""python -m arrival demo | validate | serve"""
+"""python -m arrival demo | validate | serve | sim | eval"""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -111,22 +112,18 @@ def cmd_serve(a) -> int:
     return EXIT_OK
 
 
-def cmd_sim(a) -> int:
-    """MuJoCo sim of the compiled twin -> physics-checked demos with real joint states."""
+def _sim_args(a):
+    """Shared by sim and eval: (families, twin) or an error message."""
     try:
         import mujoco  # noqa: F401
     except ImportError:
-        print("mujoco is not installed: pip install -e '.[sim]'", file=sys.stderr)
-        return EXIT_USAGE
-    from arrival.sim.collect import collect
+        return "mujoco is not installed: pip install -e '.[sim]'"
     from arrival.sim.tasks import SIM_FAMILIES
 
     fams = list(SIM_FAMILIES) if a.families == "all" else [f.strip() for f in a.families.split(",") if f.strip()]
     bad = [f for f in fams if f not in SIM_FAMILIES]
     if bad or a.episodes < 1:
-        print(f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
-              file=sys.stderr)
-        return EXIT_USAGE
+        return f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1"
     twin_path = Path(a.out) / "twins" / a.room / "twin.json"
     if twin_path.is_file():
         twin = json.loads(twin_path.read_text())
@@ -135,16 +132,54 @@ def cmd_sim(a) -> int:
         from arrival.twin.compile import compile_twin
 
         twin = compile_twin(scan_bundle.load_room(a.room, Path(a.scans)))
+    return fams, twin
+
+
+def cmd_sim(a) -> int:
+    """MuJoCo sim of the compiled twin -> physics-checked demos with real joint states."""
+    args = _sim_args(a)
+    if isinstance(args, str):
+        print(args, file=sys.stderr)
+        return EXIT_USAGE
+    fams, twin = args
+    from arrival.sim.collect import collect
+
     res = collect(twin, fams, a.episodes, a.out, people=a.people, policy_name=a.policy, res=a.res,
                   seed=a.seed, save_preview=a.save_preview)
     r = res["report_data"]
     print(f"dataset: {res['dataset']}")
     print(f"report:  {res['report']}")
-    print(f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped, physics-checked) in "
-          f"{r['seconds']:.1f}s; per family: "
+    print(f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped, physics-checked, "
+          f"{r['human_contacts']} human contacts) in {r['seconds']:.1f}s; per family: "
           + ", ".join(f"{k} {v['successes']}/{v['attempts']}" for k, v in r["families"].items()))
     if a.save_preview:
         print(f"preview: {Path(a.out) / 'previews'}")
+    return EXIT_OK
+
+
+def cmd_eval(a) -> int:
+    """Closed-loop scoring of a policy in the twin; writes out/eval/<room>_<policy>.json, no dataset."""
+    args = _sim_args(a)
+    if isinstance(args, str):
+        print(args, file=sys.stderr)
+        return EXIT_USAGE
+    fams, twin = args
+    from arrival.eval.harness import evaluate, table
+    from arrival.sim.policy import VLANotConfigured
+
+    try:
+        rep = evaluate(twin, fams, a.episodes, policy_name=a.policy, seed=a.seed, people=a.people,
+                       holdout=a.holdout, res=a.res, out_dir=a.out)
+    except VLANotConfigured as e:
+        print(f"policy vla: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    except OSError as e:  # URLError is an OSError: the policy server did not answer
+        if a.policy != "vla":
+            raise
+        print(f"policy vla: no answer from {os.environ.get('GR00T_POLICY_URL')}: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    print(table(rep))
+    print(f"eval: {rep['path']}")
     return EXIT_OK
 
 
@@ -182,6 +217,19 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--seed", type=int, default=0)
     m.add_argument("--save-preview", action="store_true")
     m.set_defaults(fn=cmd_sim)
+    e = sub.add_parser("eval", help="score a policy closed-loop in the sim: success, time, human contacts")
+    e.add_argument("--room", default="hero_kitchen")
+    e.add_argument("--policy", choices=["scripted", "vla"], default="scripted")
+    e.add_argument("--families", default="counter_to_sink,open_drawer",
+                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door")
+    e.add_argument("--episodes", type=int, default=4, help="episodes per family")
+    e.add_argument("--seed", type=int, default=0)
+    e.add_argument("--people", type=int, default=2)
+    e.add_argument("--holdout", action="store_true", help="held-out wording and start offset (docs/07-eval.md)")
+    e.add_argument("--res", type=int, default=128)
+    e.add_argument("--out", default="out")
+    e.add_argument("--scans", default="scans")
+    e.set_defaults(fn=cmd_eval)
     return p
 
 
