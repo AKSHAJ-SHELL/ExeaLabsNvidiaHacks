@@ -1,7 +1,7 @@
 """Local job queue: store an upload and write a queued status record.
 
-There is no worker that drains this queue tonight. The status JSON is the
-whole API. This module must not import the compiler or generator.
+``arrival.jobs.worker`` (``python -m arrival work``) drains it. The status JSON is
+the whole API. This module must not import the compiler or generator.
 """
 
 from __future__ import annotations

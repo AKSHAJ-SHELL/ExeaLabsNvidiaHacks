@@ -170,9 +170,11 @@ class SimEnv:
         n = _front(c)
         tray = self.data.geom(f'{task["fixture"]}_drawer0_tray')
         half = self.model.geom(f'{task["fixture"]}_drawer0_tray').size
-        front = np.array(c["position"][:2]) + n[:2] * (c["size"][1] / 2 - 0.02)  # carcass face
-        far = np.dot(tray.xpos[:2] - front, n[:2]) + half[1]  # how far the tray reaches past that face
-        xy = front + n[:2] * (0.02 + (far - 0.02) / 2)  # middle of the exposed part of the tray
+        front = np.array(c["position"][:2]) + n[:2] * (c["size"][1] / 2 - 0.02)  # a point on the carcass face
+        along = float(np.dot(tray.xpos[:2] - front, n[:2]))  # tray centre, measured out from that face
+        far = along + float(half[1])  # how far the tray reaches past the face
+        mid = 0.02 + (far - 0.02) / 2  # middle of the exposed part of the tray
+        xy = tray.xpos[:2] + n[:2] * (mid - along)  # keep the drawer's own x; the counter centre is not the drawer
         return np.array([xy[0], xy[1], tray.xpos[2] + half[2] + self.obj_half_h(task["object_id"]) + 0.01])
 
     def door_geometry(self, task: dict):

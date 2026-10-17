@@ -518,6 +518,26 @@ Include at least:
 
 `id` is `job_` plus 8 lowercase hex chars from `uuid.uuid4().hex[:8]`.
 
+The worker (`python -m arrival work`) keeps those fields and adds these when it claims the job:
+
+```json
+{
+  "status": "running",
+  "stage": "sim",
+  "started_at": 1792189828,
+  "finished_at": null,
+  "error": null,
+  "room_id": "hero_kitchen_job_01587ed1",
+  "twin_dir": "out/twins/hero_kitchen_job_01587ed1",
+  "dataset_dir": "out/datasets/hero_kitchen_job_01587ed1_sim",
+  "zip": "out/jobs/job_01587ed1/dataset.zip",
+  "attempts": 2,
+  "successes": 2
+}
+```
+
+`status` is one of `queued`, `running`, `done`, `failed`. `stage` is the last stage entered: `normalize`, `twin`, `objects`, `sim`, `validate`, `zip`. `started_at` and `finished_at` are unix seconds like `created_unix`. `error` is null unless `status` is `failed`, then `"<ExceptionType>: <message>"`. `room_id` is the upload filename stem reduced to `[a-z0-9_]` plus `_<id>`. Paths are as the worker saw them (relative to its cwd when `--out` is relative). Fields not reached yet are null.
+
 ## Report
 
 `out/reports/<room_id>.json`

@@ -52,10 +52,11 @@ python -m arrival serve        # http://127.0.0.1:8000
 | `GET /` | Lists rooms under `scans/` with `geometry_source`, task counts per family, dataset path, and download link. Has an upload form |
 | `GET /rooms/<id>` | Fixtures, the two task families, `arrival_physically_valid`, and the run report |
 | `GET /download/<id>` | Zip of `out/datasets/<id>` |
-| `POST /jobs` | Multipart upload with file field `scan` (max 200 MB, larger gets 413). Writes `out/jobs/<id>/` and returns `202 {"status":"queued",...}`. Nothing is compiled or generated in the request, and no worker drains the queue yet |
+| `POST /jobs` | Multipart upload with file field `scan` (max 200 MB, larger gets 413). Writes `out/jobs/<id>/` and returns `202 {"status":"queued",...}`. Nothing is compiled or generated in the request; `python -m arrival work` drains the queue |
 | `GET /jobs/<id>` | The job's `status.json` |
+| `GET /jobs/<id>/download` | `out/jobs/<id>/dataset.zip` once the job is `done`, else 404 with the current status |
 
-The server binds `127.0.0.1` only and has no authentication. Uploads are streamed to a temp file; a body shorter than `Content-Length`, a missing closing boundary, an empty file, or a part with no filename gets 400. If `out/datasets/<room>_sim` exists, the room page links it and shows its `arrival_generator`, `arrival_physically_valid`, episode count and families.
+The index page lists every job under `out/jobs/` with its status, stage, room id, episode count and a download link. The server binds `127.0.0.1` only and has no authentication. Uploads are streamed to a temp file; a body shorter than `Content-Length`, a missing closing boundary, an empty file, or a part with no filename gets 400. If `out/datasets/<room>_sim` exists, the room page links it and shows its `arrival_generator`, `arrival_physically_valid`, episode count and families.
 
 From a RoomPlan export instead of the authored scan (`scans/<room>/roomplan.json`):
 
@@ -118,6 +119,17 @@ python -m arrival eval --policy vla         # needs GR00T_POLICY_URL; exits 2 wi
 
 What this is not: MuJoCo frames are not a Gaussian splat of the room, episodes are not MimicGen output, and no policy was trained on them. Read `arrival_generator` and `arrival_physically_valid` in the sim dataset's `meta/info.json` before using it.
 
+## Upload worker
+
+`python -m arrival work` runs in a second terminal next to `serve`. It polls `out/jobs/*/status.json` every `--poll` seconds (default 2), takes the oldest `queued` job, marks it `running`, and runs these stages, rewriting `status.json` at each one: `normalize` (the upload is a RoomPlan CapturedRoom export if it has `walls`/`objects` with `transform`, or a `scan.json` if it has `schema_version`; anything else fails here), `twin` (`compile_twin`), `objects` (`place_default_objects` when the scan has no objects, as RoomPlan exports never do; then `out/twins/<room>/`), `sim` (`arrival.sim.collect.collect`, same options as `sim`: `--episodes 8`, `--families counter_to_sink,open_drawer`, `--people 1`, `--res 128`, `--seed 0`), `validate`, and `zip` (`out/jobs/<id>/dataset.zip` holding `<room>_sim/`). The room id is the upload's filename stem in `[a-z0-9_]` plus the job id, so two uploads of `kitchen.json` never share a twin or dataset folder. A job with zero successful episodes or a failing validator ends `failed`. Failures are written to `status.json` (`error`) and `error.txt` (traceback); the worker then moves to the next job. `--once` processes at most one job and exits. Needs the `sim` extra; without MuJoCo every job fails at `sim`.
+
+```bash
+python -m arrival work                   # until Ctrl+C
+python -m arrival work --once --episodes 2
+```
+
+Measured on a laptop CPU: a `scan.json` upload with `--episodes 2` took 5.9 s end to end, 2/2 episodes, 322 frames, zip 77,624 bytes. One worker runs at a time; there is no lock against two workers claiming the same job, no retry, and nothing runs on Nebius (OPS-2).
+
 ## Output layout
 
 `out/` is gitignored. Nothing under it is committed.
@@ -139,7 +151,8 @@ out/
   previews/                 sim contact sheets and overview mp4s (--save-preview)
   reports/hero_kitchen.json attempts, successes, dropped, seconds, demos/hour, dollars
   eval/hero_kitchen_scripted.json   closed-loop eval: per-family success, Wilson 95%, time, human contacts
-  jobs/<job_id>/            upload.bin, status.json
+  jobs/<job_id>/            upload.bin, status.json; after `work`: dataset.zip (done) or error.txt (failed)
+  twins/<stem>_<job_id>/, datasets/<stem>_<job_id>_sim/   what `work` compiled and simulated for an upload
 ```
 
 Embodiment is RoboCasa's single-arm Panda (7 joints + 1 gripper). The two task families are `counter_to_sink` and `counter_to_counter`. They vary by object, start pose, lighting, and instruction wording.
@@ -194,7 +207,7 @@ CUDA_VISIBLE_DEVICES=0 python gr00t/experiment/launch_finetune.py \
 
 Not built yet, and not claimed anywhere in the outputs:
 
-- iPhone capture app (LiDAR + RoomPlan) and an upload worker; `POST /jobs` only queues.
+- iPhone capture app (LiDAR + RoomPlan). Uploads are processed only by a local `python -m arrival work` process.
 - MimicGen generation (`arrival/generate/mimicgen.py` is a stub).
 - Gaussian splat training or compositing (`arrival/render/splat.py` is a stub).
 - Cosmos restyle of frames.

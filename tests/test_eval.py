@@ -57,21 +57,24 @@ def test_holdout_uses_template_4_and_y_offset(twin, tmp_path, monkeypatch):
                    log=lambda *_: None)
     assert rep["holdout"] is True and rep["families"]["counter_to_sink"]["min_human_distance_m"] is None
     (task,) = ran
-    mug = next(o for o in twin["objects"] if o["id"] == task["object_id"])
+    obj = next(o for o in twin["objects"] if o["id"] == task["object_id"])
     assert task["holdout"] is True and task["wording_index"] == 3
-    assert task["instruction"] == "Take the mug and drop it in the sink."
-    assert abs(task["start"][0] - mug["position"][0]) < 1e-9
-    assert abs(task["start"][1] - mug["position"][1] - 0.04) < 1e-9  # the sim halves the y offset
+    assert task["instruction"] == f"Take the {obj['label']} and drop it in the sink."
+    assert abs(task["start"][0] - obj["position"][0]) < 1e-9
+    assert abs(task["start"][1] - obj["position"][1] - 0.04) < 1e-9  # the sim halves the y offset
 
 
 def test_training_tasks_exclude_the_holdout(twin):
     from arrival.sim.tasks import make_tasks
 
-    mug = next(o for o in twin["objects"] if o["id"] == "mug_1")
-
     def offsets(tasks):
-        return {(round(t["start"][0] - mug["position"][0], 3), round(t["start"][1] - mug["position"][1], 3))
-                for t in tasks if "start" in t}
+        out = set()
+        for t in tasks:
+            if "start" not in t:
+                continue
+            obj = next(o for o in twin["objects"] if o["id"] == t["object_id"])
+            out.add((round(t["start"][0] - obj["position"][0], 3), round(t["start"][1] - obj["position"][1], 3)))
+        return out
 
     train = make_tasks(twin, ["counter_to_sink", "open_drawer"], 40, seed=0, log=lambda *_: None)
     assert len(train) == 40 and all(t["holdout"] is False for t in train)
