@@ -17,6 +17,11 @@ from arrival.sim.scene import build_mjcf, door_w, drawer_x
 FPS = 20
 SUBSTEPS = 25  # 0.002 s physics -> 20 Hz control
 SETTLE_STEPS = 12
+DRAWER_OPEN = 0.30  # start state (m) for close_drawer; open_drawer counts > 0.15 as open
+DRAWER_OPEN_PUT = 0.14  # start state for put_in_drawer: wide enough for a mug on the exposed tray, and the base
+# can then park straight in front without the pulled-out front reaching its column
+DOOR_OPEN = np.radians(70)  # start state for close_door; open_door counts > 60 deg as open
+WIPE_MIN = 0.4  # metres the sponge must travel pressed to the counter for wipe_counter to count
 
 
 def _front(f: dict) -> np.ndarray:
@@ -43,7 +48,12 @@ class SimEnv:
         self.fadr = [int(self.model.joint(f"finger_{s}").qposadr[0]) for s in ("l", "r")]
         self.data.qpos[self.qadr] = robot.HOME
         self.data.qpos[self.fadr] = robot.FINGER_OPEN
+        if task["family"] in ("close_drawer", "close_door", "put_in_drawer"):  # the part starts open
+            jn = f'{task["fixture"]}_door' if task["family"] == "close_door" else f'{task["fixture"]}_drawer0'
+            start = {"close_drawer": DRAWER_OPEN, "close_door": DOOR_OPEN, "put_in_drawer": DRAWER_OPEN_PUT}
+            self.data.qpos[int(self.model.joint(jn).qposadr[0])] = start[task["family"]]
         self.data.ctrl[:] = list(robot.HOME) + [robot.FINGER_OPEN] * 2
+        self.wiped = 0.0  # xy distance the sponge travelled while pressed to the counter (wipe_counter)
         free = self._free_floor()
         self.walkers = Walkers(task.get("people", 0), free, seed=task.get("seed", 0)) if task.get("people") else None
         mujoco.mj_forward(self.model, self.data)
@@ -75,11 +85,28 @@ class SimEnv:
             y = src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28)
             base = (mid, y, 0.75)
             task.setdefault("_place", None)
+        elif fam == "wipe_counter":
+            src = self.fx[task["source"]]
+            p = np.array(obj_pos[task["object_id"]])
+            n = _front(src)
+            base = (p[0], src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28), 0.75)
+        elif fam == "put_in_drawer":
+            # straight in front, between the mug and the drawer, just beyond the pulled-out front and its handle;
+            # parking beside the drawer instead puts the elbow into whatever appliance flanks the counter
+            c = self.fx[task["fixture"]]
+            n = _front(c)
+            p = np.array(obj_pos[task["object_id"]])
+            lx = drawer_x(c, self.twin["fixtures"])
+            yaw = c.get("yaw", 0.0)
+            mug_lx = np.cos(yaw) * (p[0] - c["position"][0]) + np.sin(yaw) * (p[1] - c["position"][1])
+            along = (lx + mug_lx) / 2
+            out = c["size"][1] / 2 + DRAWER_OPEN_PUT + 0.07 + 0.14  # front + handle bar + base column + margin
+            base = (c["position"][0] + np.cos(yaw) * along, c["position"][1] + np.sin(yaw) * along + n[1] * out, 0.75)
         else:
             c = self.fx[task["fixture"]]
             n = _front(c)
             sx, sy = c["size"][0], c["size"][1]
-            if fam == "open_drawer":
+            if fam in ("open_drawer", "close_drawer"):
                 lx, lz = drawer_x(c, self.twin["fixtures"]), robot_drawer_z()
                 along = 0.0
                 h = 0.72
@@ -104,6 +131,20 @@ class SimEnv:
     def obj_half_h(self, oid: str) -> float:
         return self.objs[oid]["size"][2] / 2
 
+    def rim_grasp(self, oid: str) -> tuple[np.ndarray, float] | None:
+        """For a bowl: (xy offset from the bowl centre to the rim point nearest the robot, grasp yaw for ik.down so
+        the fingers close across the wall). None for objects held by their body."""
+        o = self.objs[oid]
+        if o["catalog_id"] != "bowl":
+            return None
+        base = self.data.body("link1").xpos[:2]
+        d = base - self.body_pos(oid)[:2]
+        d = d / (np.linalg.norm(d) + 1e-9)
+        radius = min(o["size"][0], o["size"][1]) / 2
+        from arrival.sim.scene import BOWL_WALL
+
+        return d * (radius - BOWL_WALL / 2), float(np.arctan2(d[0], -d[1]))
+
     def place_point(self, task: dict) -> np.ndarray:
         tgt = self.fx[task["target"]]
         hh = self.obj_half_h(task["object_id"])
@@ -115,6 +156,20 @@ class SimEnv:
 
     def pull_axis(self, task: dict) -> np.ndarray:
         return _front(self.fx[task["fixture"]])
+
+    def place_point_top(self, task: dict) -> float:
+        return self._top(self.fx[task["source"]])
+
+    def drawer_place_point(self, task: dict) -> np.ndarray:
+        """Where to set an object down on the pulled-out part of the open drawer's tray."""
+        c = self.fx[task["fixture"]]
+        n = _front(c)
+        tray = self.data.geom(f'{task["fixture"]}_drawer0_tray')
+        half = self.model.geom(f'{task["fixture"]}_drawer0_tray').size
+        front = np.array(c["position"][:2]) + n[:2] * (c["size"][1] / 2 - 0.02)  # carcass face
+        far = np.dot(tray.xpos[:2] - front, n[:2]) + half[1]  # how far the tray reaches past that face
+        xy = front + n[:2] * (0.02 + (far - 0.02) / 2)  # middle of the exposed part of the tray
+        return np.array([xy[0], xy[1], tray.xpos[2] + half[2] + self.obj_half_h(task["object_id"]) + 0.01])
 
     def door_geometry(self, task: dict):
         b = self.data.body(f'{task["fixture"]}_door')
@@ -128,9 +183,14 @@ class SimEnv:
     def step(self, action: np.ndarray) -> None:
         self.data.ctrl[:7] = action[:7]
         self.data.ctrl[7:9] = action[7]
+        before = self.body_pos(self.task["object_id"])[:2] if self.task["family"] == "wipe_counter" else None
         for _ in range(SUBSTEPS):
             mujoco.mj_step(self.model, self.data)
         self.people_xy = self.walkers.step(self.model, self.data, 1.0 / FPS) if self.walkers else []
+        if before is not None:
+            p = self.body_pos(self.task["object_id"])
+            if p[2] < self._top(self.fx[self.task["source"]]) + self.obj_half_h(self.task["object_id"]) + 0.01:
+                self.wiped += float(np.linalg.norm(p[:2] - before))
 
     def render(self, cam: str, big: bool = False) -> np.ndarray:
         r = self.big if big else self.renderer
@@ -159,9 +219,32 @@ class SimEnv:
             else:
                 ok = inside and abs(p[2] - (self._top(tgt) + self.obj_half_h(oid))) < 0.025 and v < 0.05
             return bool(ok), {"object_pos": p.round(4).tolist(), "object_speed": round(v, 4)}
+        if fam == "put_in_drawer":
+            oid = task["object_id"]
+            p = self.body_pos(oid)
+            v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
+            tray = self.data.geom(f'{task["fixture"]}_drawer0_tray')
+            half = self.model.geom(f'{task["fixture"]}_drawer0_tray').size
+            local = tray.xmat.reshape(3, 3).T @ (p - tray.xpos)
+            inside = abs(local[0]) < half[0] - 0.02 and abs(local[1]) < half[1] - 0.02
+            resting = abs(local[2] - (half[2] + self.obj_half_h(oid))) < 0.03
+            return bool(inside and resting and v < 0.05), {
+                "object_pos": p.round(4).tolist(), "object_speed": round(v, 4),
+                "drawer_qpos": round(float(self.data.joint(task["joint"]).qpos[0]), 4)}
+        if fam == "wipe_counter":
+            oid = task["object_id"]
+            p = self.body_pos(oid)
+            v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
+            src = self.fx[task["source"]]
+            (cx, cy, _), (sx, sy, _) = src["position"], src["size"]
+            on_top = (abs(p[0] - cx) < sx / 2 and abs(p[1] - cy) < sy / 2
+                      and abs(p[2] - (self._top(src) + self.obj_half_h(oid))) < 0.025)
+            return bool(on_top and self.wiped >= WIPE_MIN and v < 0.05), {
+                "object_pos": p.round(4).tolist(), "wiped_m": round(self.wiped, 3)}
         jn = task["joint"]
         q = float(self.data.joint(jn).qpos[0])
-        ok = q > 0.15 if fam == "open_drawer" else q > np.radians(60)
+        ok = {"open_drawer": q > 0.15, "open_door": q > np.radians(60),
+              "close_drawer": q < 0.03, "close_door": q < np.radians(5)}[fam]
         return bool(ok), {"joint": jn, "qpos": round(q, 4)}
 
 
@@ -207,9 +290,9 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     room = twin["room_id"]
     tasks = make_tasks(twin, families, episodes, seed=seed, people=people, log=log)
     for t in tasks:
-        if t["family"] == "open_drawer":
+        if t["family"] in ("open_drawer", "close_drawer", "put_in_drawer"):
             t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
-        elif t["family"] == "open_door":
+        elif t["family"] in ("open_door", "close_door"):
             t["joint"] = f'{t["fixture"]}_door'
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
     writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"))

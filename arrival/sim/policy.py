@@ -48,7 +48,14 @@ class ScriptedExpert(Policy):
             p = env.body_pos(task["object_id"])
             gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
             tgt = env.place_point(task)
-            R = ik.down(self._grip_yaw(env, 0.0))
+            rim = env.rim_grasp(task["object_id"])
+            yaw = 0.0
+            if rim is not None:  # bowl: pinch the rim nearest the robot, pads straddling the wall 2 cm below the lip
+                off, yaw = rim
+                p = p + np.array([off[0], off[1], 0.0])
+                tgt = tgt + np.array([off[0], off[1], 0.0])
+                gz = env.body_pos(task["object_id"])[2] + env.obj_half_h(task["object_id"]) - 0.02
+            R = ik.down(self._grip_yaw(env, yaw))
             s = self.seg_steps
             return [((p[0], p[1], gz + 0.18), R, o, s), ((p[0], p[1], gz + 0.02), R, o, s),
                     ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps),
@@ -64,6 +71,79 @@ class ScriptedExpert(Policy):
             return [(pre, R, o, s), (h + 0.005 * axis, R, o, s), (h + 0.005 * axis, R, c, self.hold_steps)] + [
                 (h + (0.005 + 0.32 * k / 6) * axis, R, c, s // 2, k < 6) for k in range(1, 7)] + [
                 (h + 0.325 * axis, R, o, self.hold_steps), (h + 0.325 * axis + np.array([0, 0, 0.15]), R, o, s)]
+        if fam == "put_in_drawer":
+            # hand parallel to the counter front (yaw 90) so its long side stays clear of the overhang; the drop into
+            # the drawer is a chain of short via-point steps, because one long joint-space move bows back over the
+            # counter top and the fingers lose the mug on the slab
+            p = env.body_pos(task["object_id"])
+            gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
+            tgt = env.drawer_place_point(task)
+            R = ik.down(self._grip_yaw(env, np.pi / 2))
+            s = self.seg_steps
+            lift = gz + 0.15
+            n_steps = int(np.ceil((lift - tgt[2]) / 0.1))
+            zs = np.linspace(lift, tgt[2], n_steps + 1)[1:]
+            descent = [((tgt[0], tgt[1], z), R, c, s // 2, k < n_steps - 1) for k, z in enumerate(zs)]
+            return [((p[0], p[1], gz + 0.18), R, o, s), ((p[0], p[1], gz + 0.02), R, o, s),
+                    ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps),
+                    ((p[0], p[1], lift), R, c, s), ((tgt[0], tgt[1], lift), R, c, 2 * s)] + descent + [
+                    ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps), ((tgt[0], tgt[1], tgt[2] + 0.15), R, o, s)]
+        if fam == "wipe_counter":
+            # pinch the sponge across its short side, press it to the top and make two strokes along the counter
+            p = env.body_pos(task["object_id"])
+            top = env.place_point_top(task)
+            hh = env.obj_half_h(task["object_id"])
+            R = ik.down(self._grip_yaw(env, 0.0))
+            s = self.seg_steps
+            press = top + hh - 0.004
+            strokes = [(p[0] + dx, p[1], press) for dx in (0.15, -0.15, 0.15, -0.15)]
+            return [((p[0], p[1], p[2] + 0.15), R, o, s), ((p[0], p[1], p[2]), R, o, s),
+                    ((p[0], p[1], p[2]), R, c, self.hold_steps), ((p[0], p[1], press), R, c, s // 2)] + [
+                    (w, R, c, s, k < 3) for k, w in enumerate(strokes)] + [
+                    ((p[0], p[1], press), R, c, s), ((p[0], p[1], press), R, o, self.hold_steps),
+                    ((p[0], p[1], press + 0.15), R, o, s)]
+        if fam == "close_drawer":
+            # push the handle bar from outside with the closed fingers until the front meets the carcass
+            h, axis = env.site_pos(task["handle"]), env.pull_axis(task)
+            R = ik.down(self._grip_yaw(env, np.arctan2(axis[1], axis[0])))
+            touch = h + 0.025 * axis  # closed finger block (6 mm half) against the bar (12 mm radius)
+            s = self.seg_steps
+            shut = touch - float(self.open_at) * axis
+            return [(touch + 0.12 * axis + np.array([0, 0, 0.1]), R, c, s), (touch + 0.03 * axis, R, c, s)] + [
+                (touch + (0.03 - (0.03 + float(self.open_at)) * k / 4) * axis, R, c, s // 2, k < 4) for k in range(1, 5)] + [
+                (shut + 0.1 * axis, R, o, s)]
+        if fam == "close_door":
+            # push the handle bar back along its arc from the outside, hand nearly vertical as in open_door
+            hinge, h, _ = env.door_geometry(task)
+            r = np.linalg.norm((h - hinge)[:2])
+            a_open = np.arctan2(*(h - hinge)[[1, 0]])
+            s, up = self.seg_steps, np.array([0, 0, 1.0])
+            grasp = np.array([0, 0, 0.04])
+
+            def pt(a):
+                return hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]]) + grasp
+
+            def nrm(a):
+                return -np.array([-np.sin(a), np.cos(a), 0.0])
+
+            along = np.array([-nrm(a_open)[1], nrm(a_open)[0], 0.0])
+            if np.dot(along, env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
+                along = -along
+
+            def ori(a):
+                rot = a - a_open
+                ax = np.array([np.cos(rot) * along[0] - np.sin(rot) * along[1],
+                               np.sin(rot) * along[0] + np.cos(rot) * along[1]])
+                return ik.tilted(nrm(a)[:2], ax, np.radians(10))
+
+            sweep = float(self.open_at) + np.radians(3)  # a little past closed so the latch gap closes
+            out = [(pt(a_open) + 0.03 * nrm(a_open) + 0.15 * up, ori(a_open), c, s),
+                   (pt(a_open) + 0.03 * nrm(a_open), ori(a_open), c, s)]
+            for k in range(1, 9):
+                a = a_open + sweep * k / 8
+                out.append((pt(a) + 0.03 * nrm(a), ori(a), c, s // 2, k < 8))
+            out.append((out[-1][0] + 0.15 * up, out[-1][1], o, s))
+            return out
         if fam == "open_door":
             # The bar handle sits 2-3 cm below the counter-top overhang, so the hand comes down nearly vertical
             # (10 deg tilt keeps the hand body clear of the slab) with the fingers closing along the panel.
@@ -103,6 +183,8 @@ class ScriptedExpert(Policy):
         raise ValueError(f"unknown family {fam}")
 
     def reset(self, env, task: dict) -> None:
+        if task["family"] in ("close_drawer", "close_door"):
+            self.open_at = float(env.data.joint(task["joint"]).qpos[0])  # how far the part starts open
         q = np.array(HOME)
         self.plan: list[np.ndarray] = []
         prev = np.concatenate([q, [FINGER_OPEN]])

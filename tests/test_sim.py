@@ -75,6 +75,51 @@ def test_scripted_expert_opens_cabinet_door(twin, fixture):
     assert ep["ik_error"] < 0.02
 
 
+@pytest.mark.parametrize("family,fixture", [("close_drawer", "counter_a"), ("close_drawer", "counter_b"),
+                                            ("close_door", "counter_a"), ("close_door", "counter_b")])
+def test_scripted_expert_closes_open_parts(twin, family, fixture):
+    from arrival.sim.collect import DOOR_OPEN, DRAWER_OPEN, run_episode
+    from arrival.sim.policy import ScriptedExpert
+
+    joint = f"{fixture}_door" if family == "close_door" else f"{fixture}_drawer0"
+    task = {"family": family, "fixture": fixture, "joint": joint, "handle": f"{fixture}_drawer0_handle",
+            "lighting": "neutral", "people": 0, "seed": 0}
+    env = SimEnv(twin, task, res=32)
+    start = float(env.data.joint(joint).qpos[0])
+    assert start == pytest.approx(DOOR_OPEN if family == "close_door" else DRAWER_OPEN)  # it really starts open
+    ep = run_episode(env, ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+    assert ep["ik_error"] < 0.03
+
+
+def test_scripted_expert_puts_mug_in_drawer_and_wipes(twin):
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.tasks import make_tasks
+
+    for family in ("put_in_drawer", "wipe_counter"):
+        task = make_tasks(twin, [family], 1, seed=0)[0]
+        if family == "put_in_drawer":
+            task["handle"], task["joint"] = f'{task["fixture"]}_drawer0_handle', f'{task["fixture"]}_drawer0'
+        env = SimEnv(twin, task, res=32)
+        ep = run_episode(env, ScriptedExpert(), task)
+        assert ep["success"], (family, ep["detail"])
+    assert ep["detail"]["wiped_m"] >= 0.4  # the sponge travelled pressed to the counter, not carried above it
+
+
+def test_bowl_is_hollow_and_goes_to_sink(twin):
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.tasks import make_tasks
+
+    task = next(t for t in make_tasks(twin, ["counter_to_sink"], 40, seed=1) if t["object_id"] == "bowl_1")
+    env = SimEnv(twin, task, res=32)
+    walls = [env.model.geom(i).name for i in range(env.model.ngeom) if env.model.geom(i).name.startswith("bowl_1_wall")]
+    assert len(walls) == 8
+    ep = run_episode(env, ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+
+
 def test_vla_requires_server(monkeypatch):
     monkeypatch.delenv("GR00T_POLICY_URL", raising=False)
     with pytest.raises(VLANotConfigured):

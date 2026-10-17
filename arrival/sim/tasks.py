@@ -6,13 +6,20 @@ import random
 
 from arrival.tasks.propose import LIGHTING, POSE_OFFSETS, WORDINGS, top_z
 
-SIM_FAMILIES = ("counter_to_sink", "counter_to_counter", "open_drawer", "open_door")
+SIM_FAMILIES = ("counter_to_sink", "counter_to_counter", "open_drawer", "open_door", "close_drawer", "close_door",
+                "put_in_drawer", "wipe_counter")
 REACH = 0.78  # max horizontal eef reach from the arm base used when placing the base
 SIM_WORDINGS = {
     **WORDINGS,
     "open_drawer": ["Open the top drawer.", "Pull the top drawer of the {name} open.",
                     "Slide open the drawer under the counter."],
     "open_door": ["Open the cabinet door.", "Swing the {name} cabinet door open.", "Pull the cabinet door open."],
+    "close_drawer": ["Close the drawer.", "Push the open drawer of the {name} shut.", "Slide the drawer closed."],
+    "close_door": ["Close the cabinet door.", "Push the {name} cabinet door shut.", "Swing the open door closed."],
+    "put_in_drawer": ["Put the {name} in the open drawer.", "Place the {name} into the drawer.",
+                      "Move the {name} from the counter into the drawer."],
+    "wipe_counter": ["Wipe the counter with the {name}.", "Clean the counter top with the {name}.",
+                     "Scrub the counter using the {name}."],
 }
 
 
@@ -31,7 +38,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
         pool = []
         if fam in ("counter_to_sink", "counter_to_counter"):
             for o in twin["objects"]:
-                if o["catalog_id"] not in ("mug", "sponge"):  # bowl is wider than the gripper opening
+                if o["catalog_id"] not in ("mug", "sponge", "bowl"):  # the bowl is held by its rim (MAN-4)
                     continue
                 src = next((c for c in counters if abs(o["position"][0] - c["position"][0]) < c["size"][0] / 2), None)
                 if src is None:
@@ -50,7 +57,25 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
                 for tgt, tx in tgt_xy:
                     pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"],
                                  "target": tgt["id"], "target_x": tx, "start": list(o["position"])})
-        elif fam in ("open_drawer", "open_door"):
+        elif fam == "put_in_drawer":
+            from arrival.sim.scene import drawer_x
+            for o in twin["objects"]:
+                if o["catalog_id"] != "mug":
+                    continue
+                src = next((c for c in counters if abs(o["position"][0] - c["position"][0]) < c["size"][0] / 2), None)
+                if src is None or abs(o["position"][0] - (src["position"][0] + drawer_x(src, twin["fixtures"]))) > 0.6:
+                    continue  # the base parks beside the open drawer, so the mug must be within reach of that spot
+                pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"], "fixture": src["id"],
+                             "start": list(o["position"])})
+        elif fam == "wipe_counter":
+            for o in twin["objects"]:
+                if o["catalog_id"] != "sponge":
+                    continue
+                src = next((c for c in counters if abs(o["position"][0] - c["position"][0]) < c["size"][0] / 2), None)
+                if src is not None:
+                    pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"],
+                                 "fixture": src["id"], "start": list(o["position"])})
+        elif fam in ("open_drawer", "open_door", "close_drawer", "close_door"):
             pool = [{"fixture": c["id"], "name": c["id"].replace("_", " ")} for c in counters]
         if not pool:
             log(f"[sim] family {fam}: no reachable variation in this room for a fixed-base arm; skipped")

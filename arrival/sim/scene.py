@@ -267,16 +267,38 @@ def fridge_xml(f: dict) -> str:
             + "</body></body>")
 
 
+BOWL_WALL = 0.006  # wall thickness; the closed fingers (12 mm apart at the pads) pinch the rim
+
+
+def _bowl_geoms(oid: str, radius: float, height: float, mass: float, rgba: str) -> str:
+    """A bowl the gripper can hold by its rim: a bottom disc and an octagon of thin wall panels."""
+    col = 'friction="1.2 0.02 0.001" condim="4" conaffinity="3"'
+    g = [f'<geom name="{oid}" type="cylinder" size="{radius - BOWL_WALL:.4f} {BOWL_WALL / 2:.4f}" '
+         f'pos="0 0 {-height / 2 + BOWL_WALL / 2:.4f}" mass="{0.4 * mass:.3f}" rgba="{rgba}" {col}/>']
+    r = radius - BOWL_WALL / 2
+    half_chord = r * math.tan(math.pi / 8) + 0.002  # a hair over so the panels meet at the corners
+    for k in range(8):
+        a = k * math.pi / 4
+        g.append(f'<geom name="{oid}_wall{k}" type="box" size="{half_chord:.4f} {BOWL_WALL / 2:.4f} {height / 2:.4f}" '
+                 f'pos="{r * math.cos(a):.4f} {r * math.sin(a):.4f} 0" euler="0 0 {a + math.pi / 2:.4f}" '
+                 f'mass="{0.6 * mass / 8:.4f}" rgba="{rgba}" {col}/>')
+    return "".join(g)
+
+
 def object_xml(o: dict, pos) -> str:
     kind, mass, rgba = OBJ.get(o["catalog_id"], ("box", 0.2, "0.5 0.5 0.9 1"))
     sx, sy, sz = o["size"]
+    if o["catalog_id"] == "bowl":
+        return (f'<body name="{o["id"]}" pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}"><freejoint name="{o["id"]}"/>'
+                + _bowl_geoms(o["id"], min(sx, sy) / 2, sz, mass, rgba) + "</body>")
     if kind == "cylinder":
         geom = f'type="cylinder" size="{min(sx, 0.07) / 2:.4f} {sz / 2:.4f}"'
     else:
         geom = f'type="box" size="{sx / 2:.4f} {min(sy, 0.06) / 2:.4f} {sz / 2:.4f}"'
     return (f'<body name="{o["id"]}" pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}">'
             f'<freejoint name="{o["id"]}"/>'
-            f'<geom name="{o["id"]}" {geom} mass="{mass}" rgba="{rgba}" friction="1.2 0.02 0.001" condim="4"/></body>')
+            f'<geom name="{o["id"]}" {geom} mass="{mass}" rgba="{rgba}" friction="1.2 0.02 0.001" condim="4" '
+            f'conaffinity="3"/></body>')  # bit 2 so objects rest on drawer trays, which ignore their own carcass
 
 
 def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: dict | None = None,
