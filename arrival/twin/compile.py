@@ -10,12 +10,12 @@ from pathlib import Path
 import yaml
 
 from arrival.catalog.fixtures import default_config_name, fixture_type
-from arrival.catalog.objects import catalog_id
+from arrival.catalog.objects import catalog_id, sample_size
 
 COUNTER_DEPTH = 0.65
 COUNTER_HEIGHT = 0.92
 SYNTH_RADIUS = 0.3
-DEFAULT_OBJECTS = (("mug", [0.08, 0.08, 0.1]), ("bowl", [0.14, 0.14, 0.06]))
+DEFAULT_OBJECTS = ("mug", "bowl", "plate", "cup", "apple")  # sizes come from the catalog, varied per seed
 PLACE_MARGIN = 0.08
 
 
@@ -100,8 +100,9 @@ def compile_twin(bundle: dict) -> dict:
 
 
 def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
-    """RoomPlan captures no small objects: put a mug and a bowl on a counter top (the one holding or
-    touching a sink if any), away from sinks/stoves, deterministically from `seed`. Mutates twin."""
+    """RoomPlan captures no small objects: put DEFAULT_OBJECTS on a counter top (the one holding or touching a
+    sink if any), away from sinks/stoves, deterministically from `seed`, each at a seeded size. An object that
+    does not fit the counter is skipped. Mutates twin."""
     counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
     blockers = [f for f in twin["fixtures"] if f["type"] in ("sink", "stove")]
     sinks = [f for f in blockers if f["type"] == "sink"]
@@ -113,10 +114,11 @@ def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
     sx, sy, _ = counter["size"]
     top = counter["position"][2] + counter["size"][2] / 2
     placed: list[dict] = []
-    for label, size in DEFAULT_OBJECTS:
+    for label in DEFAULT_OBJECTS:
+        size = sample_size(label, rng)
         half = max(size[0], size[1]) / 2 + PLACE_MARGIN
         if sx / 2 <= half or sy / 2 <= half:
-            break
+            continue
         for _ in range(200):
             local = (rng.uniform(-sx / 2 + half, sx / 2 - half), rng.uniform(-sy / 2 + half, sy / 2 - half))
             x, y = to_world(local, counter)

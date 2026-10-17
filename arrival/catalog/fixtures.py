@@ -9,6 +9,7 @@ FIXTURE_MAP = {
     "dishwasher": "dishwasher",
     "storage": "hinge_cabinet",
     "table": "counter",
+    "microwave": "microwave",
 }
 
 

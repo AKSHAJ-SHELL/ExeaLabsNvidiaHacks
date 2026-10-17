@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 
+from arrival.catalog.objects import PICKABLE
 from arrival.tasks.propose import LIGHTING, POSE_OFFSETS, WORDINGS, top_z
 
 SIM_FAMILIES = ("counter_to_sink", "counter_to_counter", "open_drawer", "open_door")
@@ -31,7 +32,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
         pool = []
         if fam in ("counter_to_sink", "counter_to_counter"):
             for o in twin["objects"]:
-                if o["catalog_id"] not in ("mug", "sponge"):  # bowl is wider than the gripper opening
+                if o["catalog_id"] not in PICKABLE:  # bowl, plate and pan are wider than the gripper opening
                     continue
                 src = next((c for c in counters if abs(o["position"][0] - c["position"][0]) < c["size"][0] / 2), None)
                 if src is None:
