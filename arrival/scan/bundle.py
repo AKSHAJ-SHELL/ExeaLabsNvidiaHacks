@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 GEOMETRY_SOURCES = ("authored_sample", "roomplan", "four_photo_unmeasured")
+OPTIONAL_LISTS = ("doors", "windows", "openings", "floors")
 
 
 class ScanBundleError(ValueError):
@@ -25,12 +26,19 @@ def validate(bundle: dict) -> dict:
         raise ScanBundleError("blocks_claims must be a list")
     if not bundle.get("room_id"):
         raise ScanBundleError("room_id is required")
-    for key in ("walls", "fixtures", "objects"):
+    for key in ("walls", "fixtures", "objects") + OPTIONAL_LISTS:
         if not isinstance(bundle.get(key, []), list):
             raise ScanBundleError(f"{key} must be a list")
-    for item in bundle.get("fixtures", []) + bundle.get("objects", []):
-        if len(item.get("size", [])) != 3 or len(item.get("position", [])) != 3:
-            raise ScanBundleError(f"{item.get('id')}: size and position must have 3 values")
+    for key in ("fixtures", "objects", "doors", "windows", "openings"):
+        for item in bundle.get(key, []):
+            if len(item.get("size", [])) != 3 or len(item.get("position", [])) != 3:
+                raise ScanBundleError(f"{item.get('id')}: size and position must have 3 values")
+    for fl in bundle.get("floors", []):
+        if len(fl.get("corners", [])) < 3 or any(len(c) != 2 for c in fl["corners"]):
+            raise ScanBundleError(f"{fl.get('id')}: floor corners must be 3 or more [x, y] points")
+    for key in ("story", "story_count"):
+        if key in bundle and not isinstance(bundle[key], int):
+            raise ScanBundleError(f"{key} must be an integer")
     bundle.setdefault("blocks_claims", [])
     return bundle
 

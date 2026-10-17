@@ -65,6 +65,13 @@ python -m arrival demo --room hero_kitchen --from-roomplan --episodes 4
 
 The normalizer unwraps Apple's keyed enums (`{"sink": {}}` -> `sink`, `washerDryer` -> `washer_dryer`), drops `low`-confidence objects, puts the floor at z = 0 (from `floors[]`, else the lowest wall bottom), rotates the room so its longest wall runs along +X with the wall bounding box at (0, 0), and snaps near-90° yaws. RoomPlan captures no small objects, so a mug and a bowl are placed (seeded) on the counter nearest a sink; nothing is borrowed from the authored scan. A scan with no sink, stove or counter-like fixture yields no tasks and the command says so. `--scans` defaults to `./scans`, falling back to the repo's `scans/` when run from elsewhere.
 
+Doors, windows and openings are kept in the bundle and twin with the id of their wall, `polygonCorners` floors set the floor extent, and a merged multi-story export yields one story (`roomplan.load(path, room, story=n)`; default the story with the most objects). To eyeball every room as a top-down plan:
+
+```bash
+python scripts/render_rooms.py                              # out/renders/<room>_top.png and <room>_roomplan_top.png
+python scripts/render_rooms.py tests/fixtures/roomplan/amal.json
+```
+
 ## Simulation (MuJoCo)
 
 `python -m arrival sim --episodes N` builds a MuJoCo scene from the compiled twin and records episodes to `out/datasets/<room>_sim` (LeRobot v2 layout). Needs the `sim` extra. The code lives in `arrival/sim/`:

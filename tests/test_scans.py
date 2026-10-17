@@ -1,0 +1,122 @@
+"""TWN-2: every scan under scans/ normalizes, compiles, writes a layout, has no overlapping fixture
+footprints, nothing below the floor, a closed wall loop, and builds in MuJoCo."""
+
+import math
+
+import pytest
+import yaml
+
+from arrival.scan import bundle, roomplan
+from arrival.twin.compile import compile_twin, write_twin
+
+from conftest import SCANS
+
+WALL_TOL = 0.01
+FLOOR_TOL = 1e-6
+HERO_KNOWN_OVERLAPS = {("counter_a", "fridge_1"), ("counter_b", "stove_1")}  # the TWN-6 bug, nothing else
+
+
+def _cases():
+    out = []
+    for d in sorted(p for p in SCANS.iterdir() if p.is_dir()):
+        for source in ("scan", "roomplan"):
+            if (d / f"{source}.json").is_file():
+                out.append(pytest.param(d.name, source, id=f"{d.name}-{source}"))
+    return out
+
+
+CASES = _cases()
+
+
+def _twin(room: str, source: str) -> dict:
+    if source == "scan":
+        return compile_twin(bundle.load_room(room, SCANS))
+    return compile_twin(roomplan.load(SCANS / room / "roomplan.json", room))
+
+
+def _corners(f: dict) -> list[tuple[float, float]]:
+    sx, sy, _ = f["size"]
+    x, y, _ = f["position"]
+    c, s = math.cos(f.get("yaw", 0.0)), math.sin(f.get("yaw", 0.0))
+    return [(x + c * dx - s * dy, y + s * dx + c * dy)
+            for dx, dy in ((sx / 2, sy / 2), (-sx / 2, sy / 2), (-sx / 2, -sy / 2), (sx / 2, -sy / 2))]
+
+
+def _overlap(a: dict, b: dict, tol: float = 1e-6) -> bool:
+    """Separating-axis test on the two footprint rectangles. Touching edges do not count."""
+    ca, cb = _corners(a), _corners(b)
+    for poly in (ca, cb):
+        for i in range(4):
+            ex, ey = poly[(i + 1) % 4][0] - poly[i][0], poly[(i + 1) % 4][1] - poly[i][1]
+            pa = [-ey * x + ex * y for x, y in ca]
+            pb = [-ey * x + ex * y for x, y in cb]
+            if max(pa) <= min(pb) + tol or max(pb) <= min(pa) + tol:
+                return False
+    return True
+
+
+def _contains(outer: dict, inner: dict, tol: float = 1e-6) -> bool:
+    from arrival.twin.compile import to_local
+
+    sx, sy, _ = outer["size"]
+    return all(abs(lx) <= sx / 2 + tol and abs(ly) <= sy / 2 + tol
+               for lx, ly in (to_local(c, outer) for c in _corners(inner)))
+
+
+def _allowed(a: dict, b: dict) -> bool:
+    """A sink or stove inset in a counter, or the counter synthesized around that fixture."""
+    for counter, fixture in ((a, b), (b, a)):
+        if counter["type"] != "counter" or fixture["type"] not in ("sink", "stove"):
+            continue
+        if counter["id"] == f"counter_synth_{fixture['id']}" or _contains(counter, fixture):
+            return True
+    return False
+
+
+@pytest.mark.parametrize("room,source", CASES)
+def test_no_overlapping_fixtures(room, source):
+    fx = _twin(room, source)["fixtures"]
+    bad = {tuple(sorted((a["id"], b["id"]))) for i, a in enumerate(fx) for b in fx[i + 1:]
+           if _overlap(a, b) and not _allowed(a, b)}
+    if (room, source) == ("hero_kitchen", "scan") and bad == HERO_KNOWN_OVERLAPS:
+        pytest.xfail(f"TWN-6: authored hero kitchen overlaps {sorted(bad)}")
+    assert not bad
+
+
+@pytest.mark.parametrize("room,source", CASES)
+def test_nothing_below_floor(room, source):
+    twin = _twin(room, source)
+    for item in twin["fixtures"] + twin["objects"]:
+        assert item["position"][2] - item["size"][2] / 2 >= -FLOOR_TOL, item["id"]
+
+
+@pytest.mark.parametrize("room,source", CASES)
+def test_walls_closed(room, source):
+    walls = _twin(room, source)["walls"]
+    assert len(walls) >= 3
+    for i, w in enumerate(walls):
+        others = [p for j, o in enumerate(walls) if j != i for p in (o["start"], o["end"])]
+        for end in (w["start"], w["end"]):
+            assert min(math.dist(end, p) for p in others) <= WALL_TOL, (w["id"], end)
+
+
+@pytest.mark.parametrize("room,source", CASES)
+def test_layout_writes(room, source, tmp_path):
+    twin = _twin(room, source)
+    _, layout_path = write_twin(twin, tmp_path)
+    doc = yaml.safe_load(layout_path.read_text())
+    assert len(doc["main_group"]["bottom_row"]) == len(twin["fixtures"])
+    assert len(doc["room"]["walls"]) == len(twin["walls"])
+
+
+@pytest.mark.parametrize("room,source", CASES)
+def test_scene_builds_in_mujoco(room, source):
+    mujoco = pytest.importorskip("mujoco")
+    from arrival.sim.scene import build_mjcf
+
+    twin = _twin(room, source)
+    xs = [p for w in twin["walls"] for p in (w["start"][0], w["end"][0])]
+    ys = [p for w in twin["walls"] for p in (w["start"][1], w["end"][1])]
+    base = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, 0.75)
+    model = mujoco.MjModel.from_xml_string(build_mjcf(twin, base))
+    assert model.ngeom > len(twin["walls"])
