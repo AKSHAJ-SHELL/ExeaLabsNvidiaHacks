@@ -172,6 +172,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             return self._index()
         parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[0] == "jobs" and parts[2] == "download":
+            if not ID_RE.match(parts[1]):
+                return self._not_found("Invalid id")
+            return self._job_download(parts[1])
         if len(parts) == 2 and parts[0] in ("rooms", "download", "jobs"):
             ident = parts[1]
             if not ID_RE.match(ident):
@@ -234,15 +238,47 @@ class Handler(BaseHTTPRequestHandler):
             "<input type='file' name='scan' required> <button type='submit'>Upload</button>"
             "</form><p class='muted'>Stores the file under <code>out/jobs/&lt;id&gt;/</code> "
             "and returns a queued status (max 200 MB). Nothing is compiled or generated "
-            "in the request; no worker drains the queue yet.</p></div>"
+            "in the request. Run <code>python -m arrival work</code> in another terminal to turn "
+            "queued scans into sim datasets.</p></div>"
         )
         body = (
             "<h1>Arrival</h1><p class='muted'>Pre-scanned rooms → GR00T LeRobot v2 "
             "datasets, generated locally.</p>"
             f"<div class='warn'>{esc(PLACEHOLDER_NOTE)}</div>"
-            "<h2>Rooms</h2>" + table + upload
+            "<h2>Rooms</h2>" + table + upload + "<h2>Jobs</h2>" + self._jobs_table()
         )
         self._html(200, "Arrival", body)
+
+    def _jobs(self) -> list[dict]:
+        root = self.out_dir / "jobs"
+        if not root.is_dir():
+            return []
+        jobs = [s for d in root.iterdir() if ID_RE.match(d.name) and (s := _read_json(d / "status.json"))]
+        return sorted(jobs, key=lambda s: (-s.get("created_unix", 0), s.get("id", "")))
+
+    def _jobs_table(self) -> str:
+        rows = []
+        for s in self._jobs():
+            jid, st = s.get("id", "?"), s.get("status", "?")
+            if st == "done" and s.get("zip"):
+                result = f"<a href='/jobs/{esc(jid)}/download'>dataset.zip</a>"
+            elif st == "failed":
+                result = f"<span class='muted'>{esc(s.get('error'))}</span>"
+            else:
+                result = f"<span class='muted'>{esc(s.get('stage') or '')}</span>"
+            eps = ("" if s.get("attempts") is None
+                   else f"{esc(s.get('successes'))}/{esc(s.get('attempts'))}")
+            rows.append(
+                f"<tr><td><a href='/jobs/{esc(jid)}'><code>{esc(jid)}</code></a></td>"
+                f"<td>{esc(s.get('filename'))}</td><td><code>{esc(st)}</code></td>"
+                f"<td><code>{esc(s.get('room_id') or '')}</code></td><td>{eps}</td><td>{result}</td></tr>"
+            )
+        return (
+            "<div class='scroll'><table><tr><th>Job</th><th>Upload</th><th>Status</th><th>Room</th>"
+            "<th>Episodes</th><th>Result</th></tr>"
+            + ("".join(rows) or "<tr><td colspan='6' class='muted'>No uploads yet</td></tr>")
+            + "</table></div>"
+        )
 
     def _room(self, room: str):
         scan_path = self.scans_dir / room / "scan.json"
@@ -383,6 +419,17 @@ class Handler(BaseHTTPRequestHandler):
         if status is None:
             return self._json(404, {"error": "job not found", "id": job_id})
         self._json(200, status)
+
+    def _job_download(self, job_id: str):
+        status = read_job(self.out_dir / "jobs", job_id)
+        if status is None:
+            return self._json(404, {"error": "job not found", "id": job_id})
+        zip_path = self.out_dir / "jobs" / job_id / "dataset.zip"
+        if status.get("status") != "done" or not zip_path.is_file():
+            return self._json(404, {"error": "dataset not ready", "id": job_id, "status": status.get("status")})
+        room = status.get("room_id") or job_id
+        self._send(200, zip_path.read_bytes(), "application/zip",
+                   {"Content-Disposition": f"attachment; filename={room}_sim.zip"})
 
     def _post_job(self):
         try:

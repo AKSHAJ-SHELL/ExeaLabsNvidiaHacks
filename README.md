@@ -31,7 +31,7 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 | Robot: open door | ❌ 0%. The arm's arc path doesn't move the door yet (task MAN-2) |
 | Robot: counter → counter | ❌ Skipped. The counters are 2.2 m apart and the base doesn't move |
 | GR00T-format dataset + validator | ✅ Passes our validator, and the layout matches GR00T's loader source. ⚠️ Not yet loaded by GR00T itself since the latest fixes |
-| Local web page: browse, download, upload | ✅ Works. ⚠️ Uploads are queued; nothing processes them yet |
+| Local web page: browse, download, upload | ✅ Works. Uploads are processed by `python -m arrival work` on the same machine (twin, sim dataset, zip). ⚠️ One local worker, no cloud fan-out yet |
 | VLM planner (Nemotron) / VLA client (GR00T server) | ⚠️ The interfaces exist. Neither is wired in or tested against a live service |
 | GR00T fine-tune, MimicGen, splats, Cosmos, Nebius scale-out | ❌ Not built yet |
 
@@ -61,6 +61,7 @@ Then browse it in the local page:
 
 ```bash
 python -m arrival serve                   # http://127.0.0.1:8000
+python -m arrival work                    # in another terminal: turns uploaded scans into sim datasets
 ```
 
 Other commands:
@@ -193,7 +194,7 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 
 ### OPS: Nebius scale & backend (2)
 
-- **OPS-1: Upload worker.** A queued scan should become a twin, then a sim dataset, then a downloadable zip, with status updates in `out/jobs/<id>/status.json`.
+- **OPS-1: Upload worker.** Done locally: `python -m arrival work` turns a queued scan (RoomPlan export or `scan.json`) into a twin, a sim dataset and `out/jobs/<id>/dataset.zip`, with stage updates in `status.json` and `GET /jobs/<id>/download`. Left: one worker process, no retries, no multi-worker locking; running it on Nebius is OPS-2.
 - **OPS-2: Nebius fan-out.** Serverless Jobs (one shard of episodes per job) and Object Storage for datasets, with checkpoint and resume.
 - **OPS-3: Cost tracking.** Fill the `dollars` fields in the report from real Nebius usage per product.
 

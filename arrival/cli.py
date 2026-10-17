@@ -1,4 +1,4 @@
-"""python -m arrival demo | validate | serve"""
+"""python -m arrival demo | validate | serve | sim | work"""
 
 from __future__ import annotations
 
@@ -148,6 +148,23 @@ def cmd_sim(a) -> int:
     return EXIT_OK
 
 
+def cmd_work(a) -> int:
+    """Drain out/jobs: each queued upload -> twin -> sim dataset -> out/jobs/<id>/dataset.zip."""
+    from arrival.jobs.worker import work
+    from arrival.sim.tasks import SIM_FAMILIES
+
+    fams = list(SIM_FAMILIES) if a.families == "all" else [f.strip() for f in a.families.split(",") if f.strip()]
+    bad = [f for f in fams if f not in SIM_FAMILIES]
+    if bad or a.episodes < 1:
+        print(f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
+              file=sys.stderr)
+        return EXIT_USAGE
+    n = work(Path(a.out), once=a.once, poll=a.poll, episodes=a.episodes, families=fams, people=a.people,
+             res=a.res, seed=a.seed)
+    print(f"processed {n} job(s)")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="arrival", description="Arrival: room scan -> GR00T LeRobot v2 dataset")
     sub = p.add_subparsers(dest="cmd")
@@ -182,6 +199,17 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--seed", type=int, default=0)
     m.add_argument("--save-preview", action="store_true")
     m.set_defaults(fn=cmd_sim)
+    w = sub.add_parser("work", help="process queued uploads under <out>/jobs: twin -> sim dataset -> dataset.zip")
+    w.add_argument("--once", action="store_true", help="process one job (or none) and exit")
+    w.add_argument("--poll", type=float, default=2.0, help="seconds between queue checks")
+    w.add_argument("--episodes", type=int, default=8)
+    w.add_argument("--families", default="counter_to_sink,open_drawer",
+                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door")
+    w.add_argument("--people", type=int, default=1)
+    w.add_argument("--res", type=int, default=128)
+    w.add_argument("--seed", type=int, default=0)
+    w.add_argument("--out", default="out")
+    w.set_defaults(fn=cmd_work)
     return p
 
 
