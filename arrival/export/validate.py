@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -16,6 +17,7 @@ DTYPES = {
     "annotation.human.task_description": pa.int64(), "task_index": pa.int64(), "episode_index": pa.int64(),
     "index": pa.int64(), "next.reward": pa.float32(), "next.done": pa.bool_(),
 }
+TS_TOL = 1e-4  # seconds; LeRobot's timestamp sync check uses the same tolerance
 VIDEO_SAMPLE = 3  # mp4s fully decoded (first, last, middle); the rest are existence-checked
 
 
@@ -110,6 +112,10 @@ def validate(root: str | Path) -> list[str]:
         errors.append(f"unexpected parquet {p.relative_to(root.resolve())}")
     s_dim = (features.get("observation.state", {}).get("shape") or [0])[0]
     a_dim = (features.get("action", {}).get("shape") or [0])[0]
+    fps = info.get("fps")
+    if not isinstance(fps, (int, float)) or fps <= 0:
+        errors.append(f"info.fps must be a positive number, got {fps!r}")
+        fps = None
     cursor = 0
     for e in episodes:
         ep, length = e["episode_index"], e["length"]
@@ -146,6 +152,19 @@ def validate(root: str | Path) -> list[str]:
         done = cols.get("next.done", [])
         if done and (done[-1] is not True or any(done[:-1])):
             errors.append(f"{name}: next.done must be true on the last row only")
+        for c in ("observation.state", "action"):
+            v = cols.get(c)
+            if v and all(len(r) == len(v[0]) for r in v) and not np.isfinite(np.asarray(v, dtype=np.float64)).all():
+                errors.append(f"{name}: {c} has NaN or inf")
+        ts = np.asarray(cols.get("timestamp", []), dtype=np.float64)
+        if ts.size and not np.isfinite(ts).all():
+            errors.append(f"{name}: timestamp has NaN or inf")
+        elif ts.size and fps:
+            off = np.abs(ts - np.arange(ts.size) / fps)
+            if off.max() > TS_TOL:
+                k = int(np.argmax(off > TS_TOL))
+                errors.append(f"{name}: timestamp row {k} is {ts[k]:.6f}s, expected {k / fps:.6f}s "
+                              f"(row / fps={fps})")
         cursor += t.num_rows
 
     if video_feats:

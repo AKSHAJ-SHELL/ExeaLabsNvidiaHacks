@@ -198,6 +198,35 @@ def test_validator_catches_corruption(tmp_path):
     assert any("episode_000002.mp4" in e for e in validate(ds))
 
 
+def test_validator_catches_nan_and_bad_timestamps(tmp_path):
+    import json
+
+    import pyarrow as pa
+    res = run_demo("hero_kitchen", 2, "none", out_dir=tmp_path, scans_dir=SCANS, log=lambda *a: None)
+    ds = res["dataset"]
+    assert validate(ds) == []
+    p = ds / "data" / "chunk-000" / "episode_000001.parquet"
+    t = pq.read_table(p)
+
+    def put(col, values, typ):
+        pq.write_table(t.set_column(t.schema.get_field_index(col), col, pa.array(values, type=typ)), p)
+
+    act = t.column("action").to_pylist()
+    act[5][0] = float("nan")
+    put("action", act, pa.list_(pa.float32()))
+    assert any("action has NaN or inf" in e for e in validate(ds))
+    ts = t.column("timestamp").to_pylist()
+    put("timestamp", [x * 2 for x in ts], pa.float32())  # written at the wrong fps
+    assert any("timestamp row 1 is" in e for e in validate(ds))
+    put("timestamp", ts, pa.float32())
+    assert validate(ds) == []
+    info_p = ds / "meta" / "info.json"
+    info = json.loads(info_p.read_text())
+    info["fps"] = 0
+    info_p.write_text(json.dumps(info))
+    assert any("info.fps must be a positive number" in e for e in validate(ds))
+
+
 def test_generic_writer(tmp_path):
     import numpy as np
     from arrival.export.lerobot import LeRobotWriter
