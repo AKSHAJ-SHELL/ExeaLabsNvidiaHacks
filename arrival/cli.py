@@ -108,7 +108,7 @@ def cmd_validate(a) -> int:
 def cmd_serve(a) -> int:
     from arrival.web.app import serve
 
-    serve(port=a.port, out_dir=Path(a.out), scans_dir=resolve_scans(a.scans))
+    serve(port=a.port, out_dir=Path(a.out), scans_dir=resolve_scans(a.scans), host=a.host)
     return EXIT_OK
 
 
@@ -220,6 +220,8 @@ def build_parser() -> argparse.ArgumentParser:
     v.set_defaults(fn=cmd_validate)
     s = sub.add_parser("serve", help="local page on 127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
+    s.add_argument("--host", default="127.0.0.1",
+                   help="0.0.0.0 to accept uploads from the iOS capture app on the same Wi-Fi")
     s.add_argument("--out", default="out")
     s.add_argument("--scans", default="scans")
     s.set_defaults(fn=cmd_serve)

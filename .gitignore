@@ -5,3 +5,10 @@ __pycache__/
 .env
 *.egg-info/
 .pytest_cache/
+
+# Xcode (ios/)
+xcuserdata/
+DerivedData/
+ios/build/
+*.xcuserstate
+.DS_Store
