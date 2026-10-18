@@ -14,6 +14,8 @@ import traceback
 import zipfile
 from pathlib import Path
 
+from arrival.jobs.queue import write_status
+
 DEFAULT_FAMILIES = ("counter_to_sink", "open_drawer")
 STAGES = ("normalize", "twin", "objects", "sim", "validate", "zip")
 ROOM_RE = re.compile(r"[^a-z0-9_]+")
@@ -43,8 +45,7 @@ def load_upload(path: Path, room_id: str) -> dict:
 
 
 def _write_status(job_dir: Path, status: dict) -> dict:
-    (job_dir / "status.json").write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
-    return status
+    return write_status(job_dir, status)
 
 
 def _stage(job_dir: Path, status: dict, stage: str, log) -> None:

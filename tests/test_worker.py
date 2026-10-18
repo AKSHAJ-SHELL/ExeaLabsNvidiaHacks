@@ -127,3 +127,32 @@ def test_job_download_not_ready_is_404(tmp_path):
         srv.shutdown()
         srv.server_close()
         t.join(timeout=5)
+
+
+def test_status_is_never_read_half_written(tmp_path):
+    """The worker rewrites status.json at every stage while the page and the capture app poll it."""
+    import time
+
+    from arrival.jobs.queue import read_job
+    from arrival.jobs.worker import _write_status
+
+    status = create_job(tmp_path, "k.json", data=b"{}")
+    status["error"] = "x" * 20000  # a long traceback-sized field makes a torn read likely
+    done = threading.Event()
+
+    def writer():
+        while not done.is_set():
+            _write_status(tmp_path / status["id"], status)
+
+    t = threading.Thread(target=writer)
+    t.start()
+    try:
+        reads, t0 = 0, time.perf_counter()
+        while time.perf_counter() - t0 < 0.5:
+            assert read_job(tmp_path, status["id"])["id"] == status["id"]
+            reads += 1
+    finally:
+        done.set()
+        t.join()
+    assert reads > 100
+    assert [p.name for p in (tmp_path / status["id"]).iterdir() if p.name.endswith(".tmp")] == []
