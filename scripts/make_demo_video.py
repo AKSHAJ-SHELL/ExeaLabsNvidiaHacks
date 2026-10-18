@@ -6,12 +6,12 @@ readout is the recorded robot state, and the terminal card is captured stdout of
 
     .venv/bin/python scripts/make_demo_video.py
 
-Writes docs/media/demo.mp4, docs/media/demo.gif and docs/media/poster.png.
+Writes docs/media/demo.mp4, docs/media/demo.gif and docs/media/poster.png. The CLI runs shown in the
+video write to out/demo_video/, so an existing out/datasets/ is left alone.
 """
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -24,15 +24,18 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim.collect import SimEnv  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
 from arrival.sim.tasks import make_tasks  # noqa: E402
+from arrival.twin.compile import compile_twin  # noqa: E402
 
 W, H = 960, 540
 FPS = 30
 MEDIA = ROOT / "docs" / "media"
 ROOM = "hero_kitchen"
 PY = sys.executable
+VIDEO_OUT = "out/demo_video"  # scratch output for the CLI runs shown in the video (gitignored)
 
 BG = (14, 17, 22)
 FG = (240, 242, 245)
@@ -147,7 +150,7 @@ def floor_plan(twin: dict) -> Image.Image:
         d.line([P(*w["start"]), P(*w["end"])], fill=(245, 245, 245), width=6)
     d.text((ox, oy + (y1 - y0) * s + 10),
            f"{twin['room_id']} · {x1 - x0:.1f} m × {y1 - y0:.1f} m · {len(twin['fixtures'])} fixtures · "
-           f"{len(twin['objects'])} objects   (out/twins/{twin['room_id']}/twin.json)", font=small, fill=DIM)
+           f"{len(twin['objects'])} objects   (scans/{twin['room_id']}/scan.json)", font=small, fill=DIM)
     return im
 
 
@@ -248,8 +251,9 @@ def data_frames(ep: dict, n: int) -> list[Image.Image]:
 
 # ---------------------------------------------------------------- 5. terminal card from real CLI output
 def run_cli() -> list[str]:
-    cmds = [["-m", "arrival", "sim", "--episodes", "6", "--people", "2"],
-            ["-m", "arrival", "validate", f"out/datasets/{ROOM}_sim"]]
+    """Run the real CLI into its own folder so the user's out/datasets/<room>_sim is never replaced."""
+    cmds = [["-m", "arrival", "sim", "--episodes", "6", "--people", "2", "--out", VIDEO_OUT],
+            ["-m", "arrival", "validate", f"{VIDEO_OUT}/datasets/{ROOM}_sim"]]
     lines = []
     for c in cmds:
         p = subprocess.run([PY, *c], cwd=ROOT, capture_output=True, text=True)
@@ -295,10 +299,7 @@ def fade_in(frames: list[Image.Image], k: int = 6) -> list[Image.Image]:
 
 def main() -> None:
     MEDIA.mkdir(parents=True, exist_ok=True)
-    twin_path = ROOT / "out" / "twins" / ROOM / "twin.json"
-    if not twin_path.is_file():
-        subprocess.run([PY, "-m", "arrival", "demo", "--episodes", "4"], cwd=ROOT, check=True)
-    twin = json.loads(twin_path.read_text())
+    twin = compile_twin(load_room(ROOM, ROOT / "scans"))  # compiled in memory; nothing under out/ is touched
 
     tasks = make_tasks(twin, ["counter_to_sink", "open_drawer"], 2, seed=0, people=2, log=lambda *a: None)
     sink_t, drawer_t = tasks
