@@ -115,10 +115,12 @@ class SimEnv:
                 along = 0.0
                 h = 0.72
             else:
-                # stand just left of the handle (away from the hinge), outside the door's swing, far enough out
-                # that the far end of the handle arc stays within reach of the tilted-down grasp
+                # stand in front of the handle, outside the door's swing, far enough out that the far end of the
+                # handle arc stays within reach of the tilted-down grasp. Standing 0.1 m further from the hinge
+                # puts the elbow (link4) into the wider counter_a door's swing at about 60 deg now that the door
+                # collides where it is drawn (it used to pass through the panel's top)
                 lx, lz = sx / 2 - 0.02 - door_w(c, self.twin["fixtures"]) + 0.06, 0.53
-                along = -0.1
+                along = 0.0
                 h = 0.65
             yaw = c.get("yaw", 0.0)
             hx = c["position"][0] + np.cos(yaw) * (lx + along)

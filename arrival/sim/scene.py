@@ -40,6 +40,13 @@ def _vr(x0, x1, y0, y1, z0, z1, rgba, o=(0.0, 0.0, 0.0)):
                  (x1 - x0, y1 - y0, z1 - z0), rgba)
 
 
+def _cr(name, x0, x1, y0, y1, z0, z1, rgba, extra, o=(0.0, 0.0, 0.0)):
+    """Collision box from coordinate ranges relative to origin o: pass the same ranges as the visible twin (_vr)
+    so what the robot touches is what the cameras see."""
+    return _box(name, ((x0 + x1) / 2 - o[0], (y0 + y1) / 2 - o[1], (z0 + z1) / 2 - o[2]),
+                (x1 - x0, y1 - y0, z1 - z0), rgba, extra)
+
+
 def _vcyl(rgba, r, a, b, kind="cylinder"):
     f = " ".join(f"{v:.4f}" for v in (*a, *b))
     return f'<geom type="{kind}" fromto="{f}" size="{r}" rgba="{rgba}" {VIS}/>'
@@ -163,8 +170,9 @@ def _upper_cabinet_xml(cid: str, c: dict, fixtures: list[dict]) -> str:
 
 def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
     """Counter in its local frame (+y local = front). Top slab is split around any sink hole; the counter
-    is trimmed where it runs into a fridge/stove. Visible fronts are recessed visual twins of the physical
-    drawer/door panels (hidden, group 3) with small reveals, slim handles, backer, end panels and backsplash."""
+    is trimmed where it runs into a fridge/stove. Visible fronts (small reveals, slim handles, backer, end
+    panels, backsplash) are visual geoms; each moving drawer/door front has a hidden (group 3) collision twin
+    built from the same coordinate ranges, so it collides exactly where it is drawn."""
     fixtures = list(fixtures)
     (cx, cy, _), (sx, sy, h) = c["position"], c["size"]
     cid, yaw = c["id"], c.get("yaw", 0.0)
@@ -241,7 +249,7 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
             f'<body name="{cid}_drawer{k}" pos="{dx:.3f} {front:.3f} {dz:.3f}">'
             f'<joint name="{cid}_drawer{k}" type="slide" axis="0 1 0" range="0 0.4" damping="5" frictionloss="0.5"/>'
             f'<inertial pos="0 -0.2 0" mass="1.5" diaginertia="0.02 0.02 0.02"/>'
-            + _box(f"{cid}_drawer{k}_front", (0, 0.01, 0), (DRAWER_W, 0.02, 0.18), "0.65 0.5 0.36 1", hid)
+            + _cr(f"{cid}_drawer{k}_front", da + r2, db - r2, ya, yb, z0, z1, "0.65 0.5 0.36 1", hid, o)
             + _box(f"{cid}_drawer{k}_tray", (0, -0.2, -0.07), (DRAWER_W - 0.04, 0.38, 0.02), "0.6 0.46 0.33 1", DRAWER)
             + f'<geom name="{cid}_drawer{k}_handle" type="capsule" size="0.012" fromto="0 0.07 -0.05 0 0.07 0.05" '
               f'rgba="{STEEL}" {DRAWER}/>'
@@ -257,7 +265,7 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
         f'<body name="{cid}_door" pos="{hinge[0]:.3f} {hinge[1]:.3f} {hinge[2]}">'
         f'<joint name="{cid}_door" type="hinge" axis="0 0 -1" range="0 1.9" damping="2" frictionloss="0.2"/>'
         f'<inertial pos="{-dw / 2:.3f} 0 0" mass="2" diaginertia="0.05 0.05 0.05"/>'
-        + _box(f"{cid}_door_panel", (-dw / 2, 0.01, 0), (dw, 0.02, 0.6), "0.65 0.5 0.36 1", hid)
+        + _cr(f"{cid}_door_panel", db + r2, xr - r2, ya, yb, zlo, zf - REVEAL, "0.65 0.5 0.36 1", hid, hinge)
         + f'<geom name="{cid}_door_handle" type="capsule" size="0.012" fromto="{hx_:.3f} 0.05 0.1 '
           f'{hx_:.3f} 0.05 0.25" rgba="{STEEL}" {DRAWER}/>'
         + _vr(db + r2, xr - r2, ya, yb, zlo, zf - REVEAL, FRONT, hinge)

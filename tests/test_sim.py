@@ -107,6 +107,81 @@ def test_scripted_expert_puts_mug_in_drawer_and_wipes(twin):
     assert ep["detail"]["wiped_m"] >= 0.4  # the sponge travelled pressed to the counter, not carried above it
 
 
+def test_cabinet_fronts_collide_where_they_are_drawn(twin):
+    """Each counter's hidden door/drawer collision box spans the same height as its visible front, so the arm
+    cannot pass through the top of a front it can see (the door panel used to stop 22 cm below the counter top)."""
+    from arrival.sim.scene import KICK, REVEAL, TOP_T
+
+    m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (1.3, 1.6, 0.75)))
+    d = mujoco.MjData(m)
+    mujoco.mj_forward(m, d)
+    for c in (f for f in twin["fixtures"] if f["type"] == "counter"):
+        zf = c["size"][2] - TOP_T
+        for name, lo, hi in ((f'{c["id"]}_door_panel', KICK + REVEAL, zf - REVEAL),
+                             (f'{c["id"]}_drawer0_front', 0.600, zf - REVEAL)):
+            g = m.geom(name).id
+            z, hz = d.geom_xpos[g][2], m.geom_size[g][2]
+            assert z - hz == pytest.approx(lo, abs=1e-3) and z + hz == pytest.approx(hi, abs=1e-3), name
+
+
+ARM_BODIES = [f"link{i}" for i in range(1, 8)] + ["hand", "finger_l", "finger_r"]
+
+
+def _arm_overlaps(env, task, every: int = 2) -> dict:
+    """Run the scripted expert; worst penetration (m) of any arm geom into the scene, checked with
+    mj_geomDistance every `every` steps. Drawn-only geoms tolerate 1 cm (anything deeper is the arm visibly
+    passing through), colliding geoms 2 cm (soft contact while pushing or gripping). The floor, people,
+    free objects and the arm's own pedestal are skipped."""
+    from arrival.sim.policy import ScriptedExpert
+
+    m, d = env.model, env.data
+    arm_b = {m.body(n).id for n in ARM_BODIES}
+    free = tuple(o["id"] for o in env.twin["objects"])
+    arm = [g for g in range(m.ngeom) if m.geom_bodyid[g] in arm_b]
+    others = [g for g in range(m.ngeom) if m.geom_bodyid[g] not in arm_b | {m.body("robot_base").id}
+              and m.geom_type[g] != mujoco.mjtGeom.mjGEOM_PLANE
+              and not m.body(m.geom_bodyid[g]).name.startswith(("person",) + free)]
+    tol = {g: 0.02 if (m.geom_contype[g] or m.geom_conaffinity[g]) else 0.01 for g in others}
+    policy = ScriptedExpert()
+    policy.reset(env, task)
+    ft, worst, step = np.zeros(6), {}, 0
+    while not policy.done() and step < 600:
+        env.step(policy.act(None))
+        step += 1
+        if step % every:
+            continue
+        for ga in arm:
+            for gb in others:
+                dist = mujoco.mj_geomDistance(m, d, ga, gb, tol[gb], ft)
+                if dist < -tol[gb]:
+                    key = (m.body(m.geom_bodyid[ga]).name, m.geom(gb).name or f"{m.body(m.geom_bodyid[gb]).name}#{gb}")
+                    worst[key] = min(worst.get(key, 0.0), dist)
+    return worst
+
+
+@pytest.mark.parametrize("family,fixture", [("open_door", "counter_a"), ("open_door", "counter_b"),
+                                            ("open_drawer", "counter_a"), ("open_drawer", "counter_b"),
+                                            ("close_door", "counter_a"), ("close_door", "counter_b"),
+                                            ("close_drawer", "counter_a"), ("put_in_drawer", None),
+                                            ("counter_to_sink", None), ("wipe_counter", None)])
+def test_arm_never_passes_through_the_scene(twin, family, fixture):
+    from arrival.sim.tasks import make_tasks
+
+    if fixture:
+        task = {"family": family, "fixture": fixture, "lighting": "neutral", "people": 0, "seed": 0}
+    else:
+        task = make_tasks(twin, [family], 1, seed=0, log=lambda *_: None)[0]
+        fixture = task.get("fixture")
+    if family in ("open_drawer", "close_drawer", "put_in_drawer"):
+        task["handle"], task["joint"] = f"{fixture}_drawer0_handle", f"{fixture}_drawer0"
+    elif family in ("open_door", "close_door"):
+        task["joint"] = f"{fixture}_door"
+    env = SimEnv(twin, task, res=32)
+    worst = _arm_overlaps(env, task)
+    assert env.success(task)[0], env.success(task)[1]
+    assert not worst, {k: f"{-v * 100:.1f} cm" for k, v in worst.items()}
+
+
 def test_bowl_is_hollow_and_goes_to_sink(twin):
     from arrival.sim.collect import run_episode
     from arrival.sim.policy import ScriptedExpert
