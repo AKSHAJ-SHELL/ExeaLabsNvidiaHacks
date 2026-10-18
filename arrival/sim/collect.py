@@ -41,6 +41,11 @@ class SimEnv:
             src = self.fx[task["source"]]
             obj_pos[o["id"]] = [task["start"][0], task["start"][1], self._top(src) + o["size"][2] / 2 + 0.003]
         base, yaw = self._base_pose(task, obj_pos)
+        fx0, fy0, fx1, fy1 = self._free_floor()
+        if task.get("people") and (fx1 - fx0 < 0.5 or fy1 - fy0 < 0.5):
+            # walkers use the floor strip in front of a kitchen-style fixture run; a room laid out differently
+            # (a table in the middle of an office) has none, so the episode runs without people and says so
+            task["people"], task["people_skipped"] = 0, "no free floor strip for walkers in this room"
         xml = build_mjcf(twin, base, yaw, obj_pos, task.get("lighting", "neutral"), task.get("people", 0))
         self.model = mujoco.MjModel.from_xml_string(xml)
         self.data = mujoco.MjData(self.model)
@@ -80,6 +85,16 @@ class SimEnv:
 
     def _base_pose(self, task: dict, obj_pos: dict):
         fam = task["family"]
+        if fam == "move_on_table":
+            # at the table edge nearer the object, halfway between where it starts and where it goes, facing in
+            from arrival.twin.compile import to_local, to_world
+
+            t = self.fx[task["source"]]
+            lx = to_local(obj_pos[task["object_id"]][:2], t)[0]
+            tx = to_local(task["target_xy"], t)[0]
+            bx, by = to_world(((lx + tx) / 2, task["side"] * (t["size"][1] / 2 + 0.28)), t)
+            n = task["side"] * _front(t)  # outward normal of that edge
+            return (bx, by, 0.75), float(np.degrees(np.arctan2(-n[1], -n[0])))
         if fam in ("counter_to_sink", "counter_to_counter"):
             src = self.fx[task["source"]]
             p = np.array(obj_pos[task["object_id"]])
@@ -156,6 +171,8 @@ class SimEnv:
             self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
         if tgt["type"] == "sink":
             return np.array([tgt["position"][0], tgt["position"][1], top + hh + 0.05])
+        if "target_xy" in task:  # move_on_table: a spot on the same table
+            return np.array([task["target_xy"][0], task["target_xy"][1], top + hh + 0.012])
         return np.array([task["target_x"], tgt["position"][1], top + hh + 0.012])
 
     def pull_axis(self, task: dict) -> np.ndarray:
@@ -213,6 +230,14 @@ class SimEnv:
     # ---- physics success ----
     def success(self, task: dict) -> tuple[bool, dict]:
         fam = task["family"]
+        if fam == "move_on_table":  # resting on the table top within 6 cm of the target spot, nearly still
+            oid = task["object_id"]
+            p = self.body_pos(oid)
+            v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
+            err = float(np.linalg.norm(p[:2] - np.asarray(task["target_xy"])))
+            resting = abs(p[2] - (self._top(self.fx[task["target"]]) + self.obj_half_h(oid))) < 0.025
+            return bool(err < 0.06 and resting and v < 0.05), {
+                "object_pos": p.round(4).tolist(), "object_speed": round(v, 4), "target_error_m": round(err, 4)}
         if fam in ("counter_to_sink", "counter_to_counter"):
             oid = task["object_id"]
             p = self.body_pos(oid)

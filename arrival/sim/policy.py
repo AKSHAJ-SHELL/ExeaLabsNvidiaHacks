@@ -45,7 +45,7 @@ class ScriptedExpert(Policy):
     def _waypoints(self, env, task: dict) -> list[tuple]:
         """(pos, R, gripper, steps[, via]) list."""
         fam, o, c = task["family"], FINGER_OPEN, 0.0
-        if fam in ("counter_to_sink", "counter_to_counter"):
+        if fam in ("counter_to_sink", "counter_to_counter", "move_on_table"):
             p = env.body_pos(task["object_id"])
             gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
             tgt = env.place_point(task)
