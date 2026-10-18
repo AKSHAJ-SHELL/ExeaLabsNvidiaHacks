@@ -11,7 +11,6 @@ Writes docs/media/demo.mp4, docs/media/demo.gif and docs/media/poster.png.
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -24,15 +23,18 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim.collect import SimEnv  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
 from arrival.sim.tasks import make_tasks  # noqa: E402
+from arrival.twin.compile import compile_twin  # noqa: E402
 
 W, H = 960, 540
 FPS = 30
 MEDIA = ROOT / "docs" / "media"
 ROOM = "hero_kitchen"
 PY = sys.executable
+VIDEO_OUT = "out/demo_video"
 
 BG = (14, 17, 22)
 FG = (240, 242, 245)
@@ -248,8 +250,8 @@ def data_frames(ep: dict, n: int) -> list[Image.Image]:
 
 # ---------------------------------------------------------------- 5. terminal card from real CLI output
 def run_cli() -> list[str]:
-    cmds = [["-m", "arrival", "sim", "--episodes", "6", "--people", "2"],
-            ["-m", "arrival", "validate", f"out/datasets/{ROOM}_sim"]]
+    cmds = [["-m", "arrival", "sim", "--episodes", "6", "--people", "2", "--out", VIDEO_OUT],
+            ["-m", "arrival", "validate", f"{VIDEO_OUT}/datasets/{ROOM}_sim"]]
     lines = []
     for c in cmds:
         p = subprocess.run([PY, *c], cwd=ROOT, capture_output=True, text=True)
@@ -297,10 +299,7 @@ def fade_in(frames: list[Image.Image], k: int = 6) -> list[Image.Image]:
 
 def main() -> None:
     MEDIA.mkdir(parents=True, exist_ok=True)
-    twin_path = ROOT / "out" / "twins" / ROOM / "twin.json"
-    if not twin_path.is_file():
-        subprocess.run([PY, "-m", "arrival", "demo", "--episodes", "4"], cwd=ROOT, check=True)
-    twin = json.loads(twin_path.read_text())
+    twin = compile_twin(load_room(ROOM, ROOT / "scans"))
 
     tasks = make_tasks(twin, ["counter_to_sink", "open_drawer"], 2, seed=0, people=2, log=lambda *a: None)
     sink_t, drawer_t = tasks
