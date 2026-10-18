@@ -194,14 +194,16 @@ This step comes later. It was **not** run, and nothing in this repo was trained.
 ```bash
 CUDA_VISIBLE_DEVICES=0 python gr00t/experiment/launch_finetune.py \
   --base-model-path nvidia/GR00T-N1.7-3B \
-  --dataset-path out/datasets/hero_kitchen \
+  --dataset-path out/datasets/hero_kitchen_sim \
   --embodiment-tag NEW_EMBODIMENT \
-  --modality-config-path <to-be-written> \
+  --modality-config-path configs/gr00t/arrival_panda_config.py \
   --num-gpus 1 \
   --output-dir out/checkpoints/gr00t \
   --max-steps 2000 \
   --global-batch-size 32
 ```
+
+The modality config is `configs/gr00t/arrival_panda_config.py` (arm trained as relative joint deltas, gripper absolute, 16-step action horizon). `tests/test_gr00t_config.py` checks its keys against the `meta/modality.json` that `arrival sim` writes, with GR00T stubbed out. Not yet checked: that GR00T's own loader reads the dataset (needs the Isaac-GR00T install and a GPU box) and that its stats files compute without NaNs.
 
 ## Known gaps
 
