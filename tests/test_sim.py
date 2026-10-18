@@ -120,6 +120,45 @@ def test_bowl_is_hollow_and_goes_to_sink(twin):
     assert ep["success"], ep["detail"]
 
 
+@pytest.mark.parametrize("family,fixture", [("open_door", "counter_a"), ("open_door", "counter_b"),
+                                            ("close_door", "counter_a"), ("close_door", "counter_b"),
+                                            ("put_in_drawer", "counter_a")])
+def test_arm_stays_out_of_drawn_fronts(twin, family, fixture):
+    """MAN-2: a physics-checked success must not pass the arm through the fronts the cameras see."""
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+
+    task = {"family": family, "fixture": fixture, "lighting": "neutral", "people": 0, "seed": 0}
+    if family == "put_in_drawer":
+        from arrival.sim.tasks import make_tasks
+
+        task = next(t for t in make_tasks(twin, [family], 10, seed=0) if t["fixture"] == fixture)
+        task["handle"], task["joint"] = f"{fixture}_drawer0_handle", f"{fixture}_drawer0"
+    else:
+        task["joint"] = f"{fixture}_door"
+    env = SimEnv(twin, task, res=32)
+    m, d = env.model, env.data
+    arm = [g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith(("link", "hand", "finger"))]
+    drawn = [g for g in range(m.ngeom) if m.geom_group[g] == 2 and m.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX
+             and m.body(m.geom_bodyid[g]).name.startswith(fixture)]
+    assert arm and drawn
+    deepest = [0.0, None]
+    step = env.step
+
+    def checked_step(a):
+        step(a)
+        for ga in arm:
+            for gd in drawn:
+                dist = mujoco.mj_geomDistance(m, d, ga, gd, 0.02, None)
+                if dist < deepest[0]:
+                    deepest[:] = dist, (m.body(m.geom_bodyid[ga]).name, m.body(m.geom_bodyid[gd]).name)
+
+    env.step = checked_step
+    ep = run_episode(env, ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+    assert deepest[0] > -0.01, f"{deepest[1]} penetrates {-deepest[0] * 100:.1f} cm"  # contact depth, not a pass-through
+
+
 def test_vla_requires_server(monkeypatch):
     monkeypatch.delenv("GR00T_POLICY_URL", raising=False)
     with pytest.raises(VLANotConfigured):
