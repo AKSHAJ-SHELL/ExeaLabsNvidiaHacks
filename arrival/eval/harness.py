@@ -59,10 +59,11 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
             s = ep["safety"]
             ok = ep["success"] and not s["human_contact"]
             rows.append((ok, len(ep["states"]) / FPS, wall, s["human_contact"], s["min_human_distance_m"],
-                         ep["ik_error"]))
+                         ep["ik_error"], s["arm_contact_steps"], s["arm_contact_max_depth_m"]))
             tag = "DROP human_contact" if s["human_contact"] else ("OK " if ok else "MISS")
+            arm = f" arm_contact={s['arm_contact_steps']} steps {s['arm_contact_worst']}" if s["arm_contact_steps"] else ""
             log(f"[eval] {task['task_id']}: {tag} {ep['detail']} sim={len(ep['states']) / FPS:.2f}s "
-                f"wall={wall:.1f}s min_human_d={s['min_human_distance_m']}")
+                f"wall={wall:.1f}s min_human_d={s['min_human_distance_m']}{arm}")
         n, k = len(rows), sum(r[0] for r in rows)
         dists = [r[4] for r in rows if r[4] is not None]
         iks = [r[5] for r in rows if r[5] is not None]
@@ -71,13 +72,16 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
                     "mean_wall_seconds": round(sum(r[2] for r in rows) / n, 3),
                     "human_contacts": sum(r[3] for r in rows),
                     "min_human_distance_m": round(min(dists), 4) if dists else None,
-                    "ik_error_max": round(max(iks), 4) if iks else None}
+                    "ik_error_max": round(max(iks), 4) if iks else None,
+                    "arm_contact_episodes": sum(r[6] > 0 for r in rows),
+                    "arm_contact_max_depth_m": round(max(r[7] for r in rows), 4)}
     n = sum(f["episodes"] for f in per.values())
     k = sum(f["successes"] for f in per.values())
     report = {"room_id": room, "policy": policy_name, "episodes_per_family": episodes, "seed": seed,
               "people": people, "holdout": holdout, "resolution": res, "families": per,
               "totals": {"episodes": n, "successes": k, "success_rate": round(k / n, 4) if n else None,
                          "wilson_95": wilson(k, n), "human_contacts": sum(f["human_contacts"] for f in per.values()),
+                         "arm_contact_episodes": sum(f["arm_contact_episodes"] for f in per.values()),
                          "wall_seconds": round(time.perf_counter() - t_all, 2)}}
     path = Path(out_dir) / "eval" / f"{room}_{policy_name}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,17 +91,19 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
 
 
 def table(report: dict) -> str:
-    head = f"{'family':<20}{'ep':>4}{'succ':>6}{'rate':>7}  {'wilson95':<16}{'sim_s':>7}{'wall_s':>8}{'contact':>9}{'min_d_m':>9}{'ik_err':>8}"
+    head = (f"{'family':<20}{'ep':>4}{'succ':>6}{'rate':>7}  {'wilson95':<16}{'sim_s':>7}{'wall_s':>8}{'contact':>9}"
+            f"{'min_d_m':>9}{'ik_err':>8}{'arm_hit':>9}{'arm_mm':>8}")
     lines = [head]
     for fam, f in report["families"].items():
         lo, hi = f["wilson_95"]
         md = "-" if f["min_human_distance_m"] is None else f"{f['min_human_distance_m']:.3f}"
         ik = "-" if f["ik_error_max"] is None else f"{f['ik_error_max']:.3f}"
         lines.append(f"{fam:<20}{f['episodes']:>4}{f['successes']:>6}{f['success_rate']:>7.3f}  [{lo:.3f}, {hi:.3f}]  "
-                     f"{f['mean_seconds']:>7.2f}{f['mean_wall_seconds']:>8.1f}{f['human_contacts']:>9}{md:>9}{ik:>8}")
+                     f"{f['mean_seconds']:>7.2f}{f['mean_wall_seconds']:>8.1f}{f['human_contacts']:>9}{md:>9}{ik:>8}"
+                     f"{f['arm_contact_episodes']:>9}{f['arm_contact_max_depth_m'] * 1000:>8.1f}")
     t = report["totals"]
     lo, hi = t["wilson_95"]
     rate = "-" if t["success_rate"] is None else f"{t['success_rate']:.3f}"
     lines.append(f"{'total':<20}{t['episodes']:>4}{t['successes']:>6}{rate:>7}  [{lo:.3f}, {hi:.3f}]"
-                 f"{'':>24}{t['human_contacts']:>9}")
+                 f"{'':>24}{t['human_contacts']:>9}{'':>17}{t['arm_contact_episodes']:>9}")
     return "\n".join(lines)

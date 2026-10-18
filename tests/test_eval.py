@@ -48,6 +48,39 @@ def test_scripted_eval_shape(twin, tmp_path):
     assert rep["path"] == tmp_path / "eval" / "hero_kitchen_scripted.json"
 
 
+def test_eval_reports_arm_contacts(twin, tmp_path):
+    fams = ["counter_to_sink", "open_door"]
+    rep = evaluate(twin, fams, 1, res=32, people=0, out_dir=tmp_path, log=lambda *_: None)
+    saved = json.loads((tmp_path / "eval" / "hero_kitchen_scripted.json").read_text())
+    for f in saved["families"].values():
+        assert f["episodes"] == 1 and f["arm_contact_episodes"] in (0, 1) and f["arm_contact_max_depth_m"] >= 0
+    assert saved["totals"]["arm_contact_episodes"] == sum(f["arm_contact_episodes"] for f in saved["families"].values())
+    from arrival.eval.harness import table
+
+    assert "arm_hit" in table(rep).splitlines()[0]
+
+
+def test_arm_contact_counts_link_into_wall(twin):
+    from arrival.sim import robot
+    from arrival.sim.safety import SafetyMonitor
+    from arrival.sim.scene import build_mjcf
+
+    def at(base):  # arm at HOME, facing the south wall from `base`
+        m = mujoco.MjModel.from_xml_string(build_mjcf(twin, base, 90.0))
+        d = mujoco.MjData(m)
+        d.qpos[[int(m.joint(j).qposadr[0]) for j in robot.ARM_JOINTS]] = robot.HOME
+        mujoco.mj_forward(m, d)
+        mon = SafetyMonitor(m)
+        mon.update(m, d)
+        return mon.summary()
+
+    s = at((2.0, 2.85, 0.75))  # 0.15 m from the wall: the forearm reaches into it
+    assert s["arm_contact_steps"] == 1 and s["arm_contact_worst"] == ["link5", "wall_south"]
+    assert s["arm_contact_max_depth_m"] > 0.03
+    s = at((2.0, 2.75, 0.75))
+    assert s["arm_contact_steps"] == 0 and s["arm_contact_worst"] is None
+
+
 def test_holdout_uses_template_4_and_y_offset(twin, tmp_path, monkeypatch):
     import arrival.eval.harness as harness
 

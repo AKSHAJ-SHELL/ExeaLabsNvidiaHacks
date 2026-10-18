@@ -1,4 +1,4 @@
-"""Robot-human distance per control step (PPL-2 safety metric).
+"""Robot-human distance per control step (PPL-2 safety metric), plus arm-fixture contacts (POL-4).
 
 People are mocap bodies with non-colliding geoms, so MuJoCo never reports a robot-person contact pair.
 The metric is geometric instead: horizontal clearance between every robot collision geom (capsule axis
@@ -40,6 +40,13 @@ class SafetyMonitor:
                 gs = [g for g in range(model.ngeom) if model.geom_bodyid[g] == b]
                 self.people.append((b, max(float(model.geom_size[g][0]) for g in gs)))
                 self.person_geoms.update(gs)
+        # Arm-fixture contacts: the arm links (not the hand or fingers, which are meant to touch handles and
+        # objects) against anything but the robot itself, people and free objects (bodies with a free joint).
+        links = {model.body(f"link{i}").id for i in range(1, 8)}
+        free = {model.jnt_bodyid[j] for j in range(model.njnt) if model.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE}
+        self.link_geoms = {g for g in range(model.ngeom) if model.geom_bodyid[g] in links}
+        self.robot_geoms = {g for g in range(model.ngeom) if model.geom_bodyid[g] in body_ids}
+        self.free_geoms = {g for g in range(model.ngeom) if model.geom_bodyid[g] in free}
         self.reset()
 
     def reset(self) -> None:
@@ -47,8 +54,25 @@ class SafetyMonitor:
         self.min_d = float("inf")
         self.min_step = None
         self.contact = False
+        self.arm_steps = 0
+        self.arm_depth = 0.0
+        self.arm_worst = None
+
+    def _arm_contacts(self, model, data) -> None:
+        hit = False
+        for i in range(data.ncon):
+            c = data.contact[i]
+            for a, b in ((c.geom1, c.geom2), (c.geom2, c.geom1)):
+                if a in self.link_geoms and b not in self.robot_geoms | self.person_geoms | self.free_geoms:
+                    hit = True
+                    if -c.dist > self.arm_depth:
+                        self.arm_depth = -c.dist
+                        self.arm_worst = (model.body(model.geom_bodyid[a]).name,
+                                          model.geom(b).name or model.body(model.geom_bodyid[b]).name)
+        self.arm_steps += hit
 
     def update(self, model, data) -> None:
+        self._arm_contacts(model, data)
         if not self.people:
             return
         d = float("inf")
@@ -72,7 +96,10 @@ class SafetyMonitor:
         self.n += 1
 
     def summary(self) -> dict:
+        arm = {"arm_contact_steps": self.arm_steps, "arm_contact_max_depth_m": round(self.arm_depth, 4),
+               "arm_contact_worst": list(self.arm_worst) if self.arm_worst else None}
         if not self.people:
-            return {"min_human_distance_m": None, "min_distance_step": None, "human_contact": False, "people": 0}
+            return {"min_human_distance_m": None, "min_distance_step": None, "human_contact": False, "people": 0,
+                    **arm}
         return {"min_human_distance_m": round(self.min_d, 4), "min_distance_step": self.min_step,
-                "human_contact": bool(self.contact), "people": len(self.people)}
+                "human_contact": bool(self.contact), "people": len(self.people), **arm}
