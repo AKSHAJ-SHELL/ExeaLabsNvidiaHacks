@@ -91,7 +91,7 @@ def outro_card() -> Image.Image:
     d = ImageDraw.Draw(im)
     centered(d, 170, "Join in →", _font(40, bold=True), ACCENT)
     centered(d, 225, "github.com/AvnehSBhatia/ExeaLabsNvidiaHacks", _font(36, bold=True), FG)
-    centered(d, 320, "Help wanted: door opening · mobile base · real iPhone scans · fine-tune",
+    centered(d, 320, "Help wanted: real iPhone scans · mobile base · GR00T fine-tune",
              _font(23), (205, 210, 218))
     centered(d, 460, "Arrival · Exea Labs", _font(18), DIM)
     return im
@@ -256,6 +256,8 @@ def run_cli() -> list[str]:
         lines.append("$ python " + " ".join(c))
         lines += [ln for ln in (p.stdout + p.stderr).splitlines() if ln.strip()]
         print(f"[video] {' '.join(c)} -> exit {p.returncode}")
+        if p.returncode:
+            raise RuntimeError(f"Demo command failed: {' '.join(c)}")
     return lines
 
 
@@ -282,8 +284,8 @@ def terminal_frames(lines: list[str], n: int) -> list[Image.Image]:
             if "MISS" in ln:
                 col = (230, 150, 90)
             d.text((36, 52 + i * 17.5), ln, font=f, fill=col)
-        res.append(caption(im, "4 · GR00T-ready dataset",
-                           "LeRobot v2 · parquet + mp4 + modality.json · validated (output captured live)"))
+        res.append(caption(im, "4 · Validated dataset",
+                           "LeRobot v2 · parquet + mp4 + modality.json · validated locally"))
     return res
 
 
@@ -310,15 +312,15 @@ def main() -> None:
     drawer = episode_frames(twin, drawer_t, {"lookat": [dfx["position"][0] - 0.35, 0.75, 0.6], "az": -40, "el": -42,
                                              "d0": 3.4, "d1": 2.2})
     if not (sink["success"] and drawer["success"]):
-        print("[video] WARNING: an episode failed the physics check; its badge will say MISS")
+        raise RuntimeError("A filmed episode failed its physics success check")
 
     term_lines = run_cli()
 
     sim_sub = "MuJoCo kitchen · drawers & doors on joints · people walking · 7-DoF arm, friction grasp"
     segments = [
         [title_card()] * int(3 * FPS),
-        [caption(floor_plan(twin), "1 · Scan → digital twin",
-                 "LiDAR scan (Apple RoomPlan JSON) → walls, fixtures, objects in metres")] * int(4 * FPS),
+        [caption(floor_plan(twin), "1 · Room → digital twin",
+                 "Authored sample room → walls, fixtures, objects in metres")] * int(4 * FPS),
         sim_frames(sink, int(6.5 * FPS), "2 · Simulate the room", sim_sub, f'"{sink_t["instruction"]}"'),
         sim_frames(drawer, int(5.5 * FPS), "2 · Simulate the room", sim_sub, f'"{drawer_t["instruction"]}"'),
         data_frames(sink, int(5 * FPS)),
