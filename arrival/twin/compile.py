@@ -57,7 +57,13 @@ def _footprint_gap(f: dict, counter: dict) -> float:
 
 
 def _synth_counters(fixtures: list[dict]) -> list[dict]:
-    counters = [f for f in fixtures if f["type"] == "counter"]
+    # RoomPlan calls base cabinets "storage". A floor-standing cabinet at worktop height
+    # can already support a sink or stove, even though it remains a hinge_cabinet in the twin.
+    counters = [f for f in fixtures if f["type"] == "counter" or (
+        f["source_category"] == "storage"
+        and abs(f["size"][2] - COUNTER_HEIGHT) <= 0.15
+        and abs(f["position"][2] - f["size"][2] / 2) <= 0.1
+    )]
     out = []
     for f in fixtures:
         if f["source_category"] not in ("sink", "stove"):
