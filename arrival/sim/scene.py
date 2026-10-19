@@ -8,7 +8,7 @@ import math
 
 from arrival.catalog.objects import object_spec
 from arrival.sim import people, robot
-from arrival.twin.compile import to_local
+from arrival.twin.compile import is_counter_host, to_local
 
 LIGHT = {"dim": 0.35, "neutral": 0.7, "bright": 1.0}
 TOP_T = 0.04
@@ -46,8 +46,13 @@ def _vcyl(rgba, r, a, b, kind="cylinder"):
 
 
 def _sinks_in(counter: dict, sinks: list[dict]) -> list[dict]:
-    (cx, cy, _), (sx, sy, _) = counter["position"], counter["size"]
-    return [s for s in sinks if abs(s["position"][0] - cx) < sx / 2 and abs(s["position"][1] - cy) < sy / 2]
+    sx, sy, _ = counter["size"]
+    inside = []
+    for sink in sinks:
+        x, y = to_local(sink["position"], counter)
+        if abs(x) < sx / 2 and abs(y) < sy / 2:
+            inside.append(sink)
+    return inside
 
 
 def _span(c: dict, fixtures: list[dict]) -> tuple[float, float]:
@@ -171,7 +176,7 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
     x0, x1 = _span(c, fixtures)
     xm, xw = (x0 + x1) / 2, x1 - x0
     g = [_box(f"{cid}_carcass", (xm, 0, CARCASS_H / 2), (xw, sy - 0.04, CARCASS_H), "0.55 0.42 0.3 1")]
-    holes = [(s["position"][0] - cx, s["size"][0], s["size"][1], s) for s in _sinks_in(c, sinks)]
+    holes = [(to_local(s["position"], c)[0], s["size"][0], s["size"][1], s) for s in _sinks_in(c, sinks)]
     zt = h - TOP_T / 2
     top = "0.82 0.82 0.8 1"
     if not holes:
@@ -433,7 +438,7 @@ def part_names(twin: dict) -> list[dict]:
 
     for f in fx:
         t, fid = f["type"], f["id"]
-        if t == "counter":
+        if is_counter_host(f):
             for k in range(2):
                 add(fid, f"{fid}_drawer{k}", "slide", 0.3)
             add(fid, f"{fid}_door", "hinge", 1.2)
@@ -470,7 +475,7 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
                      f'rgba="0.93 0.91 0.86 1"/>')
     for f in fx:
         t = f["type"]
-        if t == "counter":
+        if is_counter_host(f):
             world.append(counter_xml(f, sinks, fx))
         elif t.startswith("fridge"):
             world.append(fridge_xml(f))
