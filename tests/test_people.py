@@ -94,6 +94,33 @@ def test_people_never_clip_through_fixtures(twin):
     assert all(len({tuple(np.round(p, 3)) for p in path}) >= 4 for path in walkers.paths)  # via corners repeat
 
 
+def test_feet_stay_out_of_the_counter_at_the_stop(twin):
+    """With the robot base given, the loop stops 0.35 m from the counter front: the swinging toe reaches further
+    than that at full stride, so the walker has to arrive with the swing faded."""
+    base, floor = (2.6, 1.0, 0.75), (0.4, 1.65, 3.6, 2.7)
+    for seed in (2, 5, 7, 16, 18):
+        m = mujoco.MjModel.from_xml_string(build_mjcf(twin, base, n_people=2, people_seed=seed))
+        d = mujoco.MjData(m)
+        walkers = Walkers(2, floor, seed=seed, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"])
+        feet = [g for g in range(m.ngeom) if "_foot_" in m.geom(g).name]
+        (cx, _, _), (sx, _, _) = next(f for f in twin["fixtures"] if f["id"] == "counter_a")["position"],             next(f for f in twin["fixtures"] if f["id"] == "counter_a")["size"]
+        stopped = set()
+        for _ in range(400):
+            walkers.step(m, d, 0.05)
+            mujoco.mj_kinematics(m, d)
+            for g in feet:
+                c, half = d.geom_xpos[g], m.geom_size[g][1]
+                axis = d.geom_xmat[g].reshape(3, 3)[:, 2] * half
+                for p in (c - axis, c + axis):
+                    assert _inside(twin, p[:2], p[2]) is None, (seed, m.geom(g).name, np.round(p, 3))
+            for i in range(2):  # a pause starting in front of counter_a; the fridge visit's pauses sit left of it or deeper
+                x, y = walkers.pos[i]
+                if (walkers.wait[i] > 0 and abs(walkers.wait[i] - walkers.total[i]) < 1e-9
+                        and abs(x - cx) < sx / 2 and y < 1.2):
+                    stopped.add(i)
+        assert stopped == {0, 1}, (seed, stopped)
+
+
 def _door_geoms(m):
     return [g for g in range(m.ngeom) if m.geom_bodyid[g] == m.body("fridge_1_door").id]
 

@@ -23,6 +23,9 @@ STRIDE = 1.30  # metres per full gait cycle (two steps)
 HIP_SWING, KNEE_FLEX, ARM_SWING, ELBOW = 0.40, 0.70, 0.30, 0.35  # radians
 BOB = 0.012
 AMP_RATE = 4.0  # 1/s, how fast the swing fades in and out when a person starts or stops
+BRAKE = (0.6, 0.15)  # into a stop the speed falls with the distance left over 0.6 m, to 15% at the end: the toe reaches
+# 0.53 to 0.65 m ahead at full swing and 0.29 to 0.36 m at 15%; the arrival radius stops a person 4 to 5 cm short of
+# the stop point, 0.35 m from the front, and that is what keeps the longest legs out
 PATH_SAMPLE = 0.05
 P_VISIT = 0.6  # share of episodes with people in which one person goes to the fridge
 OPEN_ANGLE = (0.95, 1.30)  # radians the door is opened to, seeded; a wider swing puts the panel further from the
@@ -488,7 +491,10 @@ class Walkers:
                     d = path[self.idx[i] % len(path)] - self.pos[i]
                     dist = float(np.linalg.norm(d))
                 if self.wait[i] <= 0 and dist > 1e-9:
-                    v = self.speed * (SLOW if self.slow[i][self.idx[i] % len(path)] else 1.0)
+                    nk = self.idx[i] % len(path)
+                    v = self.speed * (SLOW if self.slow[i][nk] else 1.0)
+                    if self.pauses[i][nk] > 0 and not self.slow[i][nk]:  # the slow fridge steps are planned for SLOW
+                        v *= float(np.clip(dist / BRAKE[0], BRAKE[1], 1.0))
                     moved = min(dist, v * dt)
                     self.pos[i] += d / dist * moved
                 yaw = np.arctan2(d[1], d[0])
