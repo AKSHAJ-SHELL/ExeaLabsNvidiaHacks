@@ -139,10 +139,16 @@ def test_status_is_never_read_half_written(tmp_path):
     status = create_job(tmp_path, "k.json", data=b"{}")
     status["error"] = "x" * 20000  # a long traceback-sized field makes a torn read likely
     done = threading.Event()
+    writer_errors = []
+    writes = [0]
 
     def writer():
-        while not done.is_set():
-            _write_status(tmp_path / status["id"], status)
+        try:
+            while not done.is_set():
+                _write_status(tmp_path / status["id"], status)
+                writes[0] += 1
+        except Exception as exc:  # surface errors from the background thread in the test
+            writer_errors.append(exc)
 
     t = threading.Thread(target=writer)
     t.start()
@@ -154,5 +160,8 @@ def test_status_is_never_read_half_written(tmp_path):
     finally:
         done.set()
         t.join()
+    assert not t.is_alive()
+    assert not writer_errors, writer_errors
+    assert writes[0] > 0
     assert reads > 100
     assert [p.name for p in (tmp_path / status["id"]).iterdir() if p.name.endswith(".tmp")] == []
