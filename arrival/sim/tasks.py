@@ -1,4 +1,5 @@
-"""Sim task families: counter_to_sink, counter_to_counter (when reachable), open_drawer, open_door."""
+"""Sim task families: counter_to_sink, counter_to_counter (when reachable), open_drawer, open_door, the close and
+put-away families, wipe_counter and open_fridge."""
 
 from __future__ import annotations
 
@@ -8,7 +9,7 @@ from arrival.catalog.objects import PICKABLE
 from arrival.tasks.propose import LIGHTING, POSE_OFFSETS, WORDINGS, top_z
 
 SIM_FAMILIES = ("counter_to_sink", "counter_to_counter", "open_drawer", "open_door", "close_drawer", "close_door",
-                "put_in_drawer", "wipe_counter")
+                "put_in_drawer", "wipe_counter", "open_fridge")
 REACH = 0.78  # max horizontal eef reach from the arm base used when placing the base
 HOLDOUT_WORDING = 3  # docs/07-eval.md: template 4 and the (0, +0.08) offset are for evaluation only
 HOLDOUT_OFFSET = [0.0, 0.08]
@@ -23,6 +24,7 @@ SIM_WORDINGS = {
                       "Move the {name} from the counter into the drawer."],
     "wipe_counter": ["Wipe the counter with the {name}.", "Clean the counter top with the {name}.",
                      "Scrub the counter using the {name}."],
+    "open_fridge": ["Open the fridge.", "Pull the {name} door open.", "Swing the fridge door open."],
 }
 
 
@@ -85,6 +87,9 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
                                  "fixture": src["id"], "start": list(o["position"])})
         elif fam in ("open_drawer", "open_door", "close_drawer", "close_door"):
             pool = [{"fixture": c["id"], "name": c["id"].replace("_", " ")} for c in counters]
+        elif fam == "open_fridge":
+            pool = [{"fixture": f["id"], "name": "fridge"} for f in twin["fixtures"]
+                    if f["type"].startswith("fridge")]
         if not pool:
             log(f"[sim] family {fam}: no reachable variation in this room for a fixed-base arm; skipped")
             continue

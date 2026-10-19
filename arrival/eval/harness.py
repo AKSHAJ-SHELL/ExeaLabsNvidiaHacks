@@ -31,7 +31,7 @@ def _finish_task(t: dict) -> dict:
     """Same joint names collect() adds."""
     if t["family"] == "open_drawer":
         t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
-    elif t["family"] == "open_door":
+    elif t["family"] in ("open_door", "open_fridge"):
         t["joint"] = f'{t["fixture"]}_door'
     return t
 

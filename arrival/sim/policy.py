@@ -28,6 +28,22 @@ class Policy:
         raise NotImplementedError
 
 
+FRIDGE_HOOK_ALONG = 0.015  # eef past the bar axis toward the free edge, so the hand clears the edge
+FRIDGE_HOOK_OUT = 0.035  # eef out from the bar axis, so the open inner pad clears the panel on the way in
+FRIDGE_HOOK = np.radians(40)  # door angle the hooked pull covers: the arm follows the bar exactly up to here
+FRIDGE_TURN = 0.3  # share of the door's turn the hand follows while hooked; more folds the elbow onto its stop
+FRIDGE_FLIP = np.diag([-1.0, -1.0, 1.0])  # half a turn about the approach axis
+FRIDGE_CLEAR = 0.04  # closed fingers slide this far out along the panel, off the bar's free side
+FRIDGE_FAR = 0.90  # metres from the hinge where the hand rounds the free edge (the edge is at 0.745)
+FRIDGE_BACK = 0.08  # how far inside the panel the hand rounds the edge and lines up before the push
+FRIDGE_PUSH_AT = 0.62  # metres from the hinge where the closed fingertips push the inside face
+FRIDGE_PUSH_GAP = 0.025  # eef behind the inside face: the closed fingertips reach 2.3 cm past the eef
+FRIDGE_PUSH_END = np.radians(80)  # door angle the push is planned to
+FRIDGE_PUSH_ROLL = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])  # fingers stacked vertically
+# for the push, so the hand is narrow along the panel and its far finger stays off the edge
+FRIDGE_PULL_STEPS = 10  # control steps per quarter of the hooked pull and per sixth of the push
+
+
 class ScriptedExpert(Policy):
     """Plans eef waypoints for the task, solves IK per waypoint (biased toward HOME), then plays joint targets
     with min-jerk timing; waypoints flagged `via` are passed through without stopping."""
@@ -180,6 +196,51 @@ class ScriptedExpert(Policy):
                 out.append((pt(a) + 0.005 * nrm(a), ori(a), c, s // 2, k < 8))
             out.append((out[-1][0], out[-1][1], o, self.hold_steps))
             out.append((out[-1][0] + 0.15 * up, out[-1][1], o, s))
+            return out
+        if fam == "open_fridge":
+            # The door is hinged at the fixture's left and swings out into the room. From this base the arm can
+            # follow the bar's arc only to about 40 deg, so the plan has two parts: the fingers close round the
+            # vertical bar from beyond the free edge and pull to 40 deg, then slide off the bar's free side, round
+            # the free edge to the inside face and push the door on with the closed fingertips.
+            hinge, h, _ = env.door_geometry(task)
+            r = np.linalg.norm((h - hinge)[:2])
+            a0 = np.arctan2(*(h - hinge)[[1, 0]])
+            s, up = self.seg_steps, np.array([0, 0, 1.0])
+
+            def along(a):  # from the hinge toward the free edge at door angle a
+                return np.array([np.cos(a), np.sin(a), 0.0])
+
+            def nrm(a):  # outward normal of the panel (the door swings counter-clockwise from above)
+                return np.array([-np.sin(a), np.cos(a), 0.0])
+
+            def pt(a):
+                return hinge + (r + FRIDGE_HOOK_ALONG) * along(a) + FRIDGE_HOOK_OUT * nrm(a) + (h[2] - hinge[2]) * up
+
+            def ori(a):  # the other parallel-jaw heading: the first one starts joint 7 on its +2.90 stop
+                return ik.facing(-along(a0 + FRIDGE_TURN * (a - a0))[:2]) @ FRIDGE_FLIP
+
+            def push(q):  # eef with the closed fingertips on the inside face at door angle q
+                return hinge + FRIDGE_PUSH_AT * along(q) - FRIDGE_PUSH_GAP * nrm(q) + (h[2] - hinge[2]) * up
+
+            def pori(q):
+                return ik.facing(nrm(q)[:2]) @ FRIDGE_PUSH_ROLL
+
+            d0, g = along(a0), pt(a0)
+            out = [(g + 0.25 * d0 + 0.15 * up, ori(a0), o, s), (g + 0.25 * d0, ori(a0), o, s),
+                   (g + 0.08 * d0, ori(a0), o, s, True), (g, ori(a0), o, s), (g, ori(a0), c, self.hold_steps)]
+            for k in range(1, 5):
+                a = a0 + FRIDGE_HOOK * k / 4
+                out.append((pt(a), ori(a), c, FRIDGE_PULL_STEPS, k < 4))
+            a, q1 = a0 + FRIDGE_HOOK, FRIDGE_HOOK
+            far = hinge + FRIDGE_FAR * along(q1) + (h[2] - hinge[2]) * up  # clear of the free edge
+            out += [(pt(a) + FRIDGE_CLEAR * along(a), ori(a), c, s, True),
+                    (far - FRIDGE_BACK * nrm(q1), pori(q1), c, s, True),
+                    (push(q1) - FRIDGE_BACK * nrm(q1), pori(q1), c, s)]
+            for k in range(7):
+                q = q1 - np.radians(3) + (FRIDGE_PUSH_END - q1 + np.radians(3)) * k / 6
+                out.append((push(q), pori(q), c, FRIDGE_PULL_STEPS, k < 6))
+            q = FRIDGE_PUSH_END
+            out += [(push(q) - 0.12 * nrm(q), pori(q), c, s), (push(q) - 0.12 * nrm(q) + 0.1 * up, pori(q), c, s)]
             return out
         raise ValueError(f"unknown family {fam}")
 
