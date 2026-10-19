@@ -13,8 +13,8 @@ import numpy as np
 from arrival.sim import robot
 from arrival.sim.people import Walkers, frame
 from arrival.sim.safety import SafetyMonitor
-from arrival.sim.scene import build_mjcf, door_w, drawer_x
-from arrival.twin.compile import to_local, to_world
+from arrival.sim.scene import build_mjcf, drawer_x, front_stand
+from arrival.twin.compile import is_counter_host, to_local, to_world
 
 FPS = 20
 SUBSTEPS = 25  # 0.002 s physics -> 20 Hz control
@@ -138,17 +138,7 @@ class SimEnv:
             base = self._park(src, along, DRAWER_OPEN_PUT + 0.07 + 0.14)  # front + handle bar + base column + margin
         else:
             src = self.fx[task["fixture"]]
-            if fam in ("open_drawer", "close_drawer"):
-                lx, lz = drawer_x(src, self.twin["fixtures"]), robot_drawer_z()
-                along = 0.0
-                h = 0.72
-            else:
-                # stand just left of the handle (away from the hinge), outside the door's swing, far enough out
-                # that the far end of the handle arc stays within reach of the tilted-down grasp
-                lx, lz = src["size"][0] / 2 - 0.02 - door_w(src, self.twin["fixtures"]) + 0.06, 0.53
-                along = -0.1
-                h = 0.65
-            base = self._park(src, lx + along, h)
+            base = self._park(src, *front_stand(src, fam, self.twin["fixtures"]))
         self.anchor = src
         n = _front(src)
         return base, float(np.degrees(np.arctan2(-n[1], -n[0])))
@@ -180,7 +170,7 @@ class SimEnv:
         tgt = self.fx[task["target"]]
         hh = self.obj_half_h(task["object_id"])
         top = self._top(tgt) if tgt["type"] != "sink" else max(
-            self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
+            self._top(f) for f in self.twin["fixtures"] if is_counter_host(f))
         if tgt["type"] == "sink":
             return np.array([tgt["position"][0], tgt["position"][1], top + hh + 0.05])
         return np.array([task["target_x"], task.get("target_y", tgt["position"][1]), top + hh + 0.012])
@@ -253,7 +243,7 @@ class SimEnv:
             (lx, ly), (sx, sy, _) = to_local(p[:2], tgt), tgt["size"]
             inside = abs(lx) < sx / 2 - 0.01 and abs(ly) < sy / 2 - 0.01
             if tgt["type"] == "sink":
-                top = max(self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
+                top = max(self._top(f) for f in self.twin["fixtures"] if is_counter_host(f))
                 ok = inside and p[2] < top and v < 0.05
             else:
                 ok = inside and abs(p[2] - (self._top(tgt) + self.obj_half_h(oid))) < 0.025 and v < 0.05

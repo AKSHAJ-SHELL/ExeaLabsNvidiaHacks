@@ -7,11 +7,13 @@ import random
 
 from arrival.catalog.objects import PICKABLE
 from arrival.tasks.propose import LIGHTING, POSE_OFFSETS, WORDINGS, top_z
-from arrival.twin.compile import to_local, to_world
+from arrival.sim.scene import stand_is_clear
+from arrival.twin.compile import is_counter_host, to_local, to_world
 
 SIM_FAMILIES = ("counter_to_sink", "counter_to_counter", "open_drawer", "open_door", "close_drawer", "close_door",
                 "put_in_drawer", "wipe_counter")
 REACH = 0.78  # max horizontal eef reach from the arm base used when placing the base
+BASE_CLEAR = 0.15  # the base column is 0.12 m in radius
 HOLDOUT_WORDING = 3  # docs/07-eval.md: template 4 and the (0, +0.08) offset are for evaluation only
 HOLDOUT_OFFSET = [0.0, 0.08]
 SIM_WORDINGS = {
@@ -49,7 +51,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
     are excluded. holdout=True draws only those; families with 3 templates keep all 3 either way.
     use_generated_instructions draws from the Nemotron cache (or the template fallback) for `split` instead."""
     rng = random.Random(seed)
-    counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
+    counters = [f for f in twin["fixtures"] if is_counter_host(f)]
     sinks = [f for f in twin["fixtures"] if f["type"] == "sink"]
     pools: dict[str, list[dict]] = {}
     for fam in families:
@@ -98,7 +100,8 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
                     pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"],
                                  "fixture": src["id"], "start": list(o["position"])})
         elif fam in ("open_drawer", "open_door", "close_drawer", "close_door"):
-            pool = [{"fixture": c["id"], "name": c["id"].replace("_", " ")} for c in counters]
+            pool = [{"fixture": c["id"], "name": c["id"].replace("_", " ")} for c in counters
+                    if stand_is_clear(c, fam, twin["fixtures"], BASE_CLEAR)]
         if not pool:
             log(f"[sim] family {fam}: no reachable variation in this room for a fixed-base arm; skipped")
             continue

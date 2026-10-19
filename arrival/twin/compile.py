@@ -158,7 +158,7 @@ def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
     """RoomPlan captures no small objects: put DEFAULT_OBJECTS on a counter top (the one holding or touching a
     sink if any), away from sinks/stoves, deterministically from `seed`, each at a seeded size. An object that
     does not fit the counter is skipped. Mutates twin."""
-    counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
+    counters = [f for f in twin["fixtures"] if is_counter_host(f)]
     blockers = [f for f in twin["fixtures"] if f["type"] in ("sink", "stove")]
     sinks = [f for f in blockers if f["type"] == "sink"]
     if not counters:
