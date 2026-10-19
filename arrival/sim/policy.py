@@ -186,14 +186,27 @@ class ScriptedExpert(Policy):
     def reset(self, env, task: dict) -> None:
         if task["family"] in ("close_drawer", "close_door"):
             self.open_at = float(env.data.joint(task["joint"]).qpos[0])  # how far the part starts open
+        wps = self._waypoints(env, task)
+        # Parallel jaws make a half turn about the approach axis the same grasp. Plan both and keep the one whose
+        # wrist stays furthest from the joint 7 stops: a fixed world yaw costs joint 7 the whole base swing, which
+        # with one of the two headings pins it at the +2.90 rad stop for the second half of the move.
+        flip = np.diag([-1.0, -1.0, 1.0])
+        plans = [self._plan(env, wps), self._plan(env, [(p, R @ flip, *rest) for p, R, *rest in wps])]
+        best_err = min(err for _, err, _ in plans)
+        self.plan, self.ik_error, _ = min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])
+        self.t = 0
+
+    @staticmethod
+    def _plan(env, waypoints) -> tuple[list[np.ndarray], float, float]:
+        """Joint-space plan for the waypoints: (targets per step, worst IK position error, peak |joint 7|)."""
         q = np.array(HOME)
-        self.plan: list[np.ndarray] = []
+        plan: list[np.ndarray] = []
         prev = np.concatenate([q, [FINGER_OPEN]])
-        self.ik_error = 0.0
+        ik_error, q7 = 0.0, abs(q[6])
         chain: list[tuple[np.ndarray, int]] = []
-        for pos, R, g, steps, *via in self._waypoints(env, task):
+        for pos, R, g, steps, *via in waypoints:
             q, err = ik.solve(env.model, env.data, pos, R, q, env.qadr, env.dofadr)
-            self.ik_error = max(self.ik_error, err)
+            ik_error, q7 = max(ik_error, err), max(q7, abs(float(q[6])))
             nxt = np.concatenate([q, [g]])
             chain.append((nxt, steps))
             if via and via[0]:
@@ -204,9 +217,9 @@ class ScriptedExpert(Policy):
             for k in range(1, total + 1):
                 t = min(1.0, k / max(1, total - 2))
                 s = t ** 3 * (10 - 15 * t + 6 * t * t)
-                self.plan.append(np.array([np.interp(s, knots, pts[:, j]) for j in range(pts.shape[1])]))
+                plan.append(np.array([np.interp(s, knots, pts[:, j]) for j in range(pts.shape[1])]))
             prev, chain = nxt, []
-        self.t = 0
+        return plan, ik_error, q7
 
     def done(self) -> bool:
         return self.t >= len(self.plan)

@@ -73,6 +73,8 @@ def test_scripted_expert_opens_cabinet_door(twin, fixture):
     assert ep["success"], ep["detail"]
     assert ep["detail"]["qpos"] > np.radians(65)  # success threshold is 60 deg; keep a margin
     assert ep["ik_error"] < 0.02
+    # 0.3 rad from the +2.90 rad stop: the planner keeps the parallel-jaw heading with the smaller peak joint 7
+    assert np.abs(ep["states"][:, 6]).max() < robot.RANGES[6][1] - 0.3
 
 
 @pytest.mark.parametrize("family,fixture", [("close_drawer", "counter_a"), ("close_drawer", "counter_b"),
@@ -105,6 +107,34 @@ def test_scripted_expert_puts_mug_in_drawer_and_wipes(twin):
         ep = run_episode(env, ScriptedExpert(), task)
         assert ep["success"], (family, ep["detail"])
     assert ep["detail"]["wiped_m"] >= 0.4  # the sponge travelled pressed to the counter, not carried above it
+
+
+def test_wrist_camera_frames_the_held_object(twin):
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.tasks import make_tasks
+
+    task = make_tasks(twin, ["counter_to_sink"], 1, seed=0)[0]
+    env = SimEnv(twin, task, res=32)
+    seg = mujoco.Renderer(env.model, 32, 32)
+    seg.enable_segmentation_rendering()
+    obj_geoms = {g for g in range(env.model.ngeom) if env.model.body(env.model.geom_bodyid[g]).name == task["object_id"]}
+    policy = ScriptedExpert()
+    policy.reset(env, task)
+    states, closed = [], None
+    while not policy.done():
+        a = policy.act(env.obs())
+        states.append(env.state())
+        env.step(a)
+        if closed is None and a[7] < 0.02:
+            closed = len(states)
+        if closed is not None and len(states) == closed + 8:
+            seg.update_scene(env.data, "wrist")
+            ids = seg.render()[..., 0]
+            held = np.isin(ids, list(obj_geoms)).mean()
+    seg.close()
+    env.close()
+    assert held > 0.2  # measured 35% on the hero mug; 0.2 leaves room for the seeded size variation
+    assert np.abs(np.array(states)[:, 6]).max() < robot.RANGES[6][1] - 0.3  # joint 7 used to sit at +2.90 at the sink
 
 
 def test_bowl_is_hollow_and_goes_to_sink(twin):
