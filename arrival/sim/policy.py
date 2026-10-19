@@ -191,7 +191,11 @@ class ScriptedExpert(Policy):
         # wrist stays furthest from the joint 7 stops: a fixed world yaw costs joint 7 the whole base swing, which
         # with one of the two headings pins it at the +2.90 rad stop for the second half of the move.
         flip = np.diag([-1.0, -1.0, 1.0])
-        plans = [self._plan(env, wps), self._plan(env, [(p, R @ flip, *rest) for p, R, *rest in wps])]
+        plans = [self._plan(env, wps)]
+        if task["family"] not in ("open_door", "close_door"):
+            # the cabinet-door grasp is tuned for its own heading against the solid panel (#47); flipped, the arm
+            # meets the panel and the door stops at 26 to 36 deg
+            plans.append(self._plan(env, [(p, R @ flip, *rest) for p, R, *rest in wps]))
         best_err = min(err for _, err, _ in plans)
         self.plan, self.ik_error, _ = min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])
         self.t = 0
