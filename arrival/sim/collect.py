@@ -11,9 +11,10 @@ import mujoco
 import numpy as np
 
 from arrival.sim import robot
-from arrival.sim.people import Walkers
+from arrival.sim.people import Walkers, frame
 from arrival.sim.safety import SafetyMonitor
 from arrival.sim.scene import build_mjcf, door_w, drawer_x
+from arrival.twin.compile import to_local, to_world
 
 FPS = 20
 SUBSTEPS = 25  # 0.002 s physics -> 20 Hz control
@@ -28,6 +29,11 @@ WIPE_MIN = 0.4  # metres the sponge must travel pressed to the counter for wipe_
 def _front(f: dict) -> np.ndarray:
     y = f.get("yaw", 0.0)
     return np.array([-np.sin(y), np.cos(y), 0.0])
+
+
+def _corners(f: dict) -> list[tuple[float, float]]:
+    hx, hy = f["size"][0] / 2, f["size"][1] / 2
+    return [to_world((dx, dy), f) for dx in (-hx, hx) for dy in (-hy, hy)]
 
 
 class SimEnv:
@@ -55,10 +61,9 @@ class SimEnv:
             self.data.qpos[int(self.model.joint(jn).qposadr[0])] = start[task["family"]]
         self.data.ctrl[:] = list(robot.HOME) + [robot.FINGER_OPEN] * 2
         self.wiped = 0.0  # xy distance the sponge travelled while pressed to the counter (wipe_counter)
-        free = self._free_floor()
-        front = max(f["position"][1] + f["size"][1] / 2 for f in twin["fixtures"])
-        self.walkers = Walkers(task.get("people", 0), free, seed=task.get("seed", 0), base_xy=base[:2],
-                               front_y=front) if task.get("people") else None
+        free, bxy, front, self.people_note = self._free_floor(self.anchor, base)
+        self.walkers = Walkers(task.get("people", 0), free, seed=task.get("seed", 0), base_xy=bxy, front_y=front,
+                               yaw=self.anchor.get("yaw", 0.0), avoid=twin["fixtures"]) if task.get("people") else None
         self.safety = SafetyMonitor(self.model)
         mujoco.mj_forward(self.model, self.data)
         self.cameras, self.res = cameras, res
@@ -72,58 +77,80 @@ class SimEnv:
     def _top(f: dict) -> float:
         return f["position"][2] + f["size"][2] / 2
 
-    def _free_floor(self):
-        xs = [p for w in self.twin["walls"] for p in (w["start"][0], w["end"][0])]
-        ys = [p for w in self.twin["walls"] for p in (w["start"][1], w["end"][1])]
-        deep = max(f["position"][1] + f["size"][1] / 2 for f in self.twin["fixtures"])
-        return (min(xs) + 0.4, deep + 0.9, max(xs) - 0.4, max(ys) - 0.3)
+    def _free_floor(self, anchor: dict, base):
+        """Floor for the walkers, in the frame where `anchor` (the fixture the task works at) faces +y: the strip
+        in front of its run, from 0.9 m past the run's deepest fixture to 0.3 m short of the facing wall or of a
+        run on it, narrowed by runs on the side walls. Returns (floor, base_xy, front_y, note) in that frame.
+        A room with no usable strip gets the whole floor and no counter stop, and `note` says so."""
+        M = frame(anchor.get("yaw", 0.0))
+        n = _front(anchor)[:2]
+        pts = np.array([M @ np.array(p, dtype=float) for w in self.twin["walls"] for p in (w["start"], w["end"])])
+        bx, by = M @ np.array(base[:2])
+        x0, x1, y1 = float(pts[:, 0].min()) + 0.4, float(pts[:, 0].max()) - 0.4, float(pts[:, 1].max()) - 0.3
+        deep, sides = -np.inf, []
+        for f in self.twin["fixtures"]:
+            c = np.array([M @ np.array(p) for p in _corners(f)])
+            d = float(np.dot(_front(f)[:2], n))
+            if d > 0.9:
+                deep = max(deep, float(c[:, 1].max()))
+            elif d < -0.9:
+                y1 = min(y1, float(c[:, 1].min()) - 0.3)
+            else:
+                sides.append(c)
+        y0 = deep + 0.9
+        for c in sides:
+            if c[:, 1].max() > y0:  # a side-wall run reaching into the strip
+                if c[:, 0].max() < bx:
+                    x0 = max(x0, float(c[:, 0].max()) + 0.4)
+                else:
+                    x1 = min(x1, float(c[:, 0].min()) - 0.4)
+        if max(x1 - bx, bx - x0) >= 0.8 and x1 - x0 >= 1.0 and y1 - y0 >= 0.6:
+            return (x0, y0, x1, y1), (bx, by), deep, None
+        whole = (float(pts[:, 0].min()) + 0.4, float(pts[:, 1].min()) + 0.4,
+                 float(pts[:, 0].max()) - 0.4, float(pts[:, 1].max()) - 0.4)
+        return whole, None, None, f"no free strip in front of {anchor['id']}: people walk the whole floor, no counter stop"
+
+    def _park(self, c: dict, along: float, out: float):
+        """Base centre `along` the fixture's run (its local x) and `out` beyond its front face."""
+        yaw, d = c.get("yaw", 0.0), c["size"][1] / 2 + out
+        return (c["position"][0] + np.cos(yaw) * along - np.sin(yaw) * d,
+                c["position"][1] + np.sin(yaw) * along + np.cos(yaw) * d, 0.75)
 
     def _base_pose(self, task: dict, obj_pos: dict):
+        """Base pose in front of the fixture the task works at (kept as `self.anchor`), facing it, on any wall."""
         fam = task["family"]
         if fam in ("counter_to_sink", "counter_to_counter"):
             src = self.fx[task["source"]]
             p = np.array(obj_pos[task["object_id"]])
-            tgt = self.fx[task["target"]]
-            mid = (p[0] + task["target_x"]) / 2
-            n = _front(src)
-            y = src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28)
-            base = (mid, y, 0.75)
+            mid = (p[:2] + self.place_point(task)[:2]) / 2
+            base = self._park(src, to_local(mid, src)[0], 0.28)
             task.setdefault("_place", None)
         elif fam == "wipe_counter":
             src = self.fx[task["source"]]
             p = np.array(obj_pos[task["object_id"]])
-            n = _front(src)
-            base = (p[0], src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28), 0.75)
+            base = self._park(src, to_local(p[:2], src)[0], 0.28)
         elif fam == "put_in_drawer":
             # straight in front, between the mug and the drawer, just beyond the pulled-out front and its handle;
             # parking beside the drawer instead puts the elbow into whatever appliance flanks the counter
-            c = self.fx[task["fixture"]]
-            n = _front(c)
+            src = self.fx[task["fixture"]]
             p = np.array(obj_pos[task["object_id"]])
-            lx = drawer_x(c, self.twin["fixtures"])
-            yaw = c.get("yaw", 0.0)
-            mug_lx = np.cos(yaw) * (p[0] - c["position"][0]) + np.sin(yaw) * (p[1] - c["position"][1])
-            along = (lx + mug_lx) / 2
-            out = c["size"][1] / 2 + DRAWER_OPEN_PUT + 0.07 + 0.14  # front + handle bar + base column + margin
-            base = (c["position"][0] + np.cos(yaw) * along, c["position"][1] + np.sin(yaw) * along + n[1] * out, 0.75)
+            along = (drawer_x(src, self.twin["fixtures"]) + to_local(p[:2], src)[0]) / 2
+            base = self._park(src, along, DRAWER_OPEN_PUT + 0.07 + 0.14)  # front + handle bar + base column + margin
         else:
-            c = self.fx[task["fixture"]]
-            n = _front(c)
-            sx, sy = c["size"][0], c["size"][1]
+            src = self.fx[task["fixture"]]
             if fam in ("open_drawer", "close_drawer"):
-                lx, lz = drawer_x(c, self.twin["fixtures"]), robot_drawer_z()
+                lx, lz = drawer_x(src, self.twin["fixtures"]), robot_drawer_z()
                 along = 0.0
                 h = 0.72
             else:
                 # stand just left of the handle (away from the hinge), outside the door's swing, far enough out
                 # that the far end of the handle arc stays within reach of the tilted-down grasp
-                lx, lz = sx / 2 - 0.02 - door_w(c, self.twin["fixtures"]) + 0.06, 0.53
+                lx, lz = src["size"][0] / 2 - 0.02 - door_w(src, self.twin["fixtures"]) + 0.06, 0.53
                 along = -0.1
                 h = 0.65
-            yaw = c.get("yaw", 0.0)
-            hx = c["position"][0] + np.cos(yaw) * (lx + along)
-            hy = c["position"][1] + np.sin(yaw) * (lx + along) + n[1] * (sy / 2 + h)
-            base = (hx, hy, 0.75)
+            base = self._park(src, lx + along, h)
+        self.anchor = src
+        n = _front(src)
         return base, float(np.degrees(np.arctan2(-n[1], -n[0])))
 
     def body_pos(self, name: str) -> np.ndarray:
@@ -156,10 +183,15 @@ class SimEnv:
             self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
         if tgt["type"] == "sink":
             return np.array([tgt["position"][0], tgt["position"][1], top + hh + 0.05])
-        return np.array([task["target_x"], tgt["position"][1], top + hh + 0.012])
+        return np.array([task["target_x"], task.get("target_y", tgt["position"][1]), top + hh + 0.012])
 
     def pull_axis(self, task: dict) -> np.ndarray:
         return _front(self.fx[task["fixture"]])
+
+    def run_yaw(self) -> float:
+        """Yaw of the run the task works at: 0 on the hero kitchen's north wall, so grasp yaws written for it
+        (fingers across the counter, hand along it) turn with the fixture on any other wall."""
+        return float(self.anchor.get("yaw", 0.0))
 
     def place_point_top(self, task: dict) -> float:
         return self._top(self.fx[task["source"]])
@@ -218,8 +250,8 @@ class SimEnv:
             p = self.body_pos(oid)
             v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
             tgt = self.fx[task["target"]]
-            (cx, cy, _), (sx, sy, _) = tgt["position"], tgt["size"]
-            inside = abs(p[0] - cx) < sx / 2 - 0.01 and abs(p[1] - cy) < sy / 2 - 0.01
+            (lx, ly), (sx, sy, _) = to_local(p[:2], tgt), tgt["size"]
+            inside = abs(lx) < sx / 2 - 0.01 and abs(ly) < sy / 2 - 0.01
             if tgt["type"] == "sink":
                 top = max(self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
                 ok = inside and p[2] < top and v < 0.05
@@ -243,8 +275,8 @@ class SimEnv:
             p = self.body_pos(oid)
             v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
             src = self.fx[task["source"]]
-            (cx, cy, _), (sx, sy, _) = src["position"], src["size"]
-            on_top = (abs(p[0] - cx) < sx / 2 and abs(p[1] - cy) < sy / 2
+            (lx, ly), (sx, sy, _) = to_local(p[:2], src), src["size"]
+            on_top = (abs(lx) < sx / 2 and abs(ly) < sy / 2
                       and abs(p[2] - (self._top(src) + self.obj_half_h(oid))) < 0.025)
             return bool(on_top and self.wiped >= WIPE_MIN and v < 0.05), {
                 "object_pos": p.round(4).tolist(), "wiped_m": round(self.wiped, 3)}
@@ -327,6 +359,8 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
                 task["target"] = plan["target"]
             log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
         env = SimEnv(twin, task, res=res, overview=save_preview and i == 0)
+        if env.people_note:
+            log(f"[sim] {task['task_id']}: {env.people_note}")
         ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
         fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0, "human_contacts": 0})
         fam["attempts"] += 1

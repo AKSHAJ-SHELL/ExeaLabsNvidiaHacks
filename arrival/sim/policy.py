@@ -50,7 +50,7 @@ class ScriptedExpert(Policy):
             gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
             tgt = env.place_point(task)
             rim = env.rim_grasp(task["object_id"])
-            yaw = 0.0
+            yaw = env.run_yaw()  # fingers close across the counter, whichever wall it stands on
             if rim is not None:  # bowl: pinch the rim nearest the robot, pads straddling the wall 2 cm below the lip
                 off, yaw = rim
                 p = p + np.array([off[0], off[1], 0.0])
@@ -79,7 +79,7 @@ class ScriptedExpert(Policy):
             p = env.body_pos(task["object_id"])
             gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
             tgt = env.drawer_place_point(task)
-            R = ik.down(self._grip_yaw(env, np.pi / 2))
+            R = ik.down(self._grip_yaw(env, env.run_yaw() + np.pi / 2))
             s = self.seg_steps
             lift = gz + 0.15
             n_steps = int(np.ceil((lift - tgt[2]) / 0.1))
@@ -94,10 +94,11 @@ class ScriptedExpert(Policy):
             p = env.body_pos(task["object_id"])
             top = env.place_point_top(task)
             hh = env.obj_half_h(task["object_id"])
-            R = ik.down(self._grip_yaw(env, 0.0))
+            R = ik.down(self._grip_yaw(env, env.run_yaw()))
             s = self.seg_steps
             press = top + hh - 0.004
-            strokes = [(p[0] + dx, p[1], press) for dx in (0.15, -0.15, 0.15, -0.15)]
+            u = np.array([np.cos(env.run_yaw()), np.sin(env.run_yaw())])  # strokes run along the counter
+            strokes = [(p[0] + d * u[0], p[1] + d * u[1], press) for d in (0.15, -0.15, 0.15, -0.15)]
             return [((p[0], p[1], p[2] + 0.15), R, o, s), ((p[0], p[1], p[2]), R, o, s),
                     ((p[0], p[1], p[2]), R, c, self.hold_steps), ((p[0], p[1], press), R, c, s // 2)] + [
                     (w, R, c, s, k < 3) for k, w in enumerate(strokes)] + [

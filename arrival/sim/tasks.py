@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
 import random
 
 from arrival.catalog.objects import PICKABLE
 from arrival.tasks.propose import LIGHTING, POSE_OFFSETS, WORDINGS, top_z
+from arrival.twin.compile import to_local, to_world
 
 SIM_FAMILIES = ("counter_to_sink", "counter_to_counter", "open_drawer", "open_door", "close_drawer", "close_door",
                 "put_in_drawer", "wipe_counter")
@@ -30,6 +32,15 @@ def _fx(twin: dict, fid: str) -> dict:
     return next(f for f in twin["fixtures"] if f["id"] == fid)
 
 
+def _holder(o: dict, counters: list[dict]) -> dict | None:
+    """The counter whose top the object stands on, judged in the counter's own frame (any wall, any yaw)."""
+    for c in counters:
+        lx, ly = to_local(o["position"], c)
+        if abs(lx) < c["size"][0] / 2 and abs(ly) < c["size"][1] / 2:
+            return c
+    return None
+
+
 def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: int = 0, holdout: bool = False,
                split: str = "train", use_generated_instructions: bool = False,
                log=print) -> list[dict]:
@@ -48,30 +59,33 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
                 # bowl is held by its rim (MAN-4); plate, pan and spatula stay out of the pick pool
                 if o["catalog_id"] not in PICKABLE + ("bowl",):
                     continue
-                src = next((c for c in counters if abs(o["position"][0] - c["position"][0]) < c["size"][0] / 2), None)
+                src = _holder(o, counters)
                 if src is None:
                     continue
-                if fam == "counter_to_sink":
-                    tgts = [s for s in sinks if abs(s["position"][0] - o["position"][0]) < 2 * REACH - 0.3]
-                    tgt_xy = [(s, s["position"][0]) for s in tgts]
+                ox = to_local(o["position"], src)[0]  # local x: distance along the source run, whatever wall it is on
+                if fam == "counter_to_sink":  # a sink set into the same run, within reach along it
+                    tgts = [s for s in sinks if abs(to_local(s["position"], src)[0] - ox) < 2 * REACH - 0.3
+                            and abs(to_local(s["position"], src)[1]) < src["size"][1] / 2]
+                    tgt_xy = [(s, s["position"][0], s["position"][1]) for s in tgts]
                 else:
                     tgt_xy = []
                     for c in counters:
-                        if c is src:
-                            continue
-                        edge = c["position"][0] - (c["size"][0] / 2 - 0.12) * (1 if c["position"][0] > o["position"][0] else -1)
-                        if abs(edge - o["position"][0]) < 1.0:  # base sits between source and target
-                            tgt_xy.append((c, edge))
-                for tgt, tx in tgt_xy:
+                        if c is src or math.cos(c.get("yaw", 0.0) - src.get("yaw", 0.0)) < 0.9:
+                            continue  # the target must continue the source run
+                        side = 1 if to_local(c["position"], src)[0] > ox else -1
+                        tx, ty = to_world((-side * (c["size"][0] / 2 - 0.12), 0.0), c)  # the target's near end
+                        if abs(to_local((tx, ty), src)[0] - ox) < 1.0:  # base sits between source and target
+                            tgt_xy.append((c, tx, ty))
+                for tgt, tx, ty in tgt_xy:
                     pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"],
-                                 "target": tgt["id"], "target_x": tx, "start": list(o["position"])})
+                                 "target": tgt["id"], "target_x": tx, "target_y": ty, "start": list(o["position"])})
         elif fam == "put_in_drawer":
             from arrival.sim.scene import drawer_x
             for o in twin["objects"]:
                 if o["catalog_id"] != "mug":
                     continue
-                src = next((c for c in counters if abs(o["position"][0] - c["position"][0]) < c["size"][0] / 2), None)
-                if src is None or abs(o["position"][0] - (src["position"][0] + drawer_x(src, twin["fixtures"]))) > 0.6:
+                src = _holder(o, counters)
+                if src is None or abs(to_local(o["position"], src)[0] - drawer_x(src, twin["fixtures"])) > 0.6:
                     continue  # the base parks beside the open drawer, so the mug must be within reach of that spot
                 pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"], "fixture": src["id"],
                              "start": list(o["position"])})
@@ -79,7 +93,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
             for o in twin["objects"]:
                 if o["catalog_id"] != "sponge":
                     continue
-                src = next((c for c in counters if abs(o["position"][0] - c["position"][0]) < c["size"][0] / 2), None)
+                src = _holder(o, counters)
                 if src is not None:
                     pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"],
                                  "fixture": src["id"], "start": list(o["position"])})
@@ -110,8 +124,10 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
              "holdout": holdout, "instruction": instr, "split": split, **v}
         if "start" in v:
             off = rng.choice([o for o in POSE_OFFSETS if (list(o) == HOLDOUT_OFFSET) == holdout])
-            t["start"] = [v["start"][0] + off[0], v["start"][1] + off[1] * 0.5,
-                          top_z(_fx(twin, v["source"])) + 0.06]
+            src = _fx(twin, v["source"])
+            co, si = math.cos(src.get("yaw", 0.0)), math.sin(src.get("yaw", 0.0))  # offsets run along the counter
+            t["start"] = [v["start"][0] + co * off[0] - si * off[1] * 0.5, v["start"][1] + si * off[0] + co * off[1] * 0.5,
+                          top_z(src) + 0.06]
         t["task_id"] = f"sim_{fam}_{i:04d}"
         tasks.append(t)
     return tasks
