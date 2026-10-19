@@ -71,7 +71,7 @@ def test_scripted_expert_opens_cabinet_door(twin, fixture):
     env = SimEnv(twin, task, res=32)
     ep = run_episode(env, ScriptedExpert(), task)
     assert ep["success"], ep["detail"]
-    assert ep["detail"]["qpos"] > np.radians(65)  # success threshold is 60 deg; keep a margin
+    assert ep["detail"]["qpos"] > np.radians(65)  # MAN-2 reaches ~66.6 deg; preserve this narrow margin
     assert ep["ik_error"] < 0.02
 
 
@@ -139,8 +139,9 @@ def test_arm_stays_out_of_drawn_fronts(twin, family, fixture):
     env = SimEnv(twin, task, res=32)
     m, d = env.model, env.data
     arm = [g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith(("link", "hand", "finger"))]
+    fixture_ids = tuple(f["id"] for f in twin["fixtures"])
     drawn = [g for g in range(m.ngeom) if m.geom_group[g] == 2 and m.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX
-             and m.body(m.geom_bodyid[g]).name.startswith(fixture)]
+             and m.body(m.geom_bodyid[g]).name.startswith(fixture_ids)]
     assert arm and drawn
     deepest = [0.0, None]
     step = env.step
