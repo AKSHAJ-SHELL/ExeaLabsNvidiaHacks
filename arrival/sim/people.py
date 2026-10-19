@@ -1,5 +1,6 @@
 """Kinematic walking people: proportioned capsule bodies on mocap roots, limbs swung by a gait phase,
-on seeded waypoint loops through free floor that keep clear of fixture footprints."""
+on seeded waypoint loops through free floor that keep clear of fixture footprints. In some episodes one person
+opens the fridge: the hinge is driven along a smooth profile while the hand holds the handle."""
 
 from __future__ import annotations
 
@@ -23,6 +24,15 @@ HIP_SWING, KNEE_FLEX, ARM_SWING, ELBOW = 0.40, 0.70, 0.30, 0.35  # radians
 BOB = 0.012
 AMP_RATE = 4.0  # 1/s, how fast the swing fades in and out when a person starts or stops
 PATH_SAMPLE = 0.05
+P_VISIT = 0.6  # share of episodes with people in which one person goes to the fridge
+OPEN_ANGLE = (0.95, 1.30)  # radians the door is opened to, seeded; a wider swing puts the panel further from the
+MAX_ANGLE = 1.45  # person in the doorway, so the angle is raised in 5 deg steps up to this when the stand point is close
+SWING_T, REACH_T = 1.2, 0.3  # seconds to swing the door, and for the hand to settle on or leave the handle
+LOOK_T = (1.5, 3.5)  # seconds spent in the open doorway
+SLOW = 0.45  # the two short steps into and out of the doorway, as a share of walking speed; the stride scales with it
+LET_GO = 0.30  # radians: the hand pulls the bar this far, then lets go and the door swings on; past about 20 deg the
+# person is on the inner side of the panel while the bar is on the outer face, so an arm still on the bar would cross it
+CATCH = 0.25  # radians: closing, the hand pushes the inner face at the free edge down to here, then the door shuts itself
 
 
 def person_spec(seed: int, i: int) -> dict:
@@ -63,6 +73,28 @@ def limb_segments(s: dict, phase: float, amp: float) -> dict[str, tuple[np.ndarr
         out[f"thigh_{side}"], out[f"shank_{side}"], out[f"foot_{side}"] = (hip, knee), (knee, ankle), (ankle, toe)
         out[f"uarm_{side}"], out[f"farm_{side}"] = (sh, elbow), (elbow, wrist)
     return out
+
+
+def reach_arm(s: dict, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Body-frame elbow and wrist of the right arm reaching for a body-frame point: two-link IK with the elbow
+    hanging below the shoulder-to-target line, the wrist stopping at 98% of the arm's length when out of reach."""
+    sh = np.array([0.0, -s["shoulder_w"], s["shoulder_z"]])
+    l1, l2 = s["upper_arm"], s["forearm"]
+    d = target - sh
+    dist = max(float(np.linalg.norm(d)), 1e-6)
+    u = d / dist
+    reach = min(dist, 0.98 * (l1 + l2))
+    a = math.acos(float(np.clip((l1 * l1 + reach * reach - l2 * l2) / (2 * l1 * reach), -1.0, 1.0)))
+    perp = np.array([0.0, 0.0, -1.0]) + u[2] * u  # the down direction, less its part along the arm
+    n = float(np.linalg.norm(perp))
+    perp = perp / n if n > 1e-6 else np.array([0.0, -1.0, 0.0])
+    return sh + l1 * (math.cos(a) * u + math.sin(a) * perp), sh + reach * u
+
+
+def toe_reach(s: dict, amp: float) -> float:
+    """How far ahead of the body centre the toe gets at swing amplitude amp, including the foot's radius. Standing,
+    the foot still points 0.13 h forward."""
+    return max(limb_segments(s, ph, amp)["foot_r"][1][0] for ph in np.linspace(0.0, 2 * math.pi, 36)) + 0.8 * s["limb_r"]
 
 
 def _cap(name: str, r: float, a, b, rgba: str) -> str:
@@ -196,6 +228,66 @@ def _seg_dist(a, b, p) -> float:
     return float(np.linalg.norm(a + t * ab - p))
 
 
+def _rot(yaw: float, v) -> np.ndarray:
+    c, si = math.cos(yaw), math.sin(yaw)
+    return np.array([c * v[0] - si * v[1], si * v[0] + c * v[1]])
+
+
+def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | None:
+    """Where one person stands to open the fridge and how far the door goes. The person faces the fridge beside
+    the handle, outside the door's swing (s1), reaches across to open it, takes a slow step into the doorway on the
+    handle side (s2), and comes back to close it. None when the room has no fridge, a stand point is off the floor
+    or in a footprint, a stand point or the swing comes within CLEAR of the robot base, or no opening angle keeps
+    the panel clear of the person's body and toes (a wider swing moves the panel away from the doorway)."""
+    from arrival.sim.scene import fridge_door_frame
+
+    fr = next((f for f in fixtures or [] if f["type"].startswith("fridge")), None)
+    if fr is None:
+        return None
+    g = fridge_door_frame(fr)
+    r = spec["radius"]
+    yaw, L, front = fr.get("yaw", 0.0), g["length"], g["front"]
+    centre = np.array(fr["position"][:2], dtype=float)
+    hinge = centre + _rot(yaw, g["hinge"])
+    s1 = centre + _rot(yaw, (L / 2 + r, front + r + 0.20))  # 0.2 out: the shoulder stays on the bar's side longer
+    s2 = centre + _rot(yaw, (L / 2 - 0.15, front + r + 0.05))
+    toe = _rot(yaw, (0.0, -toe_reach(spec, 0.0)))  # the standing toe tip, facing the fridge
+    stride = toe_reach(spec, SLOW)
+    x0, _, x1, y1 = floor  # the stand points are in the work strip in front of the floor rectangle, like the counter stop
+    prints = Footprints(fixtures)
+    for p in (s1, s2):
+        if (not (x0 <= p[0] <= x1 and p[1] <= y1) or prints.blocked(p, r)
+                or prints.blocked(p + toe, 0.8 * spec["limb_r"])):
+            return None
+    if base_xy is not None:
+        base = np.asarray(base_xy, dtype=float)
+        if (np.linalg.norm(base - hinge) < L + CLEAR or np.linalg.norm(s1 - base) < CLEAR
+                or np.linalg.norm(s2 - base) < CLEAR):
+            return None
+
+    def panel_dist(p, q):  # distance from a stand point to the door panel at angle q
+        return _seg_dist(hinge, hinge + L * _rot(yaw + q, (1.0, 0.0)), p)
+
+    swing = np.linspace(0.0, OPEN_ANGLE[1], 40)
+    if (min(panel_dist(s1, q) for q in swing) < r + 0.02
+            or min(panel_dist(s1 + toe, q) for q in swing) < 0.8 * spec["limb_r"] + 0.02):
+        return None
+    q_open = float(rng.uniform(*OPEN_ANGLE))
+    leg = [s1 + (s2 - s1) * t for t in np.linspace(0.0, 1.0, 12)]
+    while q_open <= MAX_ANGLE:
+        if (min(panel_dist(p, q_open) for p in leg) >= stride + 0.02
+                and panel_dist(s2 + toe, q_open) >= 0.8 * spec["limb_r"] + 0.02):
+            break
+        q_open += math.radians(5)
+    else:
+        return None
+    sector = {"position": [*(centre + _rot(yaw, (0.0, front + L / 2))), 0.0], "size": [L + 0.7, L + 0.7, 0.0],
+              "yaw": yaw}  # the quarter disc the door sweeps, grown for toes: the other walkers route round it
+    return {"fixture": fr["id"], "hinge": hinge, "yaw": yaw, "length": L, "handle": g["handle"], "centre": centre,
+            "face": yaw - math.pi / 2, "s1": s1, "s2": s2, "q_open": q_open, "look": float(rng.uniform(*LOOK_T)),
+            "sector": sector}
+
+
 def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = None, r: float = 0.0):
     """Free point -> approach from behind -> walk a lane behind the base (crossing the robot's work strip)
     -> stop at the counter on the far side -> free point. Free points are resampled until no segment comes
@@ -230,70 +322,179 @@ def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = 
     return routed, waits
 
 
+def _smooth(t: float) -> float:
+    t = min(max(t, 0.0), 1.0)
+    return t * t * (3 - 2 * t)
+
+
 class Walkers:
     """Each person loops through random waypoints in a free-floor rectangle at ~0.8 m/s, steering clear of
     the fixtures. Given the robot base and the counter front, the loop instead crosses the strip behind the base
-    and pauses at the counter. Limbs follow a gait phase driven by distance walked; the swing fades out when standing."""
+    and pauses at the counter. Limbs follow a gait phase driven by distance walked; the swing fades out when standing.
+    With a fridge in the room, P_VISIT of the seeds send one person to it first: they start beside the handle,
+    hold it while the hinge swings open, stand in the doorway, come back, hold the handle while it swings shut,
+    and then walk their loop. The others route round the door's swing. `fridge_visit` True or False forces it."""
 
     def __init__(self, n: int, floor: tuple[float, float, float, float], seed: int = 0, speed: float = 0.8,
-                 base_xy=None, front_y: float | None = None, fixtures=None):
+                 base_xy=None, front_y: float | None = None, fixtures=None, fridge_visit: bool | None = None):
         rng = np.random.default_rng(seed)
         self.specs = [person_spec(seed, i) for i in range(n)]
+        self.visit = None
+        if n and fixtures and fridge_visit is not False:  # its own stream, so seeds without a visit walk as before
+            vrng = np.random.default_rng([seed, 7919])
+            who = int(vrng.integers(n))
+            if fridge_visit or vrng.random() < P_VISIT:
+                plan = plan_fridge_visit(fixtures, floor, self.specs[who], vrng, base_xy)
+                self.visit = {**plan, "person": who} if plan else None
         prints = Footprints(fixtures)
-        self.paths, self.pauses = [], []
-        for s in self.specs:
+        avoid = Footprints(list(fixtures or []) + [self.visit["sector"]]) if self.visit else prints
+        self.paths, self.pauses, self.faces, self.slow = [], [], [], []
+        for i, s in enumerate(self.specs):
+            visiting = self.visit is not None and i == self.visit["person"]
+            pr = prints if visiting else avoid
             if base_xy is None:
-                pts = free_path(rng, floor, prints, s["radius"])
+                pts = free_path(rng, floor, pr, s["radius"])
                 pause = [0.0] * len(pts)
             else:
-                pts, pause = _interaction_loop(rng, floor, base_xy, front_y, prints, s["radius"])
+                pts, pause = _interaction_loop(rng, floor, base_xy, front_y, pr, s["radius"])
+            faces, slow = [None] * len(pts), [False] * len(pts)
+            if visiting:
+                pts, pause, faces, slow = self._splice_visit(pts, pause, s["radius"], floor, fixtures, base_xy)
             self.paths.append(pts)
             self.pauses.append(pause)
+            self.faces.append(faces)
+            self.slow.append(slow)
         self.pos = [p[0].copy() for p in self.paths]
         self.idx = [1] * n
         self.wait = [0.0] * n
+        self.total = [0.0] * n  # length of the pause being waited out
+        self.at = [0] * n  # waypoint index of that pause
         self.phase = [0.0] * n
         self.amp = [0.0] * n
+        self.yaw = [0.0] * n
+        self.reach = [None] * n  # (weight 0..1, world point) the right hand is going for
         self.speed = speed
+        self.door_q, self.door_max = 0.0, 0.0
+        self.driven_geoms: set[int] = set()  # the door's geoms while a person holds it open
         self._gids: list[dict[str, int]] | None = None
+        self._door = None
+        if self.visit:
+            who = self.visit["person"]
+            self.wait[who], self.total[who], self.at[who] = self.pauses[who][0], self.pauses[who][0], 0
+
+    def _splice_visit(self, pts, pause, r, floor, fixtures, base_xy):
+        """Put the fridge trip at the front of the loop: s1 (open), s2 (look), s1 (close), then the loop's own
+        points. The leg out of s1 and the leg back to it are routed round the fixtures and the robot base; the
+        loop's own legs stay as they were (its lane runs closer to the base on purpose)."""
+        v = self.visit
+        hold = REACH_T + SWING_T + REACH_T
+        block = list(fixtures or [])
+        if base_xy is not None:
+            block.append({"position": [base_xy[0], base_xy[1], 0.0], "size": [2 * CLEAR, 2 * CLEAR, 0.0], "yaw": 0.0})
+        prints = Footprints(block)
+        out = route(v["s1"], pts[0], prints, r, floor) or []
+        back = route(pts[-1], v["s1"], prints, r, floor) or []
+        path = [v["s1"], v["s2"], v["s1"]] + out + list(pts) + back
+        waits = [hold, v["look"], hold] + [0.0] * len(out) + list(pause) + [0.0] * len(back)
+        faces = ["open", "look", "close"] + [None] * (len(out) + len(pts) + len(back))
+        slow = [False, True, True] + [False] * (len(out) + len(pts) + len(back))
+        return path, waits, faces, slow
 
     def _bind(self, model) -> None:
         self._gids = [{k: model.geom(f"person_{i}_{k}").id for k in limb_segments(s, 0.0, 0.0)}
                       for i, s in enumerate(self.specs)]
+        if self.visit:
+            jn = f"{self.visit['fixture']}_door"
+            try:
+                j = model.joint(jn)
+                body = model.body(jn).id
+            except KeyError:
+                self.visit = None  # a model built without the fridge: the person just walks
+                return
+            self._door = (int(j.qposadr[0]), int(j.dofadr[0]),
+                          {g for g in range(model.ngeom) if model.geom_bodyid[g] == body})
+
+    def door_point(self, q: float, lx: float, ly: float) -> np.ndarray:
+        """A point of the door at angle q, from its frame: x along the panel from the hinge, y out of the front face
+        (negative is the inner face), at the handle's height."""
+        v = self.visit
+        xy = v["hinge"] + _rot(v["yaw"] + q, (lx, ly))
+        return np.array([xy[0], xy[1], v["handle"][2]])
+
+    def _visit_step(self, i: int, tag: str) -> None:
+        """During the open or close pause: the hand takes the bar, the door swings, the hand lets go (LET_GO).
+        Closing, the hand pushes the inner face at the free edge and leaves it at CATCH; the door shuts itself."""
+        v = self.visit
+        hx, hy, _ = v["handle"]
+        t = self.total[i] - self.wait[i]
+        p = _smooth((t - REACH_T) / SWING_T)
+        q = v["q_open"] * (p if tag == "open" else 1.0 - p)
+        self.door_q = q
+        self.door_max = max(self.door_max, q)
+        off = 0.8 * self.specs[i]["limb_r"] + 0.02  # forearm radius plus a gap, so the hand sits on the surface
+        if tag == "open":
+            hold = 1.0 - _smooth((q - LET_GO) / 0.2)
+            target = self.door_point(q, hx, hy + off)
+        else:
+            hold = _smooth((q - CATCH) / 0.2)
+            target = self.door_point(q, v["length"] - 0.05, -off - 0.065)  # 0.065 keeps the forearm capsule above the panel's top edge
+        w = min(_smooth(t / REACH_T), _smooth((self.total[i] - t) / REACH_T)) * hold
+        self.reach[i] = (w, target) if w > 0.0 else None
 
     def pose_limbs(self, model, i: int) -> None:
         """Write the limb capsules' body-frame pose for person i's current gait phase into the model."""
         if self._gids is None:
             self._bind(model)
         q = np.zeros(4)
-        for k, (a, b) in limb_segments(self.specs[i], self.phase[i], self.amp[i]).items():
+        limbs = limb_segments(self.specs[i], self.phase[i], self.amp[i])
+        if self.reach[i] is not None:
+            w, target = self.reach[i]
+            b = _rot(-self.yaw[i], target[:2] - self.pos[i])
+            elbow, wrist = reach_arm(self.specs[i], np.array([b[0], b[1], target[2]]))
+            sh, e0 = limbs["uarm_r"]
+            _, w0 = limbs["farm_r"]
+            e1 = (1 - w) * e0 + w * elbow
+            limbs["uarm_r"], limbs["farm_r"] = (sh, e1), (e1, (1 - w) * w0 + w * wrist)
+        for k, (a, b) in limbs.items():
             g = self._gids[i][k]
             model.geom_pos[g] = (a + b) / 2
             mujoco.mju_quatZ2Vec(q, b - a)
             model.geom_quat[g] = q
 
     def step(self, model, data, dt: float) -> list[list[float]]:
+        if self._gids is None:
+            self._bind(model)
         out = []
         for i, path in enumerate(self.paths):
             moved = 0.0
+            self.reach[i] = None
             if self.wait[i] > 0:
                 self.wait[i] -= dt
-                yaw = -np.pi / 2  # face the counter while stopped
+                tag = self.faces[i][self.at[i]]
+                if tag in ("open", "look", "close") and self.visit:
+                    if tag != "look":
+                        self._visit_step(i, tag)
+                    yaw = self.visit["face"]  # square to the fridge; the toes stay out of the door's swing
+                else:
+                    yaw = -np.pi / 2  # face the counter while stopped
             else:
                 k = self.idx[i] % len(path)
                 d = path[k] - self.pos[i]
                 dist = float(np.linalg.norm(d))
                 if dist < 0.05:  # at a waypoint: pause there, or turn to the next one without breaking stride
-                    self.wait[i] = self.pauses[i][k]
+                    self.wait[i] = self.total[i] = self.pauses[i][k]
+                    self.at[i] = k
                     self.idx[i] += 1
                     d = path[self.idx[i] % len(path)] - self.pos[i]
                     dist = float(np.linalg.norm(d))
                 if self.wait[i] <= 0 and dist > 1e-9:
-                    moved = min(dist, self.speed * dt)
+                    v = self.speed * (SLOW if self.slow[i][self.idx[i] % len(path)] else 1.0)
+                    moved = min(dist, v * dt)
                     self.pos[i] += d / dist * moved
                 yaw = np.arctan2(d[1], d[0])
+            self.yaw[i] = float(yaw)
             self.phase[i] += 2 * math.pi * moved / STRIDE
-            target = 1.0 if moved > 0 else 0.0
+            target = min(1.0, moved / (self.speed * dt)) if moved > 0 else 0.0  # stride scaled to speed: a full stride at 45% speed puts the toe in the door swing
             self.amp[i] += float(np.clip(target - self.amp[i], -AMP_RATE * dt, AMP_RATE * dt))
             self.pose_limbs(model, i)
             mid = model.body(f"person_{i}").mocapid[0]
@@ -301,4 +502,9 @@ class Walkers:
             data.mocap_pos[mid] = [self.pos[i][0], self.pos[i][1], bob]
             data.mocap_quat[mid] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
             out.append([float(self.pos[i][0]), float(self.pos[i][1])])
+        if self._door is not None:
+            qadr, dadr, geoms = self._door
+            data.qpos[qadr] = self.door_q
+            data.qvel[dadr] = 0.0
+            self.driven_geoms = geoms if self.door_q > 0.005 else set()
         return out

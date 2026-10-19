@@ -342,13 +342,22 @@ def microwave_xml(f: dict) -> str:
     return f'<body name="{fid}" pos="{cx} {cy} {cz - h / 2:.4f}" euler="0 0 {f.get("yaw", 0)}">' + "".join(g) + "</body>"
 
 
+def fridge_door_frame(f: dict) -> dict:
+    """The fridge door in the fixture's frame: hinge xy (left edge, just behind the front), the panel's length
+    along local +x when closed, the handle in the door's frame, and the front face's local y. people.py drives
+    the door from these numbers, so they live in one place."""
+    sx, sy, h = f["size"]
+    return {"hinge": (-sx / 2, sy / 2 - 0.03), "length": sx, "handle": (sx - 0.07, 0.09, h * 0.57), "front": sy / 2}
+
+
 def fridge_xml(f: dict) -> str:
     (cx, cy, _), (sx, sy, h) = f["position"], f["size"]
     fid, yaw = f["id"], f.get("yaw", 0.0)
-    yd = sy / 2 - 0.03
+    yd = fridge_door_frame(f)["hinge"][1]
     zf = h * 0.25 - 0.006
     fx = sx / 2 - 0.005
     zb = zf - 0.05
+    hx, hy, hz = fridge_door_frame(f)["handle"]
     vis = (_vr(-fx, fx, yd, sy / 2 + 0.02, 0.02, zf, "0.9 0.9 0.92 1")
            + "".join(_vcyl(STEEL, 0.005, (x, sy / 2 + 0.019, zb), (x, sy / 2 + 0.06, zb)) for x in (-0.22, 0.22))
            + _vcyl(STEEL, 0.012, (-0.26, sy / 2 + 0.06, zb), (0.26, sy / 2 + 0.06, zb), "capsule")
@@ -361,10 +370,10 @@ def fridge_xml(f: dict) -> str:
             + _box(f"{fid}_door_panel", (sx / 2, 0.025, h * 0.62), (sx - 0.01, 0.05, h * 0.74), "0.9 0.9 0.92 1", DRAWER)
             + _box(f"{fid}_freezer_panel", (sx / 2, 0.025, h * 0.12), (sx - 0.01, 0.05, h * 0.22), "0.9 0.9 0.92 1",
                    f'{DRAWER} group="3"')
-            + f'<geom name="{fid}_door_handle" type="capsule" size="0.015" fromto="{sx - 0.07:.3f} 0.09 {h * 0.45:.3f} '
-              f'{sx - 0.07:.3f} 0.09 {h * 0.7:.3f}" rgba="{STEEL}" {DRAWER}/>'
-            + "".join(_vcyl(STEEL, 0.005, (sx - 0.07, 0.049, h * k), (sx - 0.07, 0.09, h * k)) for k in (0.46, 0.69))
-            + f'<site name="{fid}_door_handle" pos="{sx - 0.07:.3f} 0.09 {h * 0.57:.3f}" size="0.01"/>'
+            + f'<geom name="{fid}_door_handle" type="capsule" size="0.015" fromto="{hx:.3f} {hy} {h * 0.45:.3f} '
+              f'{hx:.3f} {hy} {h * 0.7:.3f}" rgba="{STEEL}" {DRAWER}/>'
+            + "".join(_vcyl(STEEL, 0.005, (hx, 0.049, h * k), (hx, hy, h * k)) for k in (0.46, 0.69))
+            + f'<site name="{fid}_door_handle" pos="{hx:.3f} {hy} {hz:.3f}" size="0.01"/>'
             + "</body></body>")
 
 

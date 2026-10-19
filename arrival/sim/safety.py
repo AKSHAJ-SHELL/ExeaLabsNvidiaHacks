@@ -47,8 +47,11 @@ class SafetyMonitor:
         self.min_d = float("inf")
         self.min_step = None
         self.contact = False
+        self.door_contact = False
 
-    def update(self, model, data) -> None:
+    def update(self, model, data, driven=()) -> None:
+        """`driven` are geoms a person is moving right now (the fridge door they hold open): a contact between
+        one of them and the robot counts as human contact."""
         if not self.people:
             return
         d = float("inf")
@@ -66,6 +69,9 @@ class SafetyMonitor:
             g1, g2 = data.contact[i].geom1, data.contact[i].geom2
             if (g1 in self.person_geoms and g2 in self.geoms) or (g2 in self.person_geoms and g1 in self.geoms):
                 d = min(d, 0.0)
+            elif driven and ((g1 in driven and g2 in self.geoms) or (g2 in driven and g1 in self.geoms)):
+                d = min(d, 0.0)
+                self.door_contact = True
         if d < self.min_d:
             self.min_d, self.min_step = d, self.n
         self.contact = self.contact or d <= 0.0
@@ -73,6 +79,7 @@ class SafetyMonitor:
 
     def summary(self) -> dict:
         if not self.people:
-            return {"min_human_distance_m": None, "min_distance_step": None, "human_contact": False, "people": 0}
+            return {"min_human_distance_m": None, "min_distance_step": None, "human_contact": False, "people": 0,
+                    "door_contact": False}
         return {"min_human_distance_m": round(self.min_d, 4), "min_distance_step": self.min_step,
-                "human_contact": bool(self.contact), "people": len(self.people)}
+                "human_contact": bool(self.contact), "people": len(self.people), "door_contact": bool(self.door_contact)}

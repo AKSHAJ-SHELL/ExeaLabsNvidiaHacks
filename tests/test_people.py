@@ -92,3 +92,77 @@ def test_people_never_clip_through_fixtures(twin):
             near_island = near_island or np.hypot(x - 2.0, y - 2.0) < 1.0
     assert near_island  # the paths do go round the island, not just away from it
     assert all(len({tuple(np.round(p, 3)) for p in path}) >= 4 for path in walkers.paths)  # via corners repeat
+
+
+def _door_geoms(m):
+    return [g for g in range(m.ngeom) if m.geom_bodyid[g] == m.body("fridge_1_door").id]
+
+
+def test_person_opens_and_closes_the_fridge(twin):
+    base = (2.6, 1.0, 0.75)
+    m = mujoco.MjModel.from_xml_string(build_mjcf(twin, base, n_people=2, people_seed=3))
+    d = mujoco.MjData(m)
+    walkers = Walkers(2, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"],
+                      fridge_visit=True)
+    assert walkers.visit is not None
+    who = walkers.visit["person"]
+    door, qadr = _door_geoms(m), int(m.joint("fridge_1_door").qposadr[0])
+    people = [g for g in range(m.ngeom) if m.geom(g).name.startswith("person_")]
+    hand = m.geom(f"person_{who}_farm_r").id
+    site = m.site("fridge_1_door_handle").id
+    qs, held, on_bar = [], False, False
+    for _ in range(240):  # 12 s: open, look, close, walk away
+        walkers.step(m, d, 0.05)
+        mujoco.mj_kinematics(m, d)
+        q = float(d.qpos[qadr])
+        qs.append(q)
+        held = held or (q > 0.05 and bool(walkers.driven_geoms))
+        if 0.05 < q < 0.2 and len(qs) < 60:  # pulling: the hand is on the bar, 9 cm out from the panel
+            tip = d.geom_xpos[hand] + d.geom_xmat[hand].reshape(3, 3)[:, 2] * m.geom_size[hand][1]
+            on_bar = on_bar or np.linalg.norm(tip - d.site_xpos[site]) < 0.12
+        for g in people:
+            dist = min(mujoco.mj_geomDistance(m, d, g, h, 1.0, None) for h in door)
+            assert dist >= (-0.01 if g == hand else 0.0), (m.geom(g).name, round(q, 3), round(dist, 4))
+            c, half = d.geom_xpos[g], m.geom_size[g][1]
+            axis = d.geom_xmat[g].reshape(3, 3)[:, 2] * (half if m.geom_type[g] == mujoco.mjtGeom.mjGEOM_CAPSULE else 0)
+            for p in (c - axis, c, c + axis):
+                assert _inside(twin, p[:2], p[2]) is None, (m.geom(g).name, np.round(p, 3))
+    assert max(qs) > 1.0 and abs(max(qs) - walkers.visit["q_open"]) < 1e-6  # opened to the planned angle (57 deg plus)
+    assert qs[-1] == 0.0 and not walkers.driven_geoms  # and shut again
+    assert max(abs(b - a) for a, b in zip(qs, qs[1:])) < 0.12  # a swing, not a jump
+    assert held and on_bar
+
+
+def test_fridge_visit_is_seeded_and_optional(twin):
+    floor, fx = (0.4, 1.65, 3.6, 2.7), twin["fixtures"]
+    a = Walkers(2, floor, seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=fx)
+    b = Walkers(2, floor, seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=fx)
+    assert (a.visit is None) == (b.visit is None)
+    if a.visit:
+        assert a.visit["person"] == b.visit["person"] and a.visit["q_open"] == b.visit["q_open"]
+    none = Walkers(2, floor, seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=fx, fridge_visit=False)
+    assert none.visit is None
+    visits = sum(Walkers(2, floor, seed=s, base_xy=(2.6, 1.0), front_y=0.75, fixtures=fx).visit is not None
+                 for s in range(20))
+    assert 5 <= visits <= 18  # P_VISIT is 0.6 and the plan can decline
+    near = Walkers(2, floor, seed=3, base_xy=(1.2, 1.0), front_y=0.75, fixtures=fx, fridge_visit=True)
+    assert near.visit is None  # the base is inside the door's swing plus CLEAR: nobody opens it
+
+
+def test_episode_with_a_fridge_visit_still_succeeds(twin):
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+
+    for seed in range(12):
+        task = {"family": "open_drawer", "fixture": "counter_b", "handle": "counter_b_drawer0_handle",
+                "joint": "counter_b_drawer0", "lighting": "neutral", "people": 2, "seed": seed}
+        env = SimEnv(twin, task, res=32)
+        if env.walkers.visit is not None:
+            break
+    else:
+        pytest.fail("no seed in 0..11 plans a fridge visit for counter_b")
+    ep = run_episode(env, ScriptedExpert(), task)
+    assert ep["fridge_visit"] and env.walkers.door_max > 1.0
+    assert ep["success"], ep["detail"]
+    assert not ep["safety"]["human_contact"] and not ep["safety"]["door_contact"]
+    assert "door_contact" in ep["safety"]
