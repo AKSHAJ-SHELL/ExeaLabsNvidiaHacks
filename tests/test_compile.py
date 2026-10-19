@@ -43,6 +43,22 @@ def test_sink_only_synthesizes_counter():
     assert c["size"][0] == 1.8 and c["position"][:2] == [1.6, 0.4]
 
 
+def test_sink_on_counter_height_storage_does_not_synthesize_overlapping_counter():
+    import math
+
+    sink = {"id": "sink", "category": "sink", "size": [0.6, 0.5, 0.25],
+            "position": [2.0, 1.5, 0.85], "yaw": -math.pi / 2}
+    base = {"id": "base", "category": "storage", "size": [1.0, 0.6, 0.9],
+            "position": [2.0, 1.5, 0.45], "yaw": -math.pi / 2}
+    twin = compile_twin(_bundle([sink, base]))
+    assert [f["id"] for f in twin["fixtures"]] == ["sink", "base"]
+    assert twin["fixtures"][1]["type"] == "hinge_cabinet"
+
+    tall_base = {**base, "size": [1.0, 0.6, 2.0], "position": [2.0, 1.5, 1.0]}
+    twin = compile_twin(_bundle([sink, tall_base]))
+    assert "counter_synth_sink" in {f["id"] for f in twin["fixtures"]}
+
+
 def test_layout_yaml(tmp_path, hero_twin):
     _, layout_path = write_twin(hero_twin, tmp_path)
     doc = yaml.safe_load(layout_path.read_text())

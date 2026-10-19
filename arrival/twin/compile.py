@@ -56,8 +56,17 @@ def _footprint_gap(f: dict, counter: dict) -> float:
     return min(_rect_distance(list(p), counter) for p in pts)
 
 
+def is_counter_host(fixture: dict) -> bool:
+    """A worktop that can carry a sink, including RoomPlan's floor-standing storage cabinets."""
+    return fixture["type"] == "counter" or (
+        fixture.get("source_category") == "storage"
+        and abs(fixture["size"][2] - COUNTER_HEIGHT) <= 0.15
+        and abs(fixture["position"][2] - fixture["size"][2] / 2) <= 0.1
+    )
+
+
 def _synth_counters(fixtures: list[dict]) -> list[dict]:
-    counters = [f for f in fixtures if f["type"] == "counter"]
+    counters = [f for f in fixtures if is_counter_host(f)]
     out = []
     for f in fixtures:
         if f["source_category"] not in ("sink", "stove"):
