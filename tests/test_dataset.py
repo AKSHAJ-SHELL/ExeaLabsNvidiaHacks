@@ -225,6 +225,9 @@ def test_validator_catches_nan_and_bad_timestamps(tmp_path):
     info["fps"] = 0
     info_p.write_text(json.dumps(info))
     assert any("info.fps must be a positive number" in e for e in validate(ds))
+    info["fps"] = True
+    info_p.write_text(json.dumps(info))
+    assert any("info.fps must be a positive number" in e for e in validate(ds))
 
 
 def test_generic_writer(tmp_path):

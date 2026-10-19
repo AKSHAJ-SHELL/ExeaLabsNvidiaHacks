@@ -113,7 +113,7 @@ def validate(root: str | Path) -> list[str]:
     s_dim = (features.get("observation.state", {}).get("shape") or [0])[0]
     a_dim = (features.get("action", {}).get("shape") or [0])[0]
     fps = info.get("fps")
-    if not isinstance(fps, (int, float)) or fps <= 0:
+    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not np.isfinite(fps) or fps <= 0:
         errors.append(f"info.fps must be a positive number, got {fps!r}")
         fps = None
     cursor = 0
