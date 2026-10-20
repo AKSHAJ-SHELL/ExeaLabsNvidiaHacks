@@ -250,6 +250,10 @@ CUDA_VISIBLE_DEVICES=0 python gr00t/experiment/launch_finetune.py \
 
 The modality config is `configs/gr00t/arrival_panda_config.py` (arm trained as relative joint deltas, gripper absolute, 16-step action horizon). `tests/test_gr00t_config.py` checks its keys against the `meta/modality.json` that `arrival sim` writes, with GR00T stubbed out. Not yet checked: that GR00T's own loader reads the dataset (needs the Isaac-GR00T install and a GPU box) and that its stats files compute without NaNs.
 
+### Appearance variation (offline)
+
+`python -m arrival.render.variation SRC_DATASET NEW_COPY_DIR [--backend local_stub|cosmos] [--seed N] [--fraction 0.1]` copies a sim dataset and restyles about 10% of its frames; the source is untouched. Writes `meta/arrival_variation.jsonl`, `meta/arrival_variation_summary.json`, `variation_videos/`, and sets `arrival_appearance_variation` in the copy's `info.json` to `cosmos` (only after a real Cosmos success), `local_stub` or `none`. `cosmos` reads `COSMOS_URL`; without it every selected frame is reported as skipped and stays original. Added latency and cost are reported as null. See [ref/SIM-7a.md](ref/SIM-7a.md).
+
 ## Known gaps
 
 Not built yet, and not claimed anywhere in the outputs:
