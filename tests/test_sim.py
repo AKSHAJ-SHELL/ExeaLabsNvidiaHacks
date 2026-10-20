@@ -268,16 +268,19 @@ def test_planner_never_rewrites_the_tasks_family(twin, tmp_path, monkeypatch):
     assert list(res["report_data"]["families"]) == ["open_fridge"]
 
 
-def test_collect_closes_the_env_when_the_policy_raises(twin, tmp_path, monkeypatch):
+def test_collect_skips_a_task_whose_policy_raises_and_closes_its_env(twin, tmp_path, monkeypatch):
     from arrival.sim.policy import ScriptedExpert
 
     closed = []
     real = SimEnv.close
     monkeypatch.setattr(SimEnv, "close", lambda self: (closed.append(1), real(self))[1])
     monkeypatch.setattr(ScriptedExpert, "reset", lambda self, env, task: (_ for _ in ()).throw(ValueError("boom")))
-    with pytest.raises(ValueError):
-        collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=32, log=lambda *_: None)
+    res = collect(twin, ["open_drawer"], 2, tmp_path, people=0, res=32, log=lambda *_: None)
+    r = res["report_data"]
     assert closed
+    assert (r["skipped_error"], r["attempts"], r["successes"]) == (2, 0, 0)  # skipped tasks are not attempts
+    assert [x["stage"] for x in r["skip_reasons"]] == ["rollout", "rollout"] and "boom" in r["skip_reasons"][0]["reason"]
+    assert res["info"]["total_episodes"] == 0 and res["info"]["arrival_skipped_error"] == 2  # nothing was written
 
 
 def test_free_floor_survives_fixtures_only_in_the_far_half(twin):
@@ -285,7 +288,8 @@ def test_free_floor_survives_fixtures_only_in_the_far_half(twin):
 
     far = max(w["start"][1] for w in twin["walls"])
     t = {**twin, "fixtures": [{**f, "position": [f["position"][0], far, f["position"][2]]} for f in twin["fixtures"]]}
-    x0, y0, x1, y1 = SimEnv._free_floor(types.SimpleNamespace(twin=t))
+    anchor = t["fixtures"][0]
+    (x0, y0, x1, y1), *_ = SimEnv._free_floor(types.SimpleNamespace(twin=t), anchor, (2.0, 1.0, 0.75))
     assert x0 < x1 and y0 < y1
 
 

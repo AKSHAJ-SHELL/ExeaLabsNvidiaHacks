@@ -171,6 +171,11 @@ def cmd_sim(a) -> int:
     print(f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped, physics-checked, "
           f"{r['human_contacts']} human contacts) in {r['seconds']:.1f}s; per family: "
           + ", ".join(f"{k} {v['successes']}/{v['attempts']}" for k, v in r["families"].items()))
+    if r["skipped"]:
+        print(f"skipped {r['skipped']} ({r['skipped_unreachable']} unreachable in the pre-flight, "
+              f"{r['skipped_error']} errored; none written):", file=sys.stderr)
+        for x in r["skip_reasons"][:5]:
+            print(f"  {x.get('task_id') or x['family']}: {x['reason']}", file=sys.stderr)
     if a.save_preview:
         print(f"preview: {Path(a.out) / 'previews'}")
     return EXIT_OK

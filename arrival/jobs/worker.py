@@ -21,6 +21,15 @@ STAGES = ("normalize", "twin", "objects", "sim", "validate", "zip")
 ROOM_RE = re.compile(r"[^a-z0-9_]+")
 
 
+class UnsupportedLayout(RuntimeError):
+    """Not one task of the requested families can run in the uploaded room (every candidate failed the pre-flight
+    in `arrival.sim.preflight`). The job fails with a typed status and the reasons, not a traceback."""
+
+    def __init__(self, message: str, reasons: list[str] | None = None):
+        super().__init__(message)
+        self.reasons = reasons or []
+
+
 def room_id_for(filename: str, job_id: str) -> str:
     """``My Kitchen (2).json`` + ``job_1a2b3c4d`` -> ``my_kitchen_2_job_1a2b3c4d``."""
     stem = ROOM_RE.sub("_", Path(filename or "").stem.lower()).strip("_")
@@ -77,7 +86,7 @@ def claim_next(jobs_root: Path) -> tuple[Path, dict] | None:
     _, _, job_dir, st = min(queued)
     st.update({"status": "running", "stage": None, "started_at": int(time.time()), "finished_at": None,
                "error": None, "room_id": None, "twin_dir": None, "dataset_dir": None, "zip": None,
-               "attempts": None, "successes": None})
+               "attempts": None, "successes": None, "skipped": None, "error_kind": None, "error_reasons": None})
     return job_dir, _write_status(job_dir, st)
 
 
@@ -126,7 +135,14 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
 
         res_ = collect(twin, list(families), episodes, out_dir, people=people, res=res, seed=seed, log=log)
         r = res_["report_data"]
-        status.update({"dataset_dir": str(res_["dataset"]), "attempts": r["attempts"], "successes": r["successes"]})
+        status.update({"dataset_dir": str(res_["dataset"]), "attempts": r["attempts"], "successes": r["successes"],
+                       "skipped": r["skipped"]})
+        if r["skipped"]:
+            log(f"[work] {status['id']}: skipped {r['skipped']} ({r['skipped_unreachable']} unreachable, "
+                f"{r['skipped_error']} errors); the dataset holds only episodes that passed the physics check")
+        if r["attempts"] == 0:  # nothing could even be set up: a layout problem the uploader can act on
+            why = [x["reason"] for x in r["skip_reasons"]][:3]
+            raise UnsupportedLayout("no task can run in this room" + (": " + "; ".join(why) if why else ""), why)
         if r["successes"] == 0:
             raise RuntimeError(f"no successful episodes in {r['attempts']} attempts")
 
@@ -145,13 +161,18 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
         status.update({"zip": str(zip_path), "status": "done"})
     except BaseException as e:  # noqa: BLE001 - any stage failure is the job's failure, not the worker's
         status.update({"status": "failed", "error": f"{type(e).__name__}: {e}" if str(e) else type(e).__name__})
-        if not isinstance(e, Exception):  # Ctrl-C or SystemExit: record it so the job is not left running, then stop
+        if isinstance(e, UnsupportedLayout):  # a typed status, not a traceback: the room, not the worker, is the problem
+            status.update({"error": f"unsupported layout: {e}", "error_kind": "unsupported_layout",
+                           "error_reasons": e.reasons})
+            log(f"[work] {status['id']}: unsupported layout at {status.get('stage')}: {e}")
+        elif not isinstance(e, Exception):  # Ctrl-C or SystemExit: record it so the job is not left running, then stop
             status["error"] = f"interrupted: {status['error']}"
             status["finished_at"] = int(time.time())
             _write_status(job_dir, status)
             raise
-        (job_dir / "error.txt").write_text(traceback.format_exc(), encoding="utf-8")
-        log(f"[work] {status['id']}: failed at {status.get('stage')}: {status['error']}")
+        else:
+            (job_dir / "error.txt").write_text(traceback.format_exc(), encoding="utf-8")
+            log(f"[work] {status['id']}: failed at {status.get('stage')}: {status['error']}")
     status["finished_at"] = int(time.time())
     _write_status(job_dir, status)
     if status["status"] == "done":
