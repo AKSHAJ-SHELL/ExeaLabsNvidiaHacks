@@ -56,8 +56,17 @@ def _footprint_gap(f: dict, counter: dict) -> float:
     return min(_rect_distance(list(p), counter) for p in pts)
 
 
+def is_counter_host(fixture: dict) -> bool:
+    """A worktop that can carry a sink, including RoomPlan's floor-standing storage cabinets."""
+    return fixture["type"] == "counter" or (
+        fixture.get("source_category") == "storage"
+        and abs(fixture["size"][2] - COUNTER_HEIGHT) <= 0.15
+        and abs(fixture["position"][2] - fixture["size"][2] / 2) <= 0.1
+    )
+
+
 def _synth_counters(fixtures: list[dict]) -> list[dict]:
-    counters = [f for f in fixtures if f["type"] == "counter"]
+    counters = [f for f in fixtures if is_counter_host(f)]
     out = []
     for f in fixtures:
         if f["source_category"] not in ("sink", "stove"):
@@ -149,7 +158,7 @@ def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
     """RoomPlan captures no small objects: put DEFAULT_OBJECTS on a counter top (the one holding or touching a
     sink if any), away from sinks/stoves, deterministically from `seed`, each at a seeded size. An object that
     does not fit the counter is skipped. Mutates twin."""
-    counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
+    counters = [f for f in twin["fixtures"] if is_counter_host(f)]
     blockers = [f for f in twin["fixtures"] if f["type"] in ("sink", "stove")]
     sinks = [f for f in blockers if f["type"] == "sink"]
     if not counters:

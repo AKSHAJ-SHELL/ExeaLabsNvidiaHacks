@@ -11,10 +11,12 @@ import mujoco
 import numpy as np
 
 from arrival.sim import robot
-from arrival.sim.people import Walkers
+from arrival.sim.people import Walkers, frame
 from arrival.sim.safety import SafetyMonitor
 from arrival.catalog.objects import HANDLE_HELD, RIM_HELD
-from arrival.sim.scene import BOWL_WALL, PLATE_FLOOR, PLATE_RIM, build_mjcf, door_w, drawer_x
+from arrival.sim.preflight import DRAWER_OPEN_PUT, base_pose, corners, front, place_point
+from arrival.sim.scene import BOWL_WALL, PLATE_FLOOR, PLATE_RIM, build_mjcf
+from arrival.twin.compile import is_counter_host, to_local
 
 FPS = 20
 SUBSTEPS = 25  # 0.002 s physics -> 20 Hz control
@@ -22,19 +24,13 @@ SETTLE_STEPS = 12
 DRAWER_OPEN = 0.30  # start state (m) for close_drawer; open_drawer counts > 0.15 as open
 HANDLE_ROOT = 0.017  # grasp point out from a pan's ring: pad half-width 0.01 plus 7 mm
 PAD_BELOW_EEF = 0.023  # the finger pads reach this far below the eef site (robot.py hand geometry)
-DRAWER_OPEN_PUT = 0.14  # start state for put_in_drawer: wide enough for a mug on the exposed tray, and the base
-# can then park straight in front without the pulled-out front reaching its column
 DOOR_OPEN = np.radians(70)  # start state for close_door; open_door counts > 60 deg as open
 FRIDGE_OPEN = np.radians(60)  # open_fridge counts the door open past this, the same bar as open_door
-FRIDGE_BASE_ALONG = 0.1  # base centre past the door's free edge, along the front
-FRIDGE_BASE_OUT = 0.75  # base centre out from the fridge front: nearer, the handle's arc folds the elbow onto its stop
-FRIDGE_BASE_YAW = 0.0  # degrees the base turns toward the hinge from facing the front
+SKIP_REASONS_KEPT = 50  # reasons kept in the report and the dataset info
 WIPE_MIN = 0.4  # metres the sponge must travel pressed to the counter for wipe_counter to count
 
 
-def _front(f: dict) -> np.ndarray:
-    y = f.get("yaw", 0.0)
-    return np.array([-np.sin(y), np.cos(y), 0.0])
+_front, _corners = front, corners  # the stand-rule helpers live in preflight; the old names stay importable
 
 
 class SimEnv:
@@ -63,11 +59,12 @@ class SimEnv:
             self.data.qpos[int(self.model.joint(jn).qposadr[0])] = start[task["family"]]
         self.data.ctrl[:] = list(robot.HOME) + [robot.FINGER_OPEN] * 2
         self.wiped = 0.0  # xy distance the sponge travelled while pressed to the counter (wipe_counter)
+        self.people_note = None
         self.walkers = None
         if task.get("people"):
-            front = max((f["position"][1] + f["size"][1] / 2 for f in twin["fixtures"]), default=base[1])
-            self.walkers = Walkers(task["people"], self._free_floor(), seed=task.get("seed", 0), base_xy=base[:2],
-                                   front_y=front, fixtures=twin["fixtures"])
+            free, bxy, front, self.people_note = self._free_floor(self.anchor, base)
+            self.walkers = Walkers(task["people"], free, seed=task.get("seed", 0), base_xy=bxy, front_y=front,
+                                   fixtures=twin["fixtures"], yaw=self.anchor.get("yaw", 0.0))
         self.safety = SafetyMonitor(self.model)
         mujoco.mj_forward(self.model, self.data)
         self.cameras, self.res = cameras, res
@@ -85,70 +82,44 @@ class SimEnv:
     def _top(f: dict) -> float:
         return f["position"][2] + f["size"][2] / 2
 
-    def _free_floor(self):
-        xs = [p for w in self.twin["walls"] for p in (w["start"][0], w["end"][0])]
-        ys = [p for w in self.twin["walls"] for p in (w["start"][1], w["end"][1])]
-        mid = (min(ys) + max(ys)) / 2  # the work strip runs along the back wall; anything further in is an obstacle
-        deep = max((f["position"][1] + f["size"][1] / 2 for f in self.twin["fixtures"] if f["position"][1] < mid),
-                   default=min(ys))
-        return (min(xs) + 0.4, deep + 0.9, max(xs) - 0.4, max(ys) - 0.3)
+    def _free_floor(self, anchor: dict, base):
+        """Floor for the walkers, in the frame where `anchor` (the fixture the task works at) faces +y: the strip
+        in front of its run, from 0.9 m past the run's deepest fixture to 0.3 m short of the facing wall or of a
+        run on it, narrowed by runs on the side walls. Returns (floor, base_xy, front_y, note) in that frame.
+        A room with no usable strip gets the whole floor and front_y None (no counter stop), and `note` says so."""
+        M = frame(anchor.get("yaw", 0.0))
+        n = _front(anchor)[:2]
+        pts = np.array([M @ np.array(p, dtype=float) for w in self.twin["walls"] for p in (w["start"], w["end"])])
+        bx, by = M @ np.array(base[:2])
+        x0, x1, y1 = float(pts[:, 0].min()) + 0.4, float(pts[:, 0].max()) - 0.4, float(pts[:, 1].max()) - 0.3
+        deep, sides = -np.inf, []
+        for f in self.twin["fixtures"]:
+            c = np.array([M @ np.array(p) for p in _corners(f)])
+            d = float(np.dot(_front(f)[:2], n))
+            if d > 0.9:
+                deep = max(deep, float(c[:, 1].max()))
+            elif d < -0.9:
+                y1 = min(y1, float(c[:, 1].min()) - 0.3)
+            else:
+                sides.append(c)
+        y0 = deep + 0.9
+        for c in sides:
+            if c[:, 1].max() > y0:  # a side-wall run reaching into the strip
+                if c[:, 0].max() < bx:
+                    x0 = max(x0, float(c[:, 0].max()) + 0.4)
+                else:
+                    x1 = min(x1, float(c[:, 0].min()) - 0.4)
+        if max(x1 - bx, bx - x0) >= 0.8 and x1 - x0 >= 1.0 and y1 - y0 >= 0.6:
+            return (x0, y0, x1, y1), (bx, by), deep, None
+        whole = (float(pts[:, 0].min()) + 0.4, float(pts[:, 1].min()) + 0.4,
+                 float(pts[:, 0].max()) - 0.4, float(pts[:, 1].max()) - 0.4)
+        return whole, (bx, by), None, f"no free strip in front of {anchor['id']}: people walk the whole floor, no counter stop"
 
     def _base_pose(self, task: dict, obj_pos: dict):
-        fam = task["family"]
-        if fam in ("counter_to_sink", "counter_to_counter"):
-            src = self.fx[task["source"]]
-            p = np.array(obj_pos[task["object_id"]])
-            mid = (p[0] + task["target_x"]) / 2
-            n = _front(src)
-            y = src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28)
-            base = (mid, y, 0.75)
-        elif fam == "wipe_counter":
-            src = self.fx[task["source"]]
-            p = np.array(obj_pos[task["object_id"]])
-            n = _front(src)
-            base = (p[0], src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28), 0.75)
-        elif fam == "put_in_drawer":
-            # straight in front, between the mug and the drawer, just beyond the pulled-out front and its handle;
-            # parking beside the drawer instead puts the elbow into whatever appliance flanks the counter
-            c = self.fx[task["fixture"]]
-            n = _front(c)
-            p = np.array(obj_pos[task["object_id"]])
-            lx = drawer_x(c, self.twin["fixtures"])
-            yaw = c.get("yaw", 0.0)
-            mug_lx = np.cos(yaw) * (p[0] - c["position"][0]) + np.sin(yaw) * (p[1] - c["position"][1])
-            along = (lx + mug_lx) / 2
-            out = c["size"][1] / 2 + DRAWER_OPEN_PUT + 0.07 + 0.14  # front + handle bar + base column + margin
-            base = (c["position"][0] + np.cos(yaw) * along, c["position"][1] + np.sin(yaw) * along + n[1] * out, 0.75)
-        elif fam == "open_fridge":
-            # beside the door's free edge and out of its swing (the hinge is on the fixture's left edge), facing the
-            # front like the cabinet door tasks
-            f = self.fx[task["fixture"]]
-            n = _front(f)
-            sx, sy = f["size"][0], f["size"][1]
-            yaw = f.get("yaw", 0.0)
-            lx, out = sx / 2 + FRIDGE_BASE_ALONG, sy / 2 + FRIDGE_BASE_OUT
-            base = (f["position"][0] + np.cos(yaw) * lx + n[0] * out,
-                    f["position"][1] + np.sin(yaw) * lx + n[1] * out, 0.75)
-            return base, float(np.degrees(np.arctan2(-n[1], -n[0])) - FRIDGE_BASE_YAW)
-        else:
-            c = self.fx[task["fixture"]]
-            n = _front(c)
-            sx, sy = c["size"][0], c["size"][1]
-            if fam in ("open_drawer", "close_drawer"):
-                lx, lz = drawer_x(c, self.twin["fixtures"]), robot_drawer_z()
-                along = 0.0
-                h = 0.72
-            else:
-                # stand just left of the handle (away from the hinge), outside the door's swing, far enough out
-                # that the far end of the handle arc stays within reach of the tilted-down grasp
-                lx, lz = sx / 2 - 0.02 - door_w(c, self.twin["fixtures"]) + 0.06, 0.53
-                along = -0.1
-                h = 0.65
-            yaw = c.get("yaw", 0.0)
-            hx = c["position"][0] + np.cos(yaw) * (lx + along)
-            hy = c["position"][1] + np.sin(yaw) * (lx + along) + n[1] * (sy / 2 + h)
-            base = (hx, hy, 0.75)
-        return base, float(np.degrees(np.arctan2(-n[1], -n[0])))
+        """Base pose in front of the fixture the task works at (kept as `self.anchor`), facing it, on any wall."""
+        xy = obj_pos[task["object_id"]][:2] if "object_id" in task else None
+        base, yaw, self.anchor = base_pose(self.twin, task, xy)
+        return base, yaw
 
     def body_pos(self, name: str) -> np.ndarray:
         return self.data.body(name).xpos.copy()
@@ -179,16 +150,15 @@ class SimEnv:
         return None
 
     def place_point(self, task: dict) -> np.ndarray:
-        tgt = self.fx[task["target"]]
-        hh = self.obj_half_h(task["object_id"])
-        top = self._top(tgt) if tgt["type"] != "sink" else max(
-            self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
-        if tgt["type"] == "sink":
-            return np.array([tgt["position"][0], tgt["position"][1], top + hh + 0.05])
-        return np.array([task["target_x"], tgt["position"][1], top + hh + 0.012])
+        return place_point(self.twin, task)
 
     def pull_axis(self, task: dict) -> np.ndarray:
         return _front(self.fx[task["fixture"]])
+
+    def run_yaw(self) -> float:
+        """Yaw of the run the task works at: 0 on the hero kitchen's north wall, so grasp yaws written for it
+        (fingers across the counter, hand along it) turn with the fixture on any other wall."""
+        return float(self.anchor.get("yaw", 0.0))
 
     def place_point_top(self, task: dict) -> float:
         return self._top(self.fx[task["source"]])
@@ -261,10 +231,10 @@ class SimEnv:
             p = self.body_pos(oid)
             v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
             tgt = self.fx[task["target"]]
-            (cx, cy, _), (sx, sy, _) = tgt["position"], tgt["size"]
-            inside = abs(p[0] - cx) < sx / 2 - 0.01 and abs(p[1] - cy) < sy / 2 - 0.01
+            (lx, ly), (sx, sy, _) = to_local(p[:2], tgt), tgt["size"]
+            inside = abs(lx) < sx / 2 - 0.01 and abs(ly) < sy / 2 - 0.01
             if tgt["type"] == "sink":
-                top = max(self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
+                top = max(self._top(f) for f in self.twin["fixtures"] if is_counter_host(f))
                 ok = inside and p[2] < top and v < 0.05
             else:
                 ok = inside and abs(p[2] - (self._top(tgt) + self.obj_half_h(oid))) < 0.025 and v < 0.05
@@ -286,8 +256,8 @@ class SimEnv:
             p = self.body_pos(oid)
             v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
             src = self.fx[task["source"]]
-            (cx, cy, _), (sx, sy, _) = src["position"], src["size"]
-            on_top = (abs(p[0] - cx) < sx / 2 and abs(p[1] - cy) < sy / 2
+            (lx, ly), (sx, sy, _) = to_local(p[:2], src), src["size"]
+            on_top = (abs(lx) < sx / 2 and abs(ly) < sy / 2
                       and abs(p[2] - (self._top(src) + self.obj_half_h(oid))) < 0.025)
             return bool(on_top and self.wiped >= WIPE_MIN and v < 0.05), {
                 "object_pos": p.round(4).tolist(), "wiped_m": round(self.wiped, 3)}
@@ -339,15 +309,21 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             planner_name: str = "rule", cache_path: str | Path | None = None,
             split: str = "train", use_generated_instructions: bool = False,
             log=print) -> dict:
-    """Collect `episodes` attempts; failed attempts are dropped and counted."""
+    """Collect `episodes` attempts; failed attempts are dropped and counted. A task whose stand spot or reach the
+    pre-flight rejects never runs (`skipped_unreachable`, counted per rejected variation), and one whose env build
+    or rollout raises is logged with its reason, counted as `skipped_error` and never written, so a bad geometry
+    costs a task, not the run."""
     from arrival.sim.export import SimDatasetWriter
-    from arrival.sim.policy import ScriptedExpert, VLAClient, VLMPlanner
+    from arrival.sim.policy import ScriptedExpert, VLAClient, VLANotConfigured, VLMPlanner
     from arrival.sim.tasks import finish_task, make_tasks
 
     out_dir = Path(out_dir)
     room = twin["room_id"]
+    pre: dict = {}
     tasks = make_tasks(twin, families, episodes, seed=seed, people=people,
-                       split=split, use_generated_instructions=use_generated_instructions, log=log)
+                       split=split, use_generated_instructions=use_generated_instructions, log=log, preflight=pre)
+    skips = [{"stage": "preflight", **r} for r in pre["reasons"]]  # what never ran and why
+    errors = 0
     for t in tasks:
         finish_task(t)
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
@@ -381,11 +357,26 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             if plan.get("target") and plan["target"] in fx_ids and "target" in task:
                 task["target"] = plan["target"]
             log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
-        env = SimEnv(twin, task, res=res, overview=save_preview and i == 0)
+        stage = "build"
         try:
-            ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
-        finally:
-            env.close()  # idempotent; frees both GL renderers when the policy or the episode raises
+            env = SimEnv(twin, task, res=res, overview=save_preview and i == 0)
+            stage = "rollout"
+            try:
+                if env.people_note:
+                    log(f"[sim] {task['task_id']}: {env.people_note}")
+                ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
+            finally:
+                env.close()  # idempotent; frees both GL renderers when the policy or the episode raises
+        except VLANotConfigured:
+            raise
+        except Exception as e:  # noqa: BLE001 - one bad geometry must cost this task, not the run; nothing is written for it
+            if isinstance(e, OSError) and policy_name == "vla":  # the policy server did not answer: not this task's fault
+                raise
+            errors += 1
+            skips.append({"stage": stage, "task_id": task["task_id"], "family": task["family"],
+                          "reason": one_line(e)})
+            log(f"[sim] {task['task_id']}: SKIP at {stage}: {skips[-1]['reason']}")
+            continue
         fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0, "human_contacts": 0,
                                               "fridge_visits": 0, "door_contacts": 0})
         fam["attempts"] += 1
@@ -403,11 +394,14 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             _write_preview(out_dir / "previews", room, preview, ep)
             preview = None  # up to ~200 MB of overview frames; not needed past the first episode
     seconds = time.perf_counter() - t0
-    info = writer.finish(len(tasks))
+    attempts = len(tasks) - errors  # tasks that ran to the physics check; a skipped one is not an attempt
+    skipped = {"skipped_unreachable": pre["rejected"], "skipped_error": errors,
+               "skipped": pre["rejected"] + errors, "skip_reasons": skips[:SKIP_REASONS_KEPT]}
+    info = writer.finish(attempts, skipped)
     succ = sum(f["successes"] for f in per.values())
     report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name,
-              "planner": planner_name, "attempts": len(tasks),
-              "successes": succ, "dropped": len(tasks) - succ, "seconds": round(seconds, 2),
+              "planner": planner_name, "attempts": attempts, **skipped,
+              "successes": succ, "dropped": attempts - succ, "seconds": round(seconds, 2),
               "demos_per_hour": round(succ / seconds * 3600, 1) if seconds else 0.0,
               "human_contacts": sum(f["human_contacts"] for f in per.values()),
               "fridge_visits": sum(f["fridge_visits"] for f in per.values()),
@@ -418,6 +412,15 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     rp.parent.mkdir(parents=True, exist_ok=True)
     rp.write_text(json.dumps(report, indent=2))
     return {"dataset": writer.root, "report": rp, "report_data": report, "info": info}
+
+
+def one_line(e: BaseException) -> str:
+    """An exception as one line: its type, message and the innermost frame it came from."""
+    import traceback
+
+    frames = traceback.extract_tb(e.__traceback__)
+    at = f" (at {Path(frames[-1].filename).name}:{frames[-1].lineno})" if frames else ""
+    return f"{type(e).__name__}: {e}{at}"[:300]
 
 
 def _write_preview(d: Path, room: str, frames: list, ep: dict) -> None:

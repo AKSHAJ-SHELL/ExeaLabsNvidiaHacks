@@ -60,7 +60,9 @@ class SimDatasetWriter:
         self.total_frames += n
         return i
 
-    def finish(self, attempts: int) -> dict:
+    def finish(self, attempts: int, skipped: dict | None = None) -> dict:
+        """`attempts` ran to the physics check; `skipped` (when given) says what never ran and why, from the
+        pre-flight or a build or rollout error. Neither is written as an episode."""
         meta = self.root / "meta"
         with open(meta / "tasks.jsonl", "w") as f:
             for instr, ti in self.task_index.items():
@@ -98,6 +100,7 @@ class SimDatasetWriter:
             "arrival_success_check": "physics", "arrival_successes": n, "arrival_attempts": attempts,
             "arrival_video_policy": "all", "arrival_appearance": "mujoco_raster", "arrival_room_id": self.room_id,
             "arrival_families": sorted({e["arrival_family"] for e in self.episodes}),
+            **{f"arrival_{k}": v for k, v in (skipped or {}).items()},
             "features": {"observation.state": {"dtype": "float32", "shape": [8]},
                          "action": {"dtype": "float32", "shape": [8]}, **vid,
                          "timestamp": {"dtype": "float32", "shape": [1]},

@@ -87,6 +87,22 @@ def test_upper_cabinets_start_above_the_measured_wrist_height_and_skip_tables(tw
     assert any("counter_a_upper" in m.joint(i).name for i in range(m.njnt))
 
 
+def test_sink_in_yawed_counter_height_storage_reaches_the_scene():
+    import math
+
+    base = {"id": "base", "category": "storage", "size": [1.0, 0.6, 0.9],
+            "position": [2.0, 1.5, 0.45], "yaw": -math.pi / 2}
+    sink = {"id": "sink", "category": "sink", "size": [0.6, 0.5, 0.25],
+            "position": [2.0, 1.4, 0.85], "yaw": -math.pi / 2}
+    t = compile_twin(_bundle([sink, base]))
+    assert not any(f["id"].startswith("counter_synth") for f in t["fixtures"])
+    m = _model(t)
+    assert m.geom("sink_bottom").pos[0] == pytest.approx(0.1, abs=1e-4)
+    assert m.geom("base_carcass") is not None
+    assert m.joint("sink_faucet") is not None
+    assert {p["joint"] for p in part_names(t)} >= {"base_drawer0", "base_door", "sink_faucet"}
+
+
 def test_dishwasher_and_microwave_from_scan():
     fixtures = [COUNTER,
                 {"id": "dw_1", "category": "dishwasher", "size": [0.6, 0.6, 0.86], "position": [2.1, 0.40, 0.43], "yaw": 0.0},
