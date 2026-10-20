@@ -92,6 +92,98 @@ Anything built here that needs real data (realism numbers, cost dollars, accurac
 - The web page was checked with curl and tests only, not in a browser. Uploads are processed by one local worker.
 - Package description in `pyproject.toml` is stale ("MVP, placeholder motion"); an untracked `walkin_arrival.egg-info` exists locally. Fix is in DEM-3a.
 
+## Code to-do before submission
+
+Sizes: S under half a day, M about a day, L multi-day. Priority: **must** (the demo or the core claim breaks without it), **should**, nice. Issue numbers are GitHub issues; "PR" means an open branch that needs a rebase. Nothing here is built unless stated; check `main` before starting.
+
+### If you only have a day
+
+1. **L1 + L2**: fixtures on any wall (#42), and a failed task must skip, not crash. A real scan that is not the hero layout dies at the sim stage today.
+2. **L5 + L6 + L7**: shardable sim, a fresh-clone install check on macOS/Windows, and a stale-docs sweep.
+3. **C2 + L3 + L4**: hosted demo with a pre-seeded room, plus job limits and upload hardening so a public URL is safe.
+4. **G1** (in parallel, needs a GPU): load `hero_kitchen_sim` in the real GR00T loader and run the 100-step fine-tune. Nothing has trained yet.
+5. **P2 + P1**: one real consented scan through the pipeline, and the iOS RGB-D recorder if a LiDAR iPhone is free. Report anything not measured as "not measured".
+
+### Laptop
+
+| id | what | size | priority | issue |
+|---|---|---|---|---|
+| L1 | Fixtures on any wall. Merge #49, rebase and merge #75 then #77. Then make `base_pose` use the full front normal (x and y) and `make_tasks` use a fixture-local along-axis instead of world x. Add a test with counters on S, E, W walls and a U-shape that runs sim end to end (today `_free_floor` and `_base_pose` assume the north wall, and walkers crash with `high - low < 0`) | M | must | #42 (PRs #49, #75, #77) |
+| L2 | Graceful degradation. Wrap per-task env build and rollout, log the reason, count `skipped_unreachable` in stats, never write an episode that failed the oracle. Pre-flight reach, fixture and wall clearance check in `make_tasks`. Worker reports a typed "unsupported layout" status, not a traceback | S | must | #42 |
+| L3 | Worker hard limits. Run each job in a subprocess with a timeout and memory cap, cap object, wall and room size in `scan_bundle.validate`, reject pathological JSON, stage-tagged errors | M | must | #68 |
+| L4 | Harden the web app for public hosting. Validate and make job IDs unguessable (today `uuid4().hex[:8]`), stop listing all jobs, rate limit, queue cap, security headers, `--max-upload-mb`, honour `X-Forwarded-Proto`. Tests for traversal and cross-user access | M | must | #68 |
+| L5 | Shardable sim. New `arrival/jobs/shards.py`, `arrival sim --shard i/n --seed-base`, per-shard manifest, merge into one valid LeRobot v2 dataset, test that a resumed failed shard equals an uninterrupted run | M | must | #66 |
+| L6 | Fresh-clone matrix. Add macOS and Windows to CI, a wheel-from-temp-dir smoke to prove `scans/` and `configs/` are found outside the repo root, a docker build job. Fix black video after episode 0 on Windows | M | must | #72 |
+| L7 | Docs and repo hygiene sweep. Run `scripts/check_docs.py` in CI, rewrite the status table from real output, fix stale pyproject description, confirm `plan.pdf` is meant to be public, regenerate `demo.mp4` and `demo.gif` (they predate SIM-1 and MAN-1), close stale issues #18, #22, #24, #26, #28, #30, #32, #34 | S | must | #30 |
+| L8 | One-command offline demo. Check `make demo` from a fresh venv in under 5 minutes, GL backend fallback (egl, glfw, osmesa), clear error when mujoco is missing | S | must | DEM-3, DEM-4 |
+| L9 | Non-kitchen rooms. Rebase #57 after L1 (drop its walker workaround and dedupe solid fixtures against #77), then room-appropriate objects in `catalog/objects.py` so an office does not hold a mug and plate | M | should | #56 (PR #57) |
+| L10 | Twin compile fixes on the real U-shaped scan. Counter-height storage treated as a counter (#49), islands clear of walls, wall-end sink counter not colliding with the fridge; add a compile test on the #42 geometry | S | should | #42 (PR #49) |
+| L11 | Scan robustness sweep. Fuzzed RoomPlan variants (open walls, rotated or mirrored, no sink, many sinks, tiny and huge rooms) must give a valid twin or a typed readable error | M | should | #42 |
+| L12 | Episode quality validator in `export/validate.py`. Flag joints within 3% of a limit for N steps, wrist frames with few useful pixels, carried-object tilt; drop or regenerate | S | should | #72, #32 |
+| L13 | Mobile base. Pick #33 (matches #18: `state[8:11]`, `action[8:11]`, 0.3 m/s) or #36, close the other, rebase, then update `configs/gr00t/arrival_panda_config.py`, `meta/modality.json` and the loader check for the 11-float schema. Keep fixed base the default. Do it after DAT-2 passes on the fixed base, or the new action space invalidates that run. Unlocks `counter_to_counter` and wider `open_door` | L | should | #34, #18 (PRs #33, #36) |
+| L14 | Scan frames through the upload path. Bundle accepts `frames_manifest.json`, validates with the rgbd loader, stores frames, worker test from the synthetic generator. Never commit private frames | S | should | #58 |
+| L15 | Explicit provenance on twin objects (`detected`, `default_synthetic`, `authored`) in twin, job result and web UI, so invented objects are never shown as measured | S | should | #60 |
+| L16 | Realism command `arrival realism <scan>`: JSON plus side-by-side PNG, enforce held-out frames, mask invalid depth and robot, misaligned-pose control. Blocked on real frames (P1) | S | should | #65 |
+| L17 | Reachability planner `arrival/sim/reach.py`: sample base poses in the fixture frame, score with `ik.solve`, report "unreachable" with a reason. Replaces hand-tuned offsets and `REACH=0.78` | L | should | related #18, #42 |
+| L18 | Retention and deletion: `arrival gc --max-age-hours`, token-gated `DELETE /jobs/<id>`, retention note on the page | S | should | #68 |
+| L19 | Worker concurrency: atomic claim, heartbeat, per-stage progress, cancel, tests for racing workers and crash-then-requeue | M | should | #66 |
+| L20 | Usage metering for the cost report (wall seconds per shard, token counts, storage bytes) plus `scripts/teleop_baseline.py` timer. Keep unmeasured rows null | M | should | #67 |
+| L21 | CI extras: ruff, gitleaks, Dependabot, pinned constraints (pyproject has unpinned numpy and pyarrow) | S | should | none |
+| L22 | Secrets handling: `arrival/config.py` single loader, `arrival doctor` (reports which keys are set, never values), log redaction, `.env.example` | S | should | none |
+| L23 | Static demo-site export: `make site`, Pages workflow, CORS headers on the API, link check, graceful offline fallback for the live-upload section | S | should | #68 |
+| L24 | Appliance families. Rebase #27 onto the current family registry (oven, dishwasher, faucet, load and unload dishwasher), re-measure at 2 seeds with and without people. Eval already shares the family table on main, so drop that half | M | nice | #28 (PR #27) |
+| L25 | Real Menagerie Franka behind `--arm menagerie`. Rebase #25, retune door grasp offsets (open and close door failed there), keep the 34 MB mesh fetch out of CI and git. Do last or skip | M | nice | #26 (PR #25) |
+| L26 | Thin-object (spatula) pinch grasp, then add it to `counter_to_sink` and `wipe` | M | nice | #32, #31 |
+| L27 | People pass: yield and stop behaviour from the safety distance, counter-use pause, height-aware clearance, a test running `open_fridge` with a walker, mirrored right-hinged fridge plan. Do after L1 so `people.py` is rebased once | M | nice | #24 |
+| L28 | Three-room summary page: tape vs twin error, sim pass rate and realism per room. After P2 and L16 | S | nice | #59, #65 |
+
+### GPU or Linux box
+
+| id | what | size | priority | issue |
+|---|---|---|---|---|
+| G1 | Real GR00T loader check and 100-step fine-tune on `hero_kitchen_sim`. Confirm finite stats, video decode (`ego_view`, `wrist`), state/action slices, language. Fix mismatches with an offline test, save command, duration, cost, reloadable checkpoint. Generate at least a few hundred episodes at 224 px first; 64 px frames are not a fair VLA input. Settle the 8 vs 11 float state/action decision (L13) first. If NEW_EMBODIMENT rejects the Panda, use the Nebius LeRobot fallback and say so | M | must | #63, #37 |
+| G2 | Real GR00T policy server. Fix `gr00t_shim.py` (written from memory of the API): action chunking, absolute vs delta arm actions, gripper dimension, both camera keys (`VLAClient` sends only `ego_view` today). Golden-file test for the response shape, then `eval --policy vla` against a live server | M | must | POL-3 |
+| G3 | Three-cell held-out eval: base GR00T, generic-RoboCasa fine-tune, our-room fine-tune, 50 episodes each, Wilson 95% intervals, one table in `docs/07-eval.md`. Fill the `usefulness` field (hardcoded `None` in `eval/report.py`). Do not claim improvement before the real result | L | must | #64 |
+| G4 | Generic-RoboCasa baseline dataset and fine-tune wrappers with identical hyperparameters, for cell 2 of G3. Otherwise label the cell "not run" | M | must | #64 |
+| G5 | `Dockerfile.gpu`, `scripts/run_finetune.sh`, Makefile `train`, `eval-policy`, `serve-policy` targets, runnable as a Nebius Job | L | must | #63, #64 |
+| G6 | Prove `layout.yaml` loads in real RoboCasa: fix coordinate, half-extent and wall-side mismatches, fixtures within 5 cm of the twin, optional integration test that skips without RoboCasa. Prerequisite for G7 | M | must | #69 |
+| G7 | Real MimicGen retargeting for `counter_to_sink` from about 10 seeds, physics oracle drops failures, target at least 100 valid episodes, honest `arrival_generator` metadata. Fallback: extend `retarget.py` and keep the `seed_replay_retarget` label. Do not label scripted data as MimicGen | L | should | #62 |
+| G8 | Scan-appearance composite replacing the `splat.py` stub: textured or point-cloud room, depth-composite the robot and moving parts, `arrival_appearance` metadata, no splat claim unless it is one. Needs posed frames (P1, L14) | L | should | #61 |
+
+### Cloud, accounts and hosting
+
+| id | what | size | priority | issue |
+|---|---|---|---|---|
+| C1 | Nebius Serverless Jobs submit and monitor client with S3 storage, done-markers for resume, fake-backend tests with one injected failed shard, then one real small run (about 4 shards) and a merge. Builds on L5 | L | must | #66 |
+| C2 | Hosted demo: docker-compose with web and worker, TLS, non-root, `/healthz`, persistent volume, pre-seeded room so output shows in under 30 s, `scripts/smoke_hosted.py` (good and bad upload), `docs/DEPLOY.md`, Playwright browser smoke. The page has only been checked with curl | M | must | #68 |
+| C3 | Measured time and cost per demo from a real Nebius run against real pricing and the teleop baseline (P3). Report measured numbers only | S | should | #67 |
+| C4 | Detect small objects from posed frames with a VLM (cached offline fixture for tests), back-project into the twin, label defaults `synthetic`. Needs P1 and L14 | M | should | #60 |
+| C5 | Real Cosmos variation on a deterministic 10% of validated frames with source tracking, plus hosted Cosmos and policy-server endpoints. Pointless while frames are 64 px | M | nice | #70, #63 |
+
+### People, Mac and iPhone
+
+| id | what | size | priority | issue |
+|---|---|---|---|---|
+| P1 | iOS RGB-D recorder next to RoomPlan (shared ARSession, about 2 Hz, depth, intrinsics, room-frame poses, train and held-out split, `frames_manifest.json`, zip upload). First field-test CAP-1 on a LiDAR iPhone. Unblocks L16, G8, C4 | L | must | #58 |
+| P2 | Three consented real kitchen scans (straight, L, U or galley) with tape measurements, run through intake, compile and sim per room; failures stay visible. Check or drop the licences of the two public fixtures and add LICENSE and NOTICE entries | L | must | #59 |
+| P3 | Twenty timed teleoperated `counter_to_sink` demos in the twin for the OPS-3 baseline | S | should | #67 |
+| P4 | Refresh the pitch video with real footage and check the demo page in a browser | S | should | DEM-2, DEM-3 |
+
+### Open PRs that need a rebase
+
+All eight conflict with `main` except #49.
+
+| PR | adds | rebase notes |
+|---|---|---|
+| #49 | Counter-height scanned storage no longer gets a duplicate synthetic counter (+53/-7) | Merges clean today; merge first |
+| #75 | Base parks along each fixture's own front normal, walkers use the strip in front of the run (fixes #42, +279/-71) | Conflicts in `collect.py`, `people.py`, `policy.py`, docs; reconcile with the fridge-visit planner in `people.py` |
+| #77 | Scanned cabinets get tasks and every scanned fixture is solid (+584/-121) | Stacked on #49 and #75; rebase last; re-run rotated and U-kitchen fixtures plus the hero 16/16 check |
+| #57 | Scanned office: tables as tables, box furniture solid, non-kitchen tasks, no-people fallback (+190/-14) | After #75 and #77; drop its walker workaround |
+| #33 | Mobile base behind `--base mobile` with base pose in state and action (+320/-68), matches #18 | Recommended over #36; update GR00T config and loader check |
+| #36 | Single-axis `base_x` slide with a 3-phase transit (+203/-52) | Lighter, cannot turn or serve other walls; close if #33 wins |
+| #27 | Oven, dishwasher, faucet, dishwasher load and unload families (+430/-26) | Take main's family registry; add the five as entries |
+| #25 | Menagerie Franka behind `--arm menagerie` (+298/-41) | Re-measure IK and grasp with real meshes; conflicts with #33 or #36 in `robot.py` |
+
 ## Get started (5 minutes)
 
 Requires Python 3.11+ on macOS, Linux or Windows (the suite and the MuJoCo sim run as is on Windows; use `.venv\Scripts\activate` there). No GPU and no API keys needed.
