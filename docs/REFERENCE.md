@@ -45,6 +45,7 @@ Open the page:
 
 ```bash
 python -m arrival serve        # http://127.0.0.1:8000
+python -m arrival serve --host 0.0.0.0   # reachable from the iOS capture app on the same Wi-Fi; prints the LAN URL
 ```
 
 | Route | What it does |
@@ -56,7 +57,7 @@ python -m arrival serve        # http://127.0.0.1:8000
 | `GET /jobs/<id>` | The job's `status.json` |
 | `GET /jobs/<id>/download` | `out/jobs/<id>/dataset.zip` once the job is `done`, else 404 with the current status |
 
-The index page lists every job under `out/jobs/` with its status, stage, room id, episode count and a download link. The server binds `127.0.0.1` only and has no authentication. Uploads are streamed to a temp file; a body shorter than `Content-Length`, a missing closing boundary, an empty file, or a part with no filename gets 400. If `out/datasets/<room>_sim` exists, the room page links it and shows its `arrival_generator`, `arrival_physically_valid`, episode count and families.
+The index page lists every job under `out/jobs/` with its status, stage, room id, episode count and a download link. The server binds `127.0.0.1` by default and has no authentication. `--host 0.0.0.0` opens it to the local network for the capture app (`ios/README.md`); do that only on a network you trust. Uploads are streamed to a temp file; a body shorter than `Content-Length`, a missing closing boundary, an empty file, or a part with no filename gets 400. If `out/datasets/<room>_sim` exists, the room page links it and shows its `arrival_generator`, `arrival_physically_valid`, episode count and families.
 
 From a RoomPlan export instead of the authored scan (`scans/<room>/roomplan.json`):
 

@@ -24,7 +24,7 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 
 | Stage | Status |
 |---|---|
-| Scan → twin | ✅ Works on the sample kitchen and on 2 real public iPhone RoomPlan exports. ⚠️ No iPhone capture app yet |
+| Scan → twin | ✅ Works on the sample kitchen and on 2 real public iPhone RoomPlan exports. iPhone capture app in `ios/ArrivalCapture/` (CAP-1): scan, share, upload to the local server. ⚠️ No real kitchen scanned with it yet (CAP-3) |
 | Simulation: kitchen, drawers, doors, oven, dishwasher, microwave, wall cabinets, faucet, people | ✅ Works. MuJoCo, built from the twin; every moving part is a named joint with a handle site |
 | People: interactions + safety metric | ✅ Walkers stop at the counter and cross behind the robot. Every episode records the minimum robot-human distance; episodes with contact are dropped. ⚠️ Nobody opens the fridge yet |
 | Closed-loop eval harness | ✅ `python -m arrival eval` scores N episodes per family (success, time, human contacts, Wilson 95%). ⚠️ Only the scripted expert has been scored; the VLA cell needs a GR00T server (POL-3) |
@@ -115,6 +115,7 @@ Fine-tune GR00T N1.7 (next)                docs/REFERENCE.md#later-gr00t-fine-tu
 | `arrival/generate/`, `arrival/render/` | Scripted placeholder generator, schematic renderer, MimicGen and splat stubs |
 | `arrival/models/` | Nebius Token Factory (Nemotron) client |
 | `arrival/web/`, `arrival/jobs/` | Local web page and upload queue |
+| `ios/ArrivalCapture/` | iPhone RoomPlan capture app (Xcode project) |
 | `scans/` | Sample rooms |
 | `tests/` | pytest suite. No network, 145 tests, about 2 minutes on a laptop CPU |
 | `docs/` | Reference, design contracts, access links, build log |
@@ -143,7 +144,7 @@ Pick leads first. Each lead keeps their team's tasks below up to date.
 
 LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 
-- **CAP-1: Capture app.** Build the Apple RoomPlan sample ("Create a 3D model of an interior room") with an export button. It writes `CapturedRoom` JSON via `JSONEncoder` and the USDZ. Add AirDrop/share, then upload to `POST /jobs`.
+- **CAP-1: Capture app.** Build the Apple RoomPlan sample ("Create a 3D model of an interior room") with an export button. It writes `CapturedRoom` JSON via `JSONEncoder` and the USDZ. Add AirDrop/share, then upload to `POST /jobs`. *Done: `ios/ArrivalCapture/` (SwiftUI, iOS 17+, builds with a free Apple ID; see [ios/README.md](ios/README.md)). It saves `roomplan.json` + `room.usdz`, shares them, uploads to `python -m arrival serve --host 0.0.0.0` and polls the job until `dataset.zip` is ready. Left: CAP-2 RGB-D frames, and capture notes for CAP-3.*
 - **CAP-2: RGB-D frames.** Record ARKit RGB + depth frames + camera poses alongside RoomPlan (needed later for realism scoring and splats). Define the folder format in `docs/04-contracts.md`.
 - **CAP-3: Scan real rooms.** Scan **at least 10 kitchens** (straight run, L-shape, U-shape, galley, island) plus **5 non-kitchen rooms** (office, living room, bathroom, garage, dorm). For each one:
   - commit `scans/<room_id>/roomplan.json`, a `notes.md` (location type, phone model, iOS version, lighting, clutter level) and 2 reference photos;

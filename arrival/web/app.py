@@ -481,10 +481,25 @@ def make_server(host: str = "127.0.0.1", port: int = 8000,
     return server
 
 
-def serve(port: int = 8000, out_dir: Path = Path("out"), scans_dir: Path = Path("scans")) -> None:
-    server = make_server("127.0.0.1", port, out_dir, scans_dir)
-    host, real_port = server.server_address[:2]
-    print(f"Arrival serving on http://{host}:{real_port}/  (Ctrl+C to stop)", flush=True)
+def lan_ip() -> str | None:
+    """This machine's address on the local network (no packet is sent), or None when offline."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect(("192.0.2.1", 9))  # TEST-NET-1: picks the outbound interface without traffic
+            return s.getsockname()[0]
+        except OSError:
+            return None
+
+
+def serve(port: int = 8000, out_dir: Path = Path("out"), scans_dir: Path = Path("scans"),
+          host: str = "127.0.0.1") -> None:
+    server = make_server(host, port, out_dir, scans_dir)
+    bound, real_port = server.server_address[:2]
+    print(f"Arrival serving on http://{bound}:{real_port}/  (Ctrl+C to stop)", flush=True)
+    if bound == "0.0.0.0" and (ip := lan_ip()):
+        print(f"Capture app server URL: http://{ip}:{real_port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

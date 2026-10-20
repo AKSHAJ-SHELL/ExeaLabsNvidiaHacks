@@ -167,3 +167,42 @@ def test_room_page_links_sim_dataset(server):
     status, body = _get(srv, "/rooms/hero_kitchen")
     assert status == 200
     assert b"/download/hero_kitchen_sim" in body and b"mujoco_sim" in body and b"open_drawer" in body
+
+
+def test_capture_app_upload_reaches_worker(server):
+    """CAP-1: the iOS app's request (ios/ArrivalCapture/ArrivalCapture/ArrivalAPI.swift multipartBody)
+    with a real CapturedRoom export is queued byte for byte and the worker reads it as RoomPlan."""
+    from arrival.jobs.worker import load_upload, room_id_for
+
+    srv, out = server
+    boundary = "ArrivalBoundary-3F2504E0-4F89-11D3-9A0C-0305E82C3301"
+    payload = (REPO / "tests" / "fixtures" / "roomplan" / "amal.json").read_bytes()
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="scan"; filename="kitchen_a.json"\r\n'
+        "Content-Type: application/json\r\n\r\n"
+    ).encode() + payload + f"\r\n--{boundary}--\r\n".encode()
+    conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
+    conn.request("POST", "/jobs", body=body,
+                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
+                          "Accept": "application/json"})
+    resp = conn.getresponse()
+    data = json.loads(resp.read())
+    conn.close()
+    assert resp.status == 202
+    job_dir = out / "jobs" / data["id"]
+    assert (job_dir / "upload.bin").read_bytes() == payload
+    status = json.loads((job_dir / "status.json").read_text())
+    room_id = room_id_for(status["filename"], data["id"])
+    assert room_id == f"kitchen_a_{data['id']}"
+    bundle = load_upload(job_dir / "upload.bin", room_id)
+    assert bundle["geometry_source"] == "roomplan"
+    assert bundle["room_id"] == room_id
+    assert bundle["walls"]
+
+
+def test_serve_host_flag():
+    from arrival.cli import build_parser
+
+    assert build_parser().parse_args(["serve"]).host == "127.0.0.1"
+    assert build_parser().parse_args(["serve", "--host", "0.0.0.0"]).host == "0.0.0.0"
