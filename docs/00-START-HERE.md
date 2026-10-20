@@ -1,5 +1,7 @@
 # Arrival — start here
 
+> This is the original one-night MVP contract. The branch has moved past it: MuJoCo simulation, the upload worker, the iOS capture app and Tavily research all exist now (see the [README](../README.md) and [REFERENCE.md](REFERENCE.md)). Where this file and the README disagree, the README wins. The honest-label rules below still hold for the `demo` dataset.
+
 You are the implementing agent. The product spec is `plan.pdf` at the repo root. This `docs/` suite is the build contract. It is already decided. Do not re-plan, do not ask the user to pick an architecture, and do not wait on Nebius, GR00T, or a real iPhone scan.
 
 Paste this to yourself and start at task T01 in [06-agent-tasks.md](06-agent-tasks.md):
