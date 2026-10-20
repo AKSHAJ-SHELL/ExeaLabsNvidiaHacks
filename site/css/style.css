@@ -532,3 +532,14 @@ code { font-family: var(--font-mono); font-size: .875em; }
   .step { opacity: 1; } .note__lead .w { opacity: 1; }
 }
 @media (forced-colors: active) { .chip[aria-pressed="true"]::before { background: Highlight; } }
+
+/* top-bar links: repo and Devpost */
+.topbar__right { display: flex; align-items: flex-start; gap: .5rem; }
+.pill { display: inline-flex; align-items: center; gap: .5rem; height: var(--hit); padding: 0 .875rem; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); text-decoration: none; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; margin-top: -.375rem; transition: transform var(--t-fast) ease-out, border-color var(--t), background var(--t), color var(--t); }
+.pill:hover { border-color: var(--ink); } .pill:active { transform: scale(.97); }
+.pill svg { width: .875rem; height: .875rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.pill--solid { background: var(--signal); border-color: var(--signal); color: #fff; }
+.pill--solid:hover { border-color: var(--ink); background: var(--signal); filter: brightness(1.06); }
+.pill:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 720px) { .pill:not(.pill--solid) { display: none; } .pill--solid .mono { font-size: .6875rem; } .pill { padding: 0 .625rem; } }
