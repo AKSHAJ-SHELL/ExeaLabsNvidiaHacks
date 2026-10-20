@@ -75,6 +75,16 @@ python scripts/render_rooms.py                              # out/renders/<room>
 python scripts/render_rooms.py tests/fixtures/roomplan/amal.json
 ```
 
+To land a new real scan (CAP-3a), `scripts/intake_scan.py` creates `scans/<room_id>/`, strips EXIF from the photos, writes `notes.md` and `measurements.json`, runs the geometry checks and prints GO or NO-GO (exit 0, 1, or 2 when an input is refused):
+
+```bash
+python scripts/intake_scan.py kitchen_01 --roomplan roomplan.json --photos a.jpg b.jpg --location-type kitchen \
+    --phone "iPhone 15 Pro" --ios 18.1 --lighting daylight --clutter low \
+    --measure counter_length=3.20,counter_height=0.92,sink_width=0.55   # also --no-photos, --scans DIR, --out DIR
+```
+
+`arrival.scan.intake.validate_scan_dir(path)` lists what is still missing. Details in `docs/ref/CAP-3a.md`.
+
 ## Simulation (MuJoCo)
 
 `python -m arrival sim --episodes N` builds a MuJoCo scene from the compiled twin and records episodes to `out/datasets/<room>_sim` (LeRobot v2 layout). Needs the `sim` extra. The code lives in `arrival/sim/`:
