@@ -1,0 +1,90 @@
+// Fills every number on the page from the exported data. Nothing here is typed in by hand except wording.
+import { FAMILIES, frameUrl } from './data.js';
+import { fmt } from './util.js';
+
+const LABEL = { open_drawer: 'Open drawer', open_door: 'Open cabinet door', open_fridge: 'Open fridge', put_in_drawer: 'Put in drawer', wipe_counter: 'Wipe counter', counter_to_sink: 'Counter to sink' };
+export const familyLabel = (f) => LABEL[f] || f;
+
+const FORMATS = {
+  int: (v) => fmt.n(v),
+  len: (v) => (Array.isArray(v) ? v.length : Object.keys(v || {}).length),
+  keys: (v) => Object.keys(v || {}).length + ' kinds',
+  hz: (v) => `${fmt.n(v)} Hz`,
+  okword: (v) => (v ? 'ok' : 'not ok'),
+  source: (v) => (v === 'authored_sample' ? 'authored sample' : v === 'roomplan' ? 'iPhone RoomPlan' : String(v)),
+  bounds: (v) => `${(v.max[0] - v.min[0]).toFixed(1)} x ${(v.max[1] - v.min[1]).toFixed(1)} x ${(v.max[2] - v.min[2]).toFixed(1)} m`,
+  dims: (v) => `${v.state_dim} / ${v.action_dim}`,
+  cams: (v) => `${v.cameras.join(' + ')} at ${v.resolution.join('x')}`,
+  res: (v) => v.join('×'),
+};
+
+function resolve(root, path) { return path.split('.').reduce((o, k) => (o == null ? o : o[k]), root); }
+
+export function bindData(data) {
+  const roots = { rooms: data.rooms, stats: data.stats, scan: { n: data.scan.n, ...data.scan.meta } };
+  document.querySelectorAll('[data-bind]').forEach((el) => {
+    const [path, f] = el.dataset.bind.split('|');
+    let v = resolve(roots, path);
+    if (v === undefined) return;
+    if (f && f.startsWith('count:')) { const kind = f.slice(6); v = v.filter((p) => p.kind === kind).length; }
+    else if (f && FORMATS[f]) v = FORMATS[f](v);
+    el.textContent = String(v);
+  });
+}
+
+export function renderEvaluate(stats) {
+  const ev = stats.eval, rows = document.getElementById('evalRows'), total = document.getElementById('evalTotal');
+  rows.innerHTML = '';
+  const pct = (x) => (x * 100).toFixed(3) + '%';
+  const ci = (lo, hi, pt) => `<div class="axis" role="img" aria-label="95% Wilson interval ${lo.toFixed(2)} to ${hi.toFixed(2)}, observed ${pt.toFixed(2)}"><span class="axis__ci" style="left:${pct(lo)};width:${pct(hi - lo)}"><b></b></span><span class="axis__pt" style="left:${pct(pt)}"></span></div>`;
+  for (const f of FAMILIES) {
+    const e = ev.families[f]; if (!e) continue;
+    const arm = e.arm_contact_episodes ? ` · arm touched furniture ${(e.arm_contact_max_depth_m * 1000).toFixed(1)} mm` : '';
+    const row = document.createElement('div');
+    row.className = 'erow';
+    row.innerHTML = `<div class="erow__name">${familyLabel(f)}<small>${stats.families[f].instruction}</small></div>${ci(e.wilson_95[0], e.wilson_95[1], e.success_rate)}
+      <div class="erow__fig"><strong>${e.successes} / ${e.episodes}</strong><small>closest person ${e.min_human_distance_m.toFixed(2)} m · ${e.human_contacts} contacts${arm}</small></div>`;
+    rows.appendChild(row);
+  }
+  const t = ev.totals;
+  total.innerHTML = `<div class="erow__name">All six<small>pooled, still only ${t.episodes} runs</small></div>${ci(t.wilson_95[0], t.wilson_95[1], t.success_rate)}
+    <div class="erow__fig"><strong>${t.successes} / ${t.episodes}</strong><small>${t.human_contacts} human contacts · ${t.arm_contact_episodes} runs touched furniture</small></div>`;
+
+  const minD = Math.min(...Object.values(ev.families).map((e) => e.min_human_distance_m));
+  const maxArm = Math.max(...Object.values(ev.families).map((e) => e.arm_contact_max_depth_m));
+  const f1 = ev.families[FAMILIES[0]];
+  document.getElementById('caveats').innerHTML = [
+    `<b>One run per task.</b> One success out of one has a 95% Wilson interval from ${f1.wilson_95[0].toFixed(2)} to ${f1.wilson_95[1].toFixed(2)}. Pooled, ${t.successes} of ${t.episodes} runs from ${t.wilson_95[0].toFixed(2)} to ${t.wilson_95[1].toFixed(2)}. It shows the pipeline runs, not that it is reliable.`,
+    `<b>The policy is a scripted expert.</b> The harness ran <code>policy: ${ev.policy}</code>, not a learned model. Nothing here measures GR00T.`,
+    `<b>Not held out.</b> <code>holdout: ${ev.holdout}</code>, with ${ev.people} people walking in the room.`,
+    `<b>One room, authored not scanned.</b> The twin is the sample kitchen. Safety figures are for this room only.`,
+    `<b>Contacts.</b> ${t.human_contacts} contacts with people; the closest approach was ${minD.toFixed(2)} m. ${t.arm_contact_episodes} of ${t.episodes} runs brushed furniture, at most ${(maxArm * 1000).toFixed(1)} mm deep.`,
+  ].map((s) => `<li>${s}</li>`).join('');
+
+  const c = stats.cost, rep = stats.dataset.report;
+  document.getElementById('todo').innerHTML = [
+    `<b>GR00T N1.7 fine-tune on this dataset (DAT-2).</b> The dataset is written and passes the offline loader check. The fine-tune needs a GPU host and has not run.`,
+    `<b>GR00T policy server and the held-out comparison (POL-3, DAT-3).</b> Base model, generic data and this-room data, 50 episodes per cell, is a protocol, not a result.`,
+    `<b>A real scan of a real kitchen (CAP-3).</b> The iPhone capture app exists but is untested on a kitchen; the point cloud on this page is simulated.`,
+    `<b>Cost against teleoperation.</b> No teleop baseline exists, so no saving is claimed (<code>comparison.measured: ${c.comparison.measured}</code>).`,
+  ].map((s) => `<li>${s}</li>`).join('');
+
+  document.getElementById('measured').innerHTML = `
+    <div><p class="mono">Local CPU cost</p><p>$${c.dollars.local_cpu.usd}</p><p>Measured, ${rep.attempts} attempts, no cloud used.</p></div>
+    <div><p class="mono">Throughput</p><p>${fmt.n(rep.demos_per_hour, 1)} <small class="mono">demos/h</small></p><p>${rep.successes} demos in ${rep.seconds} s on a laptop CPU.</p></div>
+    <div><p class="mono">Dropped</p><p>${rep.dropped} of ${rep.attempts}</p><p>Every attempt passed the physics success check.</p></div>`;
+
+  const warns = stats.dataset.loader_check.warnings, by = {};
+  for (const w of warns) (by[w.code] ||= []).push(w.msg);
+  document.getElementById('warnText').textContent = Object.entries(by).map(([k, v]) => `${k} x${v.length}: stats.json carries min, max, mean and std but no q01 and q99 quantiles.`).join(' ') || 'No warnings.';
+}
+
+export function renderFallback(stats) {
+  const grid = document.getElementById('fallbackGrid'); grid.innerHTML = '';
+  for (const f of FAMILIES) {
+    const fig = document.createElement('figure');
+    fig.innerHTML = `<div>${['ego_view_mid', 'ego_view_end', 'wrist_mid', 'wrist_end'].map((k) => { const i = k.lastIndexOf('_'); return `<img loading="lazy" width="128" height="128" alt="${k.replace(/_/g, ' ')} frame of ${familyLabel(f)}" src="${frameUrl(f, k.slice(0, i), k.slice(i + 1))}">`; }).join('')}</div>
+      <figcaption>${stats.families[f].instruction}<small>${familyLabel(f)} · ${stats.families[f].duration_s} s · ${stats.families[f].success ? 'success' : 'failed'}</small></figcaption>`;
+    grid.appendChild(fig);
+  }
+}

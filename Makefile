@@ -2,7 +2,7 @@
 PY ?= python
 OUT ?= out
 
-.PHONY: install test sim validate demo serve clean
+.PHONY: install test sim validate demo serve clean site check-site
 
 install:
 	$(PY) -m pip install -e ".[dev,sim]"
@@ -26,3 +26,11 @@ serve:
 
 clean:
 	rm -rf $(OUT)
+
+# Static demo site: no build step. Open http://localhost:8765
+site:
+	$(PY) -m http.server 8765 --directory site
+
+# Resolves every asset path the site references, against a running `make site` (or by file path with --offline)
+check-site:
+	$(PY) scripts/check_site.py
