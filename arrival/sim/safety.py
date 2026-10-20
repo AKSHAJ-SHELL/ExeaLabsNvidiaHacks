@@ -72,7 +72,9 @@ class SafetyMonitor:
                                           model.geom(b).name or model.body(model.geom_bodyid[b]).name)
         self.arm_steps += hit
 
-    def update(self, model, data) -> None:
+    def update(self, model, data, driven=()) -> None:
+        """`driven` are geoms a person is moving right now (the fridge door they hold open): a contact between
+        one of them and the robot counts as human contact."""
         self._arm_contacts(model, data)
         if not self.people:
             return
