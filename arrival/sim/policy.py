@@ -147,14 +147,16 @@ class ScriptedExpert(Policy):
             return out
         if fam == "open_door":
             # The bar handle sits 2-3 cm below the counter-top overhang, so the hand comes down nearly vertical
-            # (10 deg tilt keeps the hand body clear of the slab) with the fingers closing along the panel.
+            # (15 deg tilt keeps the hand body clear of the slab) with the fingers closing along the panel.
             # Segments interpolate in joint space, so the hand first goes out in front of the counter and high,
             # then straight down in front, then in to the bar; a direct move from HOME sweeps through the slab.
             hinge, h, _ = env.door_geometry(task)
             r = np.linalg.norm((h - hinge)[:2])
             a0 = np.arctan2(*(h - hinge)[[1, 0]])
             s, up = self.seg_steps, np.array([0, 0, 1.0])
-            grasp = np.array([0, 0, 0.04])  # hold the bar near its top: a higher wrist reaches further along the arc
+            # Hold the bar at its top: a higher wrist reaches further along the arc, and with the tilt it keeps the
+            # elbow (link4) above the swinging panel, which is solid to its full drawn height (MAN-2).
+            grasp = np.array([0, 0, 0.07])
 
             def pt(a):
                 return hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]]) + grasp
@@ -170,13 +172,13 @@ class ScriptedExpert(Policy):
                 rot = a - a0
                 ax = np.array([np.cos(rot) * along[0] - np.sin(rot) * along[1],
                                np.sin(rot) * along[0] + np.cos(rot) * along[1]])
-                return ik.tilted(nrm(a)[:2], ax, np.radians(10))
+                return ik.tilted(nrm(a)[:2], ax, np.radians(15))
 
             n0, g = nrm(a0), pt(a0)
             out = [(g + 0.2 * n0 + 0.35 * up, ori(a0), o, s), (g + 0.2 * n0, ori(a0), o, s),
                    (g + 0.005 * n0, ori(a0), o, s), (g + 0.005 * n0, ori(a0), c, self.hold_steps)]
             for k in range(1, 9):  # one smooth via-point pull: stop-and-go pulses let the bar slide off the pads
-                a = a0 - np.radians(75) * k / 8
+                a = a0 - np.radians(80) * k / 8
                 out.append((pt(a) + 0.005 * nrm(a), ori(a), c, s // 2, k < 8))
             out.append((out[-1][0], out[-1][1], o, self.hold_steps))
             out.append((out[-1][0] + 0.15 * up, out[-1][1], o, s))

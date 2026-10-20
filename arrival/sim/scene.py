@@ -34,10 +34,15 @@ def _vbox(pos, size, rgba):
     return _box(None, pos, size, rgba, VIS)
 
 
+def _rbox(name, x0, x1, y0, y1, z0, z1, rgba, extra="", o=(0.0, 0.0, 0.0)):
+    """Box from coordinate ranges, expressed relative to origin o."""
+    return _box(name, ((x0 + x1) / 2 - o[0], (y0 + y1) / 2 - o[1], (z0 + z1) / 2 - o[2]),
+                (x1 - x0, y1 - y0, z1 - z0), rgba, extra)
+
+
 def _vr(x0, x1, y0, y1, z0, z1, rgba, o=(0.0, 0.0, 0.0)):
     """Visual box from coordinate ranges, expressed relative to origin o."""
-    return _vbox(((x0 + x1) / 2 - o[0], (y0 + y1) / 2 - o[1], (z0 + z1) / 2 - o[2]),
-                 (x1 - x0, y1 - y0, z1 - z0), rgba)
+    return _rbox(None, x0, x1, y0, y1, z0, z1, rgba, VIS, o)
 
 
 def _vcyl(rgba, r, a, b, kind="cylinder"):
@@ -231,7 +236,9 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
             g.append(vbar((xl + da) / 2, 0.46, 0.54))
     g.append(_upper_cabinet_xml(cid, c, fixtures))
     body = [f'<body name="{cid}" pos="{cx} {cy} 0" euler="0 0 {yaw}">' + "".join(g)]
-    # drawers (slide along local +y) in the left half; hinged door cabinets in the right half
+    # drawers (slide along local +y) in the left half; hinged door cabinets in the right half.
+    # Each hidden collision box uses the same coordinate ranges as its visible front, so the arm touches what
+    # the cameras show (MAN-2).
     hid = f'{DRAWER} group="3"'
     for k in range(2):
         dz = dz0 - k * 0.24  # top drawer sits in the band just under the counter top
@@ -241,7 +248,7 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
             f'<body name="{cid}_drawer{k}" pos="{dx:.3f} {front:.3f} {dz:.3f}">'
             f'<joint name="{cid}_drawer{k}" type="slide" axis="0 1 0" range="0 0.4" damping="5" frictionloss="0.5"/>'
             f'<inertial pos="0 -0.2 0" mass="1.5" diaginertia="0.02 0.02 0.02"/>'
-            + _box(f"{cid}_drawer{k}_front", (0, 0.01, 0), (DRAWER_W, 0.02, 0.18), "0.65 0.5 0.36 1", hid)
+            + _rbox(f"{cid}_drawer{k}_front", da + r2, db - r2, ya, yb, z0, z1, "0.65 0.5 0.36 1", hid, o)
             + _box(f"{cid}_drawer{k}_tray", (0, -0.2, -0.07), (DRAWER_W - 0.04, 0.38, 0.02), "0.6 0.46 0.33 1", DRAWER)
             + f'<geom name="{cid}_drawer{k}_handle" type="capsule" size="0.012" fromto="0 0.07 -0.05 0 0.07 0.05" '
               f'rgba="{STEEL}" {DRAWER}/>'
@@ -257,7 +264,7 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
         f'<body name="{cid}_door" pos="{hinge[0]:.3f} {hinge[1]:.3f} {hinge[2]}">'
         f'<joint name="{cid}_door" type="hinge" axis="0 0 -1" range="0 1.9" damping="2" frictionloss="0.2"/>'
         f'<inertial pos="{-dw / 2:.3f} 0 0" mass="2" diaginertia="0.05 0.05 0.05"/>'
-        + _box(f"{cid}_door_panel", (-dw / 2, 0.01, 0), (dw, 0.02, 0.6), "0.65 0.5 0.36 1", hid)
+        + _rbox(f"{cid}_door_panel", db + r2, xr - r2, ya, yb, zlo, zf - REVEAL, "0.65 0.5 0.36 1", hid, hinge)
         + f'<geom name="{cid}_door_handle" type="capsule" size="0.012" fromto="{hx_:.3f} 0.05 0.1 '
           f'{hx_:.3f} 0.05 0.25" rgba="{STEEL}" {DRAWER}/>'
         + _vr(db + r2, xr - r2, ya, yb, zlo, zf - REVEAL, FRONT, hinge)

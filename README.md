@@ -30,7 +30,7 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 | Closed-loop eval harness | ✅ `python -m arrival eval` scores N episodes per family (success, time, human contacts, Wilson 95%). ⚠️ Only the scripted expert has been scored; the VLA cell needs a GR00T server (POL-3) |
 | Robot: pick mug → sink | ✅ 100% success, friction grasp, physics-checked |
 | Robot: open drawer | ✅ 100% success |
-| Robot: open door | ✅ 100% on both cabinet doors (8/8, two seeds, with and without people). Opens to about 70°: the arm is mounted at 0.75 m, so the far end of the handle arc sits at its reach limit. A mobile base (MAN-3) is what lifts that |
+| Robot: open door | ✅ 100% on both cabinet doors (8/8, two seeds, with and without people). Opens to about 67° on both counters, about 1.6° above the 65° test margin. The arm is mounted at 0.75 m, so the far end of the handle arc sits at its reach limit. A mobile base (MAN-3) is what lifts that |
 | Robot: counter → counter | ❌ Skipped. The pick point and the target counter are about 2 m apart and the base doesn't move |
 | Robot: close drawer, close door, put mug in drawer, wipe counter | ✅ 100% each (32/32 across all families, seed 5, two people walking). The part starts open for the close tasks; the sponge must travel 0.4 m pressed to the top |
 | Robot: bowl | ✅ Held by the rim (one finger inside the wall). 4/4 bowl → sink. The bowl is now hollow in physics |
