@@ -113,6 +113,8 @@ Run it:
 python -m pip install -e ".[dev,sim]"
 python -m arrival sim --episodes 8 --people 2 --save-preview   # contact sheet + mp4 in out/previews/
 python -m arrival sim --base mobile --families counter_to_counter --episodes 4   # the pedestal drives (MAN-3)
+python -m arrival sim --episodes 1000 --shard 0/8 --resume     # block 0 of 8 -> out/shards/0of8/ (see Sharding below)
+python -m arrival merge-shards out --out out/merged            # join the shards, then validate the result
 python -m arrival validate out/datasets/hero_kitchen_sim
 python scripts/check_dataset_loader.py out/datasets/hero_kitchen_sim [--json]
 ```
@@ -134,6 +136,12 @@ Status as of Oct 17 (scripted expert, friction grasps, physics-checked; 16/16 ov
 | `open_fridge` | 100% | 32/32 over two seeds, with and without people; the fingers close round the vertical bar and pull the door to 40°, then the closed fingertips push the inside face to 80° (threshold 60°). Not a default family |
 
 Defaults are `counter_to_sink,open_drawer`. `--families all` runs every family; `counter_to_counter` is skipped with a log line on the fixed base and runs with `--base mobile` (MAN-3), and any failed attempt is dropped and counted. With `--base mobile` the pre-flight also checks the drive: the place point against the drive spot's reach and the whole straight line between the two stand spots against walls and fixtures (`drive path`), and `make_tasks(mobile=True)` lets the target be any counter of the same run, not only one within 1 m of the object. Fixtures may stand on any wall: the base parks in the fixture's own frame, and before a task is built `arrival/sim/preflight.py` checks that its stand spot is inside the room, 0.15 m from every wall face and fixture, and that the pick, place and stroke points are within 0.745 m of the base (a geometric horizontal-reach test, not an IK solve, so a task that passes can still miss in physics). A rejected variation is logged with its reason and counted as `skipped_unreachable`; a task whose env build or rollout raises is logged (`SKIP at build|rollout: ...`), counted as `skipped_error`, and writes no episode. Skipped tasks are not attempts: `attempts` counts tasks that ran to the physics check and `dropped` those that failed it. The report (`out/reports/<room>_sim.json`) and `meta/info.json` carry `skipped`, `skipped_unreachable`, `skipped_error` and `skip_reasons` (at most 50; `arrival_` prefixed in `info.json`), `sim` prints them to stderr, and the worker status has `skipped`; when no task at all can run, the job fails with `error_kind: unsupported_layout` and the reasons in `error_reasons`, not a traceback. `--families` accepts every name in `SIM_FAMILIES` (`arrival/sim/tasks.py`) even though its `--help` text lists only four. `--planner vlm` sends each instruction through the Nemotron planner (POL-1), `--instructions nemotron --split train|eval` draws generated wordings with a held-out set (POL-2). `--tavily` adds appliance research to the twin and the planner prompt (see [Tavily research](#tavily-research)). The VLA client has never run against a real GR00T server; `python -m arrival.policy_server.mock_server --port 8000` is an offline stand-in that proves the plumbing only (see [ref/POL-3.md](ref/POL-3.md)).
+
+### Sharding and resume
+
+`--episodes N --shard i/n` (i counts from 0) runs block `[i*N//n, (i+1)*N//n)` of the N tasks `make_tasks` draws. Every shard builds the whole task list from the same `--seed`, so the n shards together run exactly the tasks one process would run, each with the seed and `task_id` (`sim_<family>_<global index>`) it has there, and `--episodes` is the total, not per shard. Output goes to `out/shards/<i>of<n>/` (`datasets/<room>_sim`, `reports/`, `progress/`), and `meta/info.json` carries `arrival_shard` (index, count, task range and the settings that must agree). `python -m arrival merge-shards <folder> [--out out]` takes the shard folders (or `out`, or `out/shards`, which hold them), refuses a missing, duplicated, unfinished or mismatched shard (different seed, families, res, base and so on), then writes `<out>/datasets/<room>_sim` in shard order with episode, task and frame indices and the stats rebuilt, copies the mp4s, writes a summed `reports/<room>_sim.json` (`seconds` is compute time summed over shards, `seconds_longest_shard` the wall time if they ran in parallel) and runs the validator (exit 1 if it fails, 2 for an unusable shard set). Pre-flight rejections are counted once, not once per shard. On a laptop, 2 shards of 2 episodes merge to the same episodes, frames, tasks, task ids and stats as one run of 4 (`tests/test_shards.py`); this was not run across machines.
+
+Every `sim` run writes a journal, `<out>/progress/<room>_sim.jsonl`, one line per finished task, appended after that task's episode files. `--resume` reads it, skips the finished tasks, deletes the files of a task a kill interrupted, and continues, so a killed shard ends with the dataset an uninterrupted run would have written (checked in the same test file). A journal from different settings (room, families, episodes, seed, people, policy, planner, split, base, res, shard) is refused with the differing names rather than mixed in; without `--resume` the old run is overwritten. Datasets now put episode `i` in `chunk-{i // 1000:03d}` like the validator expects, so a merged run of more than 1,000 episodes is a multi-chunk dataset (before, the sim writer put every episode in `chunk-000` and `validate` rejected more than 1,000).
 
 ### State and action width: 8 vs 11 floats
 
@@ -198,6 +206,8 @@ out/
     data/chunk-XXX/episode_XXXXXX.parquet   (1,000 episodes per chunk)
     videos/chunk-XXX/observation.images.ego_view/episode_XXXXXX.mp4
   datasets/hero_kitchen_sim/ MuJoCo sim dataset (same layout, ego_view + wrist videos)
+  shards/<i>of<n>/          `sim --shard i/n`: datasets/, reports/, progress/ of one shard; `merge-shards` joins them
+  progress/<room>_sim.jsonl per-task journal that `sim --resume` continues from
   previews/                 sim contact sheets and overview mp4s (--save-preview)
   research/                 `research` output (<room>_research.json, query_research.json)
   reports/hero_kitchen.json attempts, successes, dropped, seconds, demos/hour, dollars
@@ -272,7 +282,7 @@ Not built yet, and not claimed anywhere in the outputs:
 - MimicGen generation (`arrival/generate/mimicgen.py` is a stub).
 - Gaussian splat training or compositing (`arrival/render/splat.py` is a stub).
 - Cosmos restyle of frames.
-- Nebius Serverless fan-out of generation jobs.
+- Nebius Serverless fan-out of generation jobs. The sim can be split (`--shard`) and merged, but nothing submits, monitors or stores shards on Nebius yet.
 - GR00T fine-tune (command above, not run). `python -m arrival eval` scores policies in the sim; it has only been run with the scripted expert.
 - The mobile base (`--base mobile`) drives only for `counter_to_counter`, in a straight line along one run; the door and drawer families still park once (so `open_door` still stops at about 63-66° and `put_in_drawer` keeps its 0.6 m rule), and a target on another wall needs a turn and a route that no family plans yet. `--base mobile --policy vla` is refused because the policy server's wire format carries no base pose (G2).
 - RoboCasa-native layout conventions: `layout.yaml` is a subset emitter (world-frame `pos`, `z_rot` on oblique walls), not loadable by RoboCasa as-is.

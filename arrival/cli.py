@@ -1,4 +1,4 @@
-"""python -m arrival demo | validate | serve | sim | eval | work"""
+"""python -m arrival demo | validate | serve | sim | merge-shards | eval | work"""
 
 from __future__ import annotations
 
@@ -148,6 +148,13 @@ def cmd_sim(a) -> int:
         print(args, file=sys.stderr)
         return EXIT_USAGE
     fams, twin = args
+    from arrival.jobs.shards import ShardError, parse_shard
+
+    try:
+        shard = parse_shard(a.shard) if getattr(a, "shard", None) else None
+    except ShardError as e:
+        print(e, file=sys.stderr)
+        return EXIT_USAGE
     if getattr(a, "tavily", False):
         from arrival.tasks.tavily_research import TavilyResearchAgent
         agent = TavilyResearchAgent()
@@ -159,7 +166,11 @@ def cmd_sim(a) -> int:
         res = collect(twin, fams, a.episodes, a.out, people=a.people, policy_name=a.policy, res=a.res,
                       seed=a.seed, save_preview=a.save_preview,
                       planner_name=a.planner, split=a.split,
-                      use_generated_instructions=(a.instructions == "nemotron"), base=getattr(a, "base", "fixed"))
+                      use_generated_instructions=(a.instructions == "nemotron"), base=getattr(a, "base", "fixed"),
+                      shard=shard, resume=getattr(a, "resume", False))
+    except ShardError as e:
+        print(e, file=sys.stderr)
+        return EXIT_USAGE
     except VLANotConfigured as e:
         print(f"policy vla: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -171,6 +182,10 @@ def cmd_sim(a) -> int:
     r = res["report_data"]
     print(f"dataset: {res['dataset']}")
     print(f"report:  {res['report']}")
+    if shard:
+        s = r["shard"]
+        print(f"shard {s['index']}/{s['count']}: tasks {s['task_range'][0]}..{s['task_range'][1] - 1} of {s['total_tasks']}; "
+              f"join the shards with: python -m arrival merge-shards {Path(a.out) / 'shards'} --out {a.out}")
     print(f"{r['successes']} episodes / {r['attempts']} attempts ({r['dropped']} dropped, physics-checked, "
           f"{r['human_contacts']} human contacts) in {r['seconds']:.1f}s; per family: "
           + ", ".join(f"{k} {v['successes']}/{v['attempts']}" for k, v in r["families"].items()))
@@ -181,6 +196,30 @@ def cmd_sim(a) -> int:
             print(f"  {x.get('task_id') or x['family']}: {x['reason']}", file=sys.stderr)
     if a.save_preview:
         print(f"preview: {Path(a.out) / 'previews'}")
+    return EXIT_OK
+
+
+def cmd_merge_shards(a) -> int:
+    """Join the datasets `sim --shard i/n` wrote into one LeRobot v2 dataset and validate it."""
+    from arrival.export.validate import validate
+    from arrival.jobs.shards import ShardError, merge_shards
+
+    try:
+        res = merge_shards(a.shards, a.out)
+    except ShardError as e:
+        print(f"merge-shards: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    errors = validate(res["dataset"])
+    for e in errors:
+        print(f"INVALID: {e}", file=sys.stderr)
+    info = res["info"]
+    print(f"dataset: {res['dataset']}")
+    if res["report"]:
+        print(f"report:  {res['report']}")
+    if errors:
+        return EXIT_INVALID
+    print(f"OK: merged {info['arrival_merged_shards']} shards: {info['total_episodes']} episodes, "
+          f"{info['total_frames']} frames, {info['total_tasks']} tasks, physically_valid={info['arrival_physically_valid']}")
     return EXIT_OK
 
 
@@ -322,8 +361,18 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--scans", default="scans")
     m.add_argument("--seed", type=int, default=0)
     m.add_argument("--save-preview", action="store_true")
+    m.add_argument("--shard", default=None, metavar="I/N",
+                   help="run block I of N of the --episodes tasks (I counts from 0), into <out>/shards/<I>of<N>/; "
+                        "join with merge-shards")
+    m.add_argument("--resume", action="store_true",
+                   help="continue a killed run from its progress journal instead of starting over (same settings)")
     m.add_argument("--tavily", action="store_true", help="Enrich digital twin and VLM planning with Tavily appliance research")
     m.set_defaults(fn=cmd_sim)
+    g = sub.add_parser("merge-shards", help="join sim --shard datasets into one validated LeRobot v2 dataset")
+    g.add_argument("shards", nargs="+", help="shard folders (<out>/shards/<i>of<n>), their dataset folders, "
+                                             "or the one folder that holds them")
+    g.add_argument("--out", default="out", help="the merged dataset goes to <out>/datasets/<room>_sim")
+    g.set_defaults(fn=cmd_merge_shards)
     r = sub.add_parser("research", help="Tavily AI research on kitchen appliances and safety guidelines")
     r.add_argument("--room", default="hero_kitchen")
     r.add_argument("--query", default=None, help="direct query string to search via Tavily")

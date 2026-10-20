@@ -333,12 +333,17 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             policy_name: str = "scripted", res: int = 128, seed: int = 0, save_preview: bool = False,
             planner_name: str = "rule", cache_path: str | Path | None = None,
             split: str = "train", use_generated_instructions: bool = False, base: str = "fixed",
-            log=print) -> dict:
+            shard: tuple[int, int] | None = None, resume: bool = False, log=print) -> dict:
     """Collect `episodes` attempts; failed attempts are dropped and counted. A task whose stand spot or reach the
     pre-flight rejects never runs (`skipped_unreachable`, counted per rejected variation), and one whose env build
     or rollout raises is logged with its reason, counted as `skipped_error` and never written, so a bad geometry
     costs a task, not the run. base="mobile" gives the arm a driven base (MAN-3), which also admits the
-    counter_to_counter variations a fixed base cannot reach."""
+    counter_to_counter variations a fixed base cannot reach.
+    shard=(i, n) runs only block i of n of the `episodes` tasks (arrival/jobs/shards.py) and writes under
+    <out_dir>/shards/<i>of<n>/, so n processes cover the run with no overlap; `arrival merge-shards` joins them.
+    Every run journals each finished task; resume=True continues from that journal (a different run's journal is
+    refused with a ShardError) and the result is the dataset an uninterrupted run would have written."""
+    from arrival.jobs.shards import Journal, shard_dir, shard_range
     from arrival.sim.export import SimDatasetWriter
     from arrival.sim.policy import ScriptedExpert, VLAClient, VLANotConfigured, VLMPlanner
     from arrival.sim.tasks import finish_task, make_tasks
@@ -349,17 +354,47 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     tasks = make_tasks(twin, families, episodes, seed=seed, people=people,
                        split=split, use_generated_instructions=use_generated_instructions, mobile=base == "mobile", log=log,
                        preflight=pre)
+    lo, hi = shard_range(len(tasks), *shard) if shard else (0, len(tasks))
+    if shard:
+        out_dir = shard_dir(out_dir, *shard)
     skips = [{"stage": "preflight", **r} for r in pre["reasons"]]  # what never ran and why
     errors = 0
-    for t in tasks:
+    for t in tasks[lo:hi]:
         finish_task(t)
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
     planner = VLMPlanner(log=log, cache_path=cache_path) if planner_name == "vlm" else None
-    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"), base=base)
+    fingerprint = {"room": room, "families": list(families), "episodes": episodes, "seed": seed, "people": people,
+                   "policy": policy_name, "planner": planner_name, "split": split,
+                   "instructions": use_generated_instructions, "base": base, "res": res, "shard": list(shard) if shard else None}
+    journal = Journal(out_dir / "progress" / f"{room}_sim.jsonl")
+    done = journal.start(fingerprint, resume)
+    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"), base=base,
+                              resume=bool(done))
+    per: dict = {}
+    prior_seconds = 0.0
+    if done:
+        writer.restore([r["episode"] for r in done if r["outcome"] == "ok"], [r["stats"] for r in done if r["outcome"] == "ok"])
+        for r in done:
+            prior_seconds += r["seconds"]
+            if r["outcome"] == "skip":
+                errors += 1
+                skips.append({"stage": r["stage"], "task_id": r["task_id"], "family": r["family"], "reason": r["reason"]})
+                continue
+            fam = per.setdefault(r["family"], {"attempts": 0, "successes": 0, "human_contacts": 0,
+                                               "fridge_visits": 0, "door_contacts": 0})
+            fam["attempts"] += 1
+            fam["successes"] += r["outcome"] == "ok"
+            fam["human_contacts"] += r["human_contact"]
+            fam["fridge_visits"] += r["fridge_visit"]
+            fam["door_contacts"] += r["door_contact"]
+        log(f"[sim] resume: {len(done)} of {hi - lo} tasks already done, {len(writer.episodes)} episodes kept")
+    finished = {r["task_id"] for r in done}
     t0 = time.perf_counter()
-    per = {}
     preview = [] if save_preview else None
-    for i, task in enumerate(tasks):
+    for i, task in enumerate(tasks[lo:hi]):
+        if task["task_id"] in finished:
+            continue
+        t_task = time.perf_counter()
         if planner is not None:
             obj_ids = [o["id"] for o in twin.get("objects", [])]
             fx_ids = [f["id"] for f in twin.get("fixtures", [])]
@@ -403,6 +438,8 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             skips.append({"stage": stage, "task_id": task["task_id"], "family": task["family"],
                           "reason": one_line(e)})
             log(f"[sim] {task['task_id']}: SKIP at {stage}: {skips[-1]['reason']}")
+            journal.append({"task_id": task["task_id"], "outcome": "skip", "family": task["family"], "stage": stage,
+                            "reason": skips[-1]["reason"], "seconds": round(time.perf_counter() - t_task, 3)})
             continue
         fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0, "human_contacts": 0,
                                               "fridge_visits": 0, "door_contacts": 0})
@@ -414,17 +451,26 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
         tag = "DROP human_contact" if contact else ("OK " if ep["success"] else "MISS")
         log(f"[sim] {task['task_id']}: {tag} {ep['detail']} ik_err={ep['ik_error'] if ep['ik_error'] is None else round(ep['ik_error'], 4)} "
             f"min_human_d={ep['safety']['min_human_distance_m']}" + (" fridge_visit" if ep["fridge_visit"] else ""))
-        if ep["success"] and not contact:
+        kept = ep["success"] and not contact
+        if kept:
             fam["successes"] += 1
             writer.add_episode(ep, task)
+        journal.append({"task_id": task["task_id"], "outcome": "ok" if kept else ("contact" if contact else "miss"),
+                        "family": task["family"], "human_contact": contact, "fridge_visit": int(ep["fridge_visit"]),
+                        "door_contact": ep["safety"]["door_contact"], "seconds": round(time.perf_counter() - t_task, 3),
+                        **({"episode": writer.episodes[-1], "stats": writer.stats[-1]} if kept else {})})  # after the files
         if save_preview and i == 0:
             _write_preview(out_dir / "previews", room, preview, ep)
             preview = None  # up to ~200 MB of overview frames; not needed past the first episode
-    seconds = time.perf_counter() - t0
-    attempts = len(tasks) - errors  # tasks that ran to the physics check; a skipped one is not an attempt
+    seconds = prior_seconds + time.perf_counter() - t0
+    attempts = sum(f["attempts"] for f in per.values())  # tasks that ran to the physics check; a skipped one is not an attempt
     skipped = {"skipped_unreachable": pre["rejected"], "skipped_error": errors,
                "skipped": pre["rejected"] + errors, "skip_reasons": skips[:SKIP_REASONS_KEPT]}
-    info = writer.finish(attempts, skipped)
+    shard_info = ({"index": shard[0], "count": shard[1], "task_range": [lo, hi], "total_tasks": len(tasks),
+                   "episodes": episodes, "seed": seed, "families": list(families), "people": people,
+                   "policy": policy_name, "planner": planner_name, "split": split,
+                   "instructions": use_generated_instructions, "base": base, "res": res}) if shard else None
+    info = writer.finish(attempts, skipped, {"shard": shard_info} if shard else None)
     succ = sum(f["successes"] for f in per.values())
     report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name,
               "planner": planner_name, "attempts": attempts, **skipped,
@@ -435,7 +481,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
               "door_contacts": sum(f["door_contacts"] for f in per.values()),
               "families": {k: {**v, "success_rate": round(v["successes"] / v["attempts"], 3)} for k, v in per.items()},
               "people": people, "resolution": res, "physics_checked_success": True, "grasp": "friction",
-              "base": base}
+              "base": base, **({"shard": shard_info} if shard else {}), **({"resumed_tasks": len(done)} if done else {})}
     rp = out_dir / "reports" / f"{room}_sim.json"
     rp.parent.mkdir(parents=True, exist_ok=True)
     rp.write_text(json.dumps(report, indent=2))
