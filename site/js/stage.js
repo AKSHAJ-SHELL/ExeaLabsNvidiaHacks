@@ -99,9 +99,9 @@ class Highlight {
 export class Stage {
   constructor({ canvas, wrap, data, reduced = false, coarse = false }) {
     this.canvas = canvas; this.wrap = wrap; this.data = data; this.reduced = reduced; this.coarse = coarse;
-    const gl2 = canvas.getContext('webgl2', { antialias: true, powerPreference: 'high-performance' });
+    const gl2 = canvas.getContext('webgl2', { antialias: true });
     if (!gl2) throw new Error('webgl2 unavailable');
-    this.renderer = new THREE.WebGLRenderer({ canvas, context: gl2, antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({ canvas, context: gl2, antialias: true });
     this.prCap = Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2);
     this.pr = this.prCap;
     this.renderer.setPixelRatio(this.pr);
@@ -116,7 +116,8 @@ export class Stage {
     this.controls.maxPolarAngle = Math.PI * 0.495; this.controls.minDistance = 0.6; this.controls.maxDistance = 14;
     this.controls.zoomSpeed = 0.8;
     // tour mode: a mouse drag on the canvas hands the camera to the reader; touch and wheel keep scrolling the page
-    this.controls.enabled = !coarse; this.controls.enableZoom = false;
+    // The camera belongs to the scroll until the twin has been built; before that a drag would freeze the tour.
+    this.controls.enabled = false; this.controls.enableZoom = false; this._orbitable = false;
     canvas.style.touchAction = 'pan-y';
     this.controls.addEventListener('start', () => { if (this.mode === 'tour') { this.controls.target.copy(this._look); this._pendingExplore = true; } });
     this.controls.addEventListener('change', () => { if (this._pendingExplore && this.mode === 'tour') { this._pendingExplore = false; this._enterExplore(); } });
@@ -126,7 +127,7 @@ export class Stage {
     this.J = { shotU: 0, front: 0, build: 0, scanA: 1, wire: 0, dims: 0, exF: 0, exA: 0, compare: 0, robot: false, people: false, feeds: 0, autoplay: false };
     this.user = { solid: true, wire: false, scan: false, people: true };
     this.cmpX = 0.5;
-    this.mode = 'tour'; this.blend = 1;
+    this.mode = 'tour'; this.blend = 1; this.lost = false; this._camReady = false; this._feedDirty = true;
     this.visible = true;
     this.u = 0;
     this.par = { x: 0, y: 0, tx: 0, ty: 0 };
@@ -139,7 +140,7 @@ export class Stage {
     this.pickables = [];
     this.settle = reduced ? 1 : 0;
     this.frameState = { f: 0, t: 0, dur: 1, n: 1, joints: new Float32Array(8), live: 0, livePair: '' };
-    this._acc = 0; this._cbAcc = 0; this._perfN = 0; this._perfT = 0; this._perfBad = 0;
+    this._acc = 0; this._cbAcc = 0; this._perfN = 0; this._perfT = 0; this._perfBad = 0; this._perfGood = 0;
 
     this._v = new THREE.Vector3(); this._v2 = new THREE.Vector3(); this._look = new THREE.Vector3(); this._pos = new THREE.Vector3();
     this._retPos = new THREE.Vector3(); this._retLook = new THREE.Vector3();
@@ -271,7 +272,7 @@ export class Stage {
   _makeBody(name, geoms, person) {
     const geo = buildBody(geoms);
     const group = new THREE.Group(); group.name = name;
-    const entry = { name, group, geo, person, solid: null };
+    const entry = { name, group, geo, person, solid: null, isRobot: ROBOT.includes(name) };
     if (geo) {
       const solid = new THREE.Mesh(geo.solid, this.matSolid); solid.userData.body = name;
       const edges = new THREE.LineSegments(geo.edges, this.matEdges);
@@ -386,7 +387,7 @@ export class Stage {
     add([x1, y0, 0], [x1, y1, 0], [0.5, 0, 0], f2(y1 - y0));
     add([x1, y1, 0], [x1, y1, z1], [0.5, 0.5, 0], f2(z1), { perp: [1, 1, 0] });
     for (const f of rooms.fixtures) {
-      if (f.type === 'sink') continue;
+      if (f.type === 'sink' || Math.abs(f.yaw || 0) > 1e-3) continue;   // the front edge below assumes yaw 0
       const w = f.size[0], d = f.size[1], front = f.position[1] + d / 2;
       add([f.position[0] - w / 2, front, 0], [f.position[0] + w / 2, front, 0], [0, 0.3 + (f.type.startsWith('fridge') ? 0.0 : 0.0), 0], f2(w));
       if (f.type.startsWith('fridge')) add([f.position[0] + w / 2, front, 0], [f.position[0] + w / 2, front, f.size[2]], [0.32, 0.0, 0], f2(f.size[2]), { perp: [1, 0, 0] });
@@ -414,14 +415,17 @@ export class Stage {
     const el = document.createElement('span');
     el.className = `dim dim--${cls}`; el.textContent = text; el.setAttribute('aria-hidden', 'true');
     this.labelHost.appendChild(el);
-    this.labels.push({ el, pos: pos.clone(), group, follow, shown: false });
+    this.labels.push({ el, pos: pos.clone(), group, follow, shown: false, x: -1e9, y: -1e9 });
   }
 
   _buildLights() {
     this.hemi = new THREE.HemisphereLight(0xffffff, 0xcfc6b4, 1.5);
     this.key = new THREE.DirectionalLight(0xffffff, 2.0);
     this.fill = new THREE.DirectionalLight(0xffffff, 0.5);
-    this.scene.add(this.hemi, this.key, this.fill);
+    // aim both at the room centre; the default target is the room corner, which skews the shading
+    const [x0, y0] = this.data.rooms.bounds.min, [x1, y1] = this.data.rooms.bounds.max;
+    mj((x0 + x1) / 2, (y0 + y1) / 2, 0.9, this.key.target.position); this.fill.target.position.copy(this.key.target.position);
+    this.scene.add(this.hemi, this.key, this.fill, this.key.target, this.fill.target);
   }
 
   _buildTrail() {
@@ -501,6 +505,8 @@ export class Stage {
     this.frameState.n = ep.n; this.frameState.dur = this.duration;
     this.time = 0; this.hold = 0; this.poseDirty = true;
     this._buildShots();
+    // the arm shots move with the task's base: ease from where the camera is now instead of snapping to the new path
+    if (this._camReady && this.mode === 'tour') { this._retPos.copy(this.camera.position); this._retLook.copy(this._look); this.blend = 0; }
     this._applyLights();
     this.select.detach(); this.hover.detach();
     this.setTheme(this.theme || { paper: '#EFE9DC', ink: '#16130F', signal: '#E04A1F', dark: false });
@@ -515,6 +521,9 @@ export class Stage {
   _buildShots() {
     const ep = this.ep, rb = ep.nodes.static.robot_base || [1.4, 1.4, 0.75];
     const fx = rb[0], fy = rb[1] - 0.45, sd = fx > 2 ? -1 : 1;   // view the arm from the open side of the room
+    // the base differs per task, so keep the two arm shots inside the room (open_drawer would put shot 9 at x = 4.4 m)
+    const [bx0, by0] = this.rooms.bounds.min, [bx1, by1] = this.rooms.bounds.max;
+    const inX = (v) => clamp(v, bx0 + 0.3, bx1 - 0.3), inY = (v) => clamp(v, by0 + 0.3, by1 - 0.3);
     const S = [
       { p: [2.0, 6.8, 6.8], l: [2.0, 2.6, 0.3], f: 36 },            // 0 hero: plan view from the south
       { p: [1.12, 1.8, 1.3], l: [2.9, 0.1, 1.0], f: 66 },           // 1 scan station 1
@@ -524,8 +533,8 @@ export class Stage {
       { p: [2.0, 6.0, 3.3], l: [2.0, 1.2, 0.8], f: 36 },            // 5 compare, front-on
       { p: [4.8, 5.4, 3.8], l: [2.0, 1.0, 1.0], f: 40 },            // 6 explode
       { p: [-0.6, 5.2, 3.6], l: [2.0, 1.0, 1.1], f: 40 },           // 7 explode, other side
-      { p: [fx + sd * 2.3, fy + 0.3, 1.6], l: [fx, fy - 0.2, 1.0], f: 40 },   // 8 simulate: close on the arm
-      { p: [fx + sd * 3.3, fy + 1.4, 2.2], l: [fx - sd * 0.2, fy - 0.1, 0.95], f: 40 }, // 9 workbench
+      { p: [inX(fx + sd * 2.3), inY(fy + 0.3), 1.6], l: [fx, fy - 0.2, 1.0], f: 40 },   // 8 simulate: close on the arm
+      { p: [inX(fx + sd * 3.3), inY(fy + 1.4), 2.2], l: [fx - sd * 0.2, fy - 0.1, 0.95], f: 40 }, // 9 workbench
     ];
     this.shots = S;
     const pts = (k) => S.map((s) => mj(s[k][0], s[k][1], s[k][2]));
@@ -579,7 +588,7 @@ export class Stage {
   // ---------- modes and picking ----------
   _enterExplore() {
     this.mode = 'explore'; this.controls.enableZoom = true; this.controls.enabled = true;
-    this.canvas.style.touchAction = 'none';
+    this.canvas.style.touchAction = 'none'; this.canvas.setAttribute('data-lenis-prevent', '');   // wheel zooms here, it must not scroll the page too
     this.cb.mode?.('explore');
   }
   setMode(m) {
@@ -589,8 +598,8 @@ export class Stage {
       this._enterExplore();
     } else {
       this._retPos.copy(this.camera.position); this._retLook.copy(this.controls.target);
-      this.mode = 'tour'; this.blend = 0; this.controls.enableZoom = false; this.controls.enabled = !this.coarse;
-      this.canvas.style.touchAction = 'pan-y'; this._focus = null;
+      this.mode = 'tour'; this.blend = 0; this.controls.enableZoom = false; this.controls.enabled = this._orbitable;
+      this.canvas.style.touchAction = 'pan-y'; this.canvas.removeAttribute('data-lenis-prevent'); this._focus = null;
       this.cb.mode?.('tour');
     }
   }
@@ -628,19 +637,38 @@ export class Stage {
     this.camera.updateProjectionMatrix();
     this.scanMat.uniforms.uPx.value = this.pr;
   }
-  setFeeds(egoEl, wristEl) { this.feedEls = [[egoEl, this.camNodes.get('cam:ego_view')], [wristEl, this.camNodes.get('cam:wrist')]]; }
+  setFeeds(egoEl, wristEl) {
+    this.feedEls = [[egoEl, this.camNodes.get('cam:ego_view')], [wristEl, this.camNodes.get('cam:wrist')]];
+    // feed rectangles are measured only when something that can move them changed, not every frame
+    const dirty = () => { this._feedDirty = true; };
+    const ro = new ResizeObserver(dirty); ro.observe(egoEl); ro.observe(wristEl); ro.observe(this.canvas);
+    const rd = document.getElementById('readout'); if (rd) ro.observe(rd);   // a taller readout pushes the feeds down
+    egoEl.closest('.side')?.addEventListener('scroll', dirty, { passive: true });
+    addEventListener('resize', dirty);
+  }
 
   // ---------- the frame ----------
   tick(dt) {
-    if (!this.ep) return;
+    if (!this.ep || this.lost) return;
     dt = Math.min(dt, 0.1);
     const J = this.J, ep = this.ep;
+    // the reader can take the camera once the twin is built (not on touch: there the page keeps scrolling)
+    const orbitable = !this.coarse && J.build >= 0.5;
+    if (orbitable !== this._orbitable) {
+      this._orbitable = orbitable; this.wrap.classList.toggle('is-orbitable', orbitable);
+      if (this.mode === 'tour') this.controls.enabled = orbitable;
+    }
     // performance guard: drop resolution if frames run long
     if (this.visible) {
       this._perfT += dt; this._perfN++;
       if (this._perfN >= 90) {
         const avg = this._perfT / this._perfN;
-        if (avg > 0.024 && this.pr > 1) { this._perfBad++; if (this._perfBad >= 2) { this.pr = Math.max(1, this.pr - 0.25); this.resize(); this._perfBad = 0; } } else this._perfBad = 0;
+        if (avg > 0.024 && this.pr > 1) { this._perfBad++; this._perfGood = 0; if (this._perfBad >= 2) { this.pr = Math.max(1, this.pr - 0.25); this.resize(); this._perfBad = 0; } }
+        else {
+          this._perfBad = 0;
+          // recover: a few comfortably fast windows in a row bring resolution back up (a transient stall should not cost it for good)
+          if (avg < 0.019 && this.pr < this.prCap) { if (++this._perfGood >= 4) { this.pr = Math.min(this.prCap, this.pr + 0.25); this.resize(); this._perfGood = 0; } } else this._perfGood = 0;
+        }
         this._perfN = 0; this._perfT = 0;
       }
     }
@@ -657,8 +685,7 @@ export class Stage {
         this.poseDirty = true;
       }
     }
-    this._explodeKey = J.exF * 7 + J.exA * 13;
-    if (this._explodeKey !== this._lastExplode) { this._lastExplode = this._explodeKey; this.poseDirty = true; }
+    if (J.exF !== this._lastExF || J.exA !== this._lastExA) { this._lastExF = J.exF; this._lastExA = J.exA; this.poseDirty = true; }
     if (this.poseDirty) this._pose(this.time * ep.fps);
 
     // layers
@@ -666,8 +693,7 @@ export class Stage {
     const solidOn = this.user.solid && showTwin;
     for (const e of this.bodies.values()) {
       if (!e.solid) continue;
-      const isRobot = ROBOT.includes(e.name);
-      const vis = isRobot ? J.robot : true;
+      const vis = e.isRobot ? J.robot : true;
       e.group.visible = vis;
       e.solid.visible = solidOn; e.edges.visible = solidOn;
       e.wire.visible = (this.user.wire || J.wire > 0.5) && vis;
@@ -757,7 +783,7 @@ export class Stage {
       this._pos.lerpVectors(this._retPos, this._pos, e); this._look.lerpVectors(this._retLook, this._look, e);
     }
     const p = this.par; p.x = damp(p.x, p.tx, 5, dt); p.y = damp(p.y, p.ty, 5, dt);
-    cam.position.copy(this._pos); cam.lookAt(this._look);
+    cam.position.copy(this._pos); cam.lookAt(this._look); this._camReady = true;
     if (!this.reduced) { const k = this._pos.distanceTo(this._look) * 0.018; cam.translateX(p.x * k); cam.translateY(p.y * k); }
   }
 
@@ -766,11 +792,14 @@ export class Stage {
     // reads first (feed rects), then draw
     let feedRects = null;
     if (J.feeds > 0.5 && this.feedEls) {
-      const cr = this.canvas.getBoundingClientRect();
       feedRects = this._feedRects || (this._feedRects = [{}, {}]);
-      for (let i = 0; i < 2; i++) {
-        const b = this.feedEls[i][0].getBoundingClientRect(), o = feedRects[i];
-        o.x = b.left - cr.left; o.y = H - (b.bottom - cr.top); o.w = b.width; o.h = b.height; o.cam = this.feedEls[i][1];
+      if (this._feedDirty) {
+        this._feedDirty = false;
+        const cr = this.canvas.getBoundingClientRect();
+        for (let i = 0; i < 2; i++) {
+          const b = this.feedEls[i][0].getBoundingClientRect(), o = feedRects[i];
+          o.x = b.left - cr.left; o.y = H - (b.bottom - cr.top); o.w = b.width; o.h = b.height; o.cam = this.feedEls[i][1];
+        }
       }
     }
     r.setScissorTest(false); r.setViewport(0, 0, W, H);
@@ -782,6 +811,8 @@ export class Stage {
       r.setScissorTest(false); cam.layers.enableAll();
     } else r.render(this.scene, cam);
     if (feedRects) {
+      // the robot cameras see real walls: undo the ghosting that the orbit camera applied (tick re-applies it next frame)
+      for (const w of this.walls) { w.mat.opacity = 1; w.mat.depthWrite = true; w.em.opacity = 0.62; }
       r.autoClear = true; r.setScissorTest(true);
       for (let i = 0; i < 2; i++) {
         const o = feedRects[i]; if (o.w < 8) continue;
@@ -801,7 +832,10 @@ export class Stage {
         if (L.follow) { L.follow.getWorldPosition(v); v.y += 0.05; } else v.copy(L.pos);
         v.project(cam);
         if (v.z > 1 || v.z < -1) show = false;
-        else { const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H; L.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0) translate(-50%,-135%)`; }
+        else {
+          const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H;
+          if (Math.abs(x - L.x) > 0.1 || Math.abs(y - L.y) > 0.1) { L.x = x; L.y = y; L.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0) translate(-50%,-135%)`; }
+        }
       }
       if (show !== L.shown) { L.shown = show; L.el.classList.toggle('is-on', show); }
     }

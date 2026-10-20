@@ -30,6 +30,14 @@ export function parseEpisode(raw) {
   return ep;
 }
 
+// Episodes are cached as promises, so a double click or a prefetch never fetches the same file twice and an episode can be
+// requested before the core data has finished. A failed fetch is dropped from the cache so a later click can retry.
+const episodeCache = {};
+export function loadEpisode(family) {
+  if (!episodeCache[family]) episodeCache[family] = j(`episodes/${family}.json`).then(parseEpisode).catch((err) => { delete episodeCache[family]; throw err; });
+  return episodeCache[family];
+}
+
 export async function loadCore(step) {
   const out = {};
   const tasks = [
@@ -44,10 +52,11 @@ export async function loadCore(step) {
     }],
   ];
   await Promise.all(tasks.map(async ([k, f]) => { out[k] = await f(); step?.(k); }));
-  out.episodes = {};
-  out.loadEpisode = async (family) => {
-    if (!out.episodes[family]) out.episodes[family] = parseEpisode(await j(`episodes/${family}.json`));
-    return out.episodes[family];
+  out.episodes = episodeCache;
+  out.loadEpisode = loadEpisode;
+  out.prefetchEpisodes = () => {
+    const go = () => { for (const f of FAMILIES) loadEpisode(f).catch(() => {}); };
+    if ('requestIdleCallback' in window) requestIdleCallback(go, { timeout: 4000 }); else setTimeout(go, 1500);
   };
   return out;
 }

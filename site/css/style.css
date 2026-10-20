@@ -218,10 +218,11 @@ code { font-family: var(--font-mono); font-size: .875em; }
 .dim--note { background: var(--panel); border: 1px solid var(--line-2); color: var(--ink-2); text-transform: uppercase; font-size: .625rem; padding: 3px 5px; }
 
 /* compare */
-.compare { position: absolute; inset: 0; z-index: 6; pointer-events: none; opacity: 0; transition: opacity var(--t) var(--ease-out); }
+.compare { position: absolute; inset: 0; z-index: 4; pointer-events: none; opacity: 0; transition: opacity var(--t) var(--ease-out); }
 .compare.is-on { opacity: 1; }
 .compare__line { position: absolute; top: 0; bottom: 0; width: 0; left: 0; border-left: 1px solid var(--ink); will-change: transform; }
-.compare__handle { position: absolute; top: 50%; left: 0; width: var(--hit); height: 5.5rem; margin: -2.75rem 0 0 -1.375rem; display: grid; place-items: center; pointer-events: auto; cursor: ew-resize; touch-action: pan-y; }
+/* the handle sits in the lower third: the chapter note (z 5) is centred and ends above it, so the card never covers the grip */
+.compare__handle { position: absolute; top: 78%; left: 0; width: var(--hit); height: 5.5rem; margin: -2.75rem 0 0 -1.375rem; display: grid; place-items: center; pointer-events: auto; cursor: ew-resize; touch-action: pan-y; }
 .compare__handle i { width: .875rem; height: 3.25rem; border: 1px solid var(--ink); background: var(--panel); position: relative; box-shadow: 0 0 0 4px var(--paper); transition: transform var(--t-fast) ease-out, background var(--t); }
 .compare__handle i::before, .compare__handle i::after { content: ""; position: absolute; left: 50%; width: 1px; height: 1.25rem; background: var(--ink); transform: translateX(-50%); }
 .compare__handle i::before { top: .5rem; opacity: .5; } .compare__handle i::after { bottom: .5rem; opacity: .5; }
@@ -506,7 +507,6 @@ code { font-family: var(--font-mono); font-size: .875em; }
   .tasks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .controls { flex-wrap: wrap; padding: .5rem; row-gap: 0; } .scrub { order: 3; flex-basis: 100%; } .timeread { margin-left: auto; }
   .index { left: 1.5rem; right: .5rem; width: auto; bottom: 9rem; }
-  .compare__handle { top: 72%; }
   .compare__tag { top: auto; bottom: 9.5rem; } .compare__tag--l { left: 1.5rem; } .compare__tag--r { right: .5rem; top: auto; }
   .chapter, .close, .fallback { padding-right: 1rem; padding-top: var(--s6); }
   .hero__deck { margin-top: var(--s2); }

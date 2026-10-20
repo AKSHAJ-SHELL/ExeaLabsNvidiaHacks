@@ -10,6 +10,7 @@
 //                                           full bleed while the hero text lifts away
 //   scroll-progress-indicators / tracing-beam : a margin line drawn with the page, chapter ticks, active chapter label
 //   sticky-scroll-reveal                  : pipeline steps scroll on the left, the sticky spec sheet on the right follows the active step
+//                                           (now in chrome.js, so it also works without WebGL)
 //   scroll-text-highlight-reading         : words of the active note's lead brighten as you read through its window
 import { clamp, lerp, smoothstep, smootherstep, easeInOutCubic, $, $$ } from './util.js';
 
@@ -22,8 +23,9 @@ const NOTE_OF = { scan: 'scan', twin: 'twin', compare: 'compare', explode: 'expl
 const STRIP = { hero: ['Sheet A-01', 'Cover'], scan: ['Sheet A-01', '01 Scan'], twin: ['Sheet A-02', '02 Twin'], compare: ['Sheet A-02', '02 Twin'], explode: ['Sheet A-02', '02 Twin'], simulate: ['Sheet A-03', '03 Simulate'], bench: ['Sheet A-03', '03 Simulate'] };
 const e3 = easeInOutCubic;
 
-export function initScroll({ stage, ui, reduced, coarse, announce, compare }) {
+export function initScroll({ stage, ui, reduced, coarse, announce, compare, motion }) {
   gsap.registerPlugin(ScrollTrigger);
+  ScrollTrigger.config({ ignoreMobileResize: true });      // a collapsing mobile toolbar must not rebuild the journey
   const J = stage.J;
   const journey = $('#journey'), pin = $('#pin'), stageEl = $('#stage'), hero = $('#hero');
   journey.style.height = `${100 + TOTAL}svh`;
@@ -66,10 +68,10 @@ export function initScroll({ stage, ui, reduced, coarse, announce, compare }) {
     for (let k = 0; k < ph.length; k++) {
       const n = notes[NOTE_OF[ph[k].id]]; if (!n) continue;
       n.classList.toggle('is-on', k === i); n.classList.toggle('is-before', k > i); n.classList.toggle('is-after', k < i);
-      n.setAttribute('aria-hidden', String(k !== i));
     }
     const s = STRIP[id]; strip.sheet.textContent = s[0]; strip.name.textContent = s[1];
     stageEl.classList.toggle('is-sim', id === 'simulate' || id === 'bench');
+    if (stage.mode === 'explore') stage.setMode('tour');       // the camera goes back to the scroll when the chapter changes
     if (id !== 'hero') announce(`${s[1]}.`);
   }
 
@@ -101,7 +103,7 @@ export function initScroll({ stage, ui, reduced, coarse, announce, compare }) {
       stageEl.style.opacity = x; hero.style.opacity = 1 - x; hero.style.pointerEvents = x > 0.5 ? 'none' : '';
       stageEl.style.setProperty('--k', 1); stageEl.classList.remove('is-tilted');
     } else {
-      const ty = (1 - k) * H * (innerWidth < 720 ? 0.64 : 0.55), rx = (1 - k) * 18, sc = lerp(0.84, 1, k);
+      const ty = (1 - k) * H * (innerWidth < 720 ? 0.72 : 0.55), rx = (1 - k) * 18, sc = lerp(0.84, 1, k);
       stageEl.style.transform = k >= 0.999 ? 'none' : `translate3d(0,${ty.toFixed(1)}px,0) rotateX(${rx.toFixed(2)}deg) scale(${sc.toFixed(4)})`;
       stageEl.style.setProperty('--k', k.toFixed(4));
       stageEl.classList.toggle('is-tilted', k < 0.96);
@@ -120,8 +122,10 @@ export function initScroll({ stage, ui, reduced, coarse, announce, compare }) {
     }
   }
 
-  ScrollTrigger.create({ trigger: journey, start: 'top top', end: 'bottom bottom', onUpdate: (s) => journeyUpdate(s.progress), onRefresh: (s) => journeyUpdate(s.progress) });
+  const journeyST = ScrollTrigger.create({ trigger: journey, start: 'top top', end: 'bottom bottom', onUpdate: (s) => journeyUpdate(s.progress), onRefresh: (s) => journeyUpdate(s.progress) });
   journeyUpdate(0);
+  // scroll position of a progress value, read from the trigger's own range so svh, dvh and a collapsing toolbar cannot skew it
+  const journeyY = (P) => journeyST.start + P * (journeyST.end - journeyST.start);
 
   // ---------- pause rendering off screen ----------
   new IntersectionObserver(([e]) => { stage.visible = e.isIntersecting; }, { rootMargin: '10% 0px' }).observe(journey);
@@ -129,9 +133,8 @@ export function initScroll({ stage, ui, reduced, coarse, announce, compare }) {
 
   // ---------- tracing beam ----------
   const beamSvg = $('#beamSvg'), beamBase = $('#beamBase'), beamFill = $('#beamFill'), beamList = $('#beamList'), beam = $('#beam');
-  const chapters = [['scan', () => journey.offsetTop + (ph[1].a * TOTAL) / 100 * innerHeight], ['twin', () => journey.offsetTop + (ph[2].a * TOTAL) / 100 * innerHeight],
-    ['simulate', () => journey.offsetTop + (ph[5].a * TOTAL) / 100 * innerHeight], ['dataset', () => $('#dataset').offsetTop], ['evaluate', () => $('#evaluate').offsetTop], ['close', () => $('#close').offsetTop]];
-  let beamLen = 1, chapterY = [], docMax = 1;
+  const chapters = [['scan', () => journeyY(ph[1].a)], ['twin', () => journeyY(ph[2].a)], ['simulate', () => journeyY(ph[5].a)], ['dataset', () => $('#dataset').offsetTop], ['evaluate', () => $('#evaluate').offsetTop], ['close', () => $('#close').offsetTop]];
+  let beamLen = 1, chapterY = [], docMax = 1, beamLinks = [], beamActive = -2;
   function buildBeam() {
     const h = beam.clientHeight; if (!h) return;
     docMax = Math.max(1, document.documentElement.scrollHeight - innerHeight);
@@ -143,41 +146,49 @@ export function initScroll({ stage, ui, reduced, coarse, announce, compare }) {
     beamSvg.setAttribute('viewBox', `0 0 20 ${h}`);
     beamLen = beamFill.getTotalLength(); beamFill.style.strokeDasharray = beamLen;
     $$('li', beamList).forEach((li, i) => { li.style.top = `${clamp(chapterY[i] / docMax) * h}px`; li.style.left = '14px'; });
+    beamLinks = $$('a', beamList); beamActive = -2;
     beamUpdate();
   }
   function beamUpdate() {
     const y = (lenis ? lenis.scroll : scrollY), prog = clamp(y / docMax);
     beamFill.style.strokeDashoffset = beamLen * (1 - prog);
-    let active = -1; chapterY.forEach((cy, i) => { if (y + innerHeight * 0.4 >= cy) active = i; });
-    $$('a', beamList).forEach((a, i) => a.classList.toggle('is-on', i === active));
+    let active = -1; for (let i = 0; i < chapterY.length; i++) if (y + innerHeight * 0.4 >= chapterY[i]) active = i;
+    if (active !== beamActive) { beamActive = active; beamLinks.forEach((a, i) => a.classList.toggle('is-on', i === active)); }
   }
   ScrollTrigger.create({ trigger: document.documentElement, start: 'top top', end: 'bottom bottom', onUpdate: beamUpdate });
   ScrollTrigger.addEventListener('refresh', buildBeam);
 
   // ---------- anchors ----------
-  const goTo = (y) => { if (lenis) lenis.scrollTo(y, { duration: 1.4, easing: (t) => 1 - Math.pow(1 - t, 4) }); else scrollTo({ top: y, behavior: reduced ? 'auto' : 'smooth' }); };
+  const jumpNow = (y) => { if (lenis) lenis.scrollTo(y, { immediate: true, force: true }); else scrollTo({ top: y, behavior: 'instant' }); };
+  const slide = (y) => { if (lenis) lenis.scrollTo(y, { duration: 1.4, easing: (t) => 1 - Math.pow(1 - t, 4) }); else scrollTo({ top: y, behavior: reduced ? 'auto' : 'smooth' }); };
+  // A long jump between chapters hides behind a Hyperframes wipe (the page moves while the plate covers it); a short one slides.
+  const goTo = (y, kind) => {
+    const far = Math.abs(y - (lenis ? lenis.scroll : scrollY)) > innerHeight * 1.2;
+    if (kind && far && motion?.wipe(kind, () => jumpNow(y))) return;
+    slide(y);
+  };
   const targetY = { scan: () => chapterY[0] + 4, twin: () => chapterY[1] + 4, simulate: () => chapterY[2] + 4 };
+  const WIPE = { scan: 'ink', twin: 'ink', simulate: 'ink', dataset: 'fold', evaluate: 'fold', close: 'cross', top: 'cross' };
+  // keyboard and screen reader users land where the page went: move focus to the destination (not just the scroll position)
+  const focusTo = (el) => { if (!el) return; if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1'); el.focus({ preventScroll: true }); };
   $$('a[href^="#"]').forEach((a) => a.addEventListener('click', (e) => {
     const id = a.getAttribute('href').slice(1), ch = a.dataset.chapter;
-    let y = null;
-    if (targetY[ch]) y = targetY[ch](); else if (id === 'top') y = 0; else { const el = document.getElementById(id); if (el) y = el.getBoundingClientRect().top + scrollY; }
-    if (y == null) return; e.preventDefault(); goTo(y);
-    if (id !== 'top' && ch) a.blur();
+    let y = null, dest = null;
+    if (targetY[ch]) { y = targetY[ch](); dest = stageEl; }
+    else if (id === 'top') { y = 0; dest = $('#top'); }
+    else { dest = document.getElementById(id); if (dest) y = dest.getBoundingClientRect().top + scrollY; }
+    if (y == null) return; e.preventDefault();
+    if (a.classList.contains('skip')) jumpNow(y); else goTo(y, WIPE[ch || id]);
+    focusTo(dest);
   }));
-  $('#toTop').addEventListener('click', () => goTo(0));
-
-  // ---------- sticky-scroll-reveal ----------
-  const steps = $$('.step'), panels = $$('.spec__panel'), FILES = ['scan', 'rooms.json', 'mujoco', 'expert', 'lerobot v2.1', 'loader check'];
-  function activate(i) {
-    steps.forEach((s, k) => s.classList.toggle('is-active', k === i)); panels.forEach((p, k) => p.classList.toggle('is-active', k === i));
-    $('#specStep').textContent = `Step ${i + 1}`; $('#specFile').textContent = FILES[i];
-  }
-  steps.forEach((s, i) => ScrollTrigger.create({ trigger: s, start: 'top 58%', end: 'bottom 58%', onToggle: (self) => { if (self.isActive) activate(i); } }));
-  activate(0);
+  const warm = () => motion?.warm();
+  $('#beam').addEventListener('pointerover', warm, { once: true }); $('#beam').addEventListener('focusin', warm, { once: true });
+  $('.brand')?.addEventListener('pointerover', warm, { once: true });
 
   // ---------- small reveals ----------
   if (!reduced) {
-    $$('.plate').forEach((el, i) => { gsap.set(el, { opacity: 0, y: 14 }); ScrollTrigger.create({ trigger: el, start: 'top 90%', once: true, onEnter: () => gsap.to(el, { opacity: 1, y: 0, duration: 0.7, delay: i * 0.05, ease: 'power3.out', clearProps: 'opacity,transform,y' }) }); });
+    // the lift is a CSS variable folded into the .tilt transform, so the reveal never overwrites the tilt's own transform
+    $$('.plate').forEach((el, i) => { gsap.set(el, { opacity: 0, '--ty': 14 }); ScrollTrigger.create({ trigger: el, start: 'top 90%', once: true, onEnter: () => gsap.to(el, { opacity: 1, '--ty': 0, duration: 0.7, delay: i * 0.05, ease: 'power3.out', clearProps: 'opacity,--ty' }) }); });
     ScrollTrigger.create({ trigger: '#eval', start: 'top 75%', once: true, onEnter: () => {
       $$('.axis__ci').forEach((el, i) => gsap.fromTo(el, { '--grow': 0 }, { '--grow': 1, duration: 0.9, delay: 0.1 + i * 0.07, ease: 'power3.out' }));
       $$('.axis__pt').forEach((el, i) => gsap.from(el, { opacity: 0, duration: 0.4, delay: 0.7 + i * 0.07 }));
@@ -185,12 +196,14 @@ export function initScroll({ stage, ui, reduced, coarse, announce, compare }) {
     $$('.axis__ci').forEach((el) => el.style.setProperty('--grow', 0));
   }
 
-  // ---------- resize ----------
-  let rt = 0;
-  addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { lenis?.resize(); ScrollTrigger.refresh(); }, 200); });
-  addEventListener('load', () => ScrollTrigger.refresh());
+  // ---------- refresh ----------
+  // ScrollTrigger and Lenis already listen for resize; a second listener here only doubled the work. What neither can see is
+  // late layout: web fonts and images finishing after boot move every offset, so refresh once they are in.
+  const late = () => { lenis?.resize(); ScrollTrigger.refresh(); };
+  document.fonts?.ready.then(late);
+  if (document.readyState === 'complete') setTimeout(late, 0); else addEventListener('load', late, { once: true });
   ScrollTrigger.refresh();
   buildBeam();
 
-  return { goTo, journeyUpdate, lenis, TOTAL, PHASES: ph, setP(P) { goTo((P * TOTAL / 100) * innerHeight + journey.offsetTop); } };
+  return { goTo, journeyUpdate, lenis, TOTAL, PHASES: ph, setP(P) { goTo(journeyY(P)); } };
 }

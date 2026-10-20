@@ -16,12 +16,12 @@ export const damp = (cur, target, rate, dt) => lerp(cur, target, 1 - Math.exp(-r
 export class Spring {
   constructor(value = 0, response = 0.3) { this.x = value; this.v = 0; this.target = value; this.response = response; }
   set(value) { this.x = this.target = value; this.v = 0; }
+  // Closed-form critically damped step: stable at any dt (the semi-implicit Euler form diverges once dt*w > ~0.8).
   step(dt) {
-    const w = (2 * Math.PI) / this.response;
-    const d = Math.min(dt, 1 / 30);
-    // semi-implicit integration of x'' = -w^2 (x - target) - 2 w x'
-    this.v += (-w * w * (this.x - this.target) - 2 * w * this.v) * d;
-    this.x += this.v * d;
+    const w = (2 * Math.PI) / this.response, d = Math.min(Math.max(dt, 0), 0.1), e = Math.exp(-w * d);
+    const dx = this.x - this.target, c = this.v + w * dx;
+    this.x = this.target + (dx + c * d) * e;
+    this.v = (this.v - w * c * d) * e;
     return this.x;
   }
   get settled() { return Math.abs(this.x - this.target) < 1e-4 && Math.abs(this.v) < 1e-3; }
@@ -43,3 +43,6 @@ export const safeStorage = {
 
 export const prefersReducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 export const isCoarse = () => matchMedia('(pointer: coarse)').matches;
+
+// Live motion preferences: callers read these per use, and subscribe when a mid-session change should take effect.
+export const watchMedia = (query, fn) => { const m = matchMedia(query); const h = () => fn(m.matches); (m.addEventListener ? m.addEventListener('change', h) : m.addListener(h)); return m; };
