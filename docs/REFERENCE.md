@@ -121,6 +121,8 @@ python -m arrival eval --policy vla         # needs GR00T_POLICY_URL; exits 2 wi
 
 `eval` runs `--episodes` episodes per family through the same `SimEnv` and `run_episode` as `sim`, writes no dataset, prints a table, and writes `out/eval/<room>_<policy>.json` (shape in [04-contracts.md](04-contracts.md)). Per family: episodes, successes, success rate with a Wilson 95% interval, mean sim seconds (frames / 20), mean wall seconds, human contacts, the smallest robot-human distance seen, the largest IK residual, and arm-fixture contacts (`arm_contact_episodes`, `arm_contact_max_depth_m`). A human contact counts as a failure; an arm-fixture contact is counted, not scored. Every family ends through the same `finish_task` as `sim`, so the close and put families are covered, and an episode that raises is recorded as a failure instead of stopping the run. The eval is sim-in-the-twin only; nothing here scores a real robot.
 
+`python -m arrival.generate.retarget` records one scripted-expert seed and replays it for new object start poses (`--attempts`, `--family counter_to_sink|counter_to_counter`, `--res`, `--seed`, `--baseline` to time the scripted expert on the same count). Successes (physics oracle) are written to `out/datasets/<room>_seed_replay/` with `arrival_generator = "seed_replay_retarget"` and a seed reference; unreachable or failed replays are dropped. Details in [ref/DAT-4a.md](ref/DAT-4a.md).
+
 What this is not: MuJoCo frames are not a Gaussian splat of the room, episodes are not MimicGen output, and no policy was trained on them. Read `arrival_generator` and `arrival_physically_valid` in the sim dataset's `meta/info.json` before using it.
 
 ## Upload worker
