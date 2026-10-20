@@ -144,6 +144,24 @@ python scripts/intake_scan.py kitchen_01 --roomplan roomplan.json --photos a.jpg
 `arrival.scan.intake.validate_scan_dir(path)` lists what is still missing. Details in `docs/ref/CAP-3a.md`.
 To check the twin against tape measurements, put a `measurements.json` beside a room's `scan.json` (format and extraction rules in `docs/ref/TWN-1a.md`) and run `python scripts/scan_accuracy.py [scans/<room> ...]`: it prints the signed error per dimension and exits 1 when any is over `tolerance_m` (default 0.05 m); rooms without the file are skipped.
 
+## Static export of the page
+
+```bash
+python -m arrival export-site                              # out/static_site/index.html, no server needed
+python -m arrival export-site --out out --dest out/static_site --zips
+```
+
+Crawls the real page (`arrival serve`'s handler on an ephemeral 127.0.0.1 port) and writes plain files: `index.html`, `rooms/<id>/index.html`, `previews/` (the png, mp4 and gif files the pages reference), `data/<room>.json` plus `data/index.json` (the numbers the page shows; anything missing on disk is `null`) and `.nojekyll`. Links are rewritten to relative file links so the folder works from `file://` and under a GitHub Pages project prefix. The upload form, the jobs table and the page script are replaced by a note, because no backend takes a scan. Dataset zips are included only with `--zips`; otherwise the download buttons are removed. The export is link-checked (every relative link and asset must resolve inside the folder) and nothing is written if a link is broken. Rooms with no dataset under `--out` still export and say "not generated"; run `python -m arrival demo` or `sim` first. It does not touch the repo-root `site/` directory. Not done: a Pages workflow, and CORS headers on the API for a hosted live-upload page.
+
+## Multi-room summary
+
+```bash
+python -m arrival summary                                     # hero_kitchen + the two real RoomPlan fixtures
+python -m arrival summary --rooms hero_kitchen,tests/fixtures/roomplan/amal.json --episodes 2 --out out/summary
+```
+
+Runs normalize, compile, tasks, sim and validate (structural, then per episode) on each room with tiny settings (default 2 episode attempts, 64 px, 1 person; work files under `out/summary`, not `out/`) and writes `summary.md` and `summary.json` there. A failing stage records its reason and the later stages read `-` (not run); a room with no reachable task reads `skipped`. `--rooms` takes scan names under `--scans` or paths to a RoomPlan or `scan.json` file. The tape-error column is filled only where a `measurements.json` exists (hero_kitchen's is authored from its own scan and is labelled so), and realism is always "not measured": it needs held-out RGB-D frames that no room here has. RoomPlan exports hold no small objects, so their objects are `default_synthetic` (invented) and the table says so.
+
 ## Simulation (MuJoCo)
 
 `python -m arrival sim --episodes N` builds a MuJoCo scene from the compiled twin and records episodes to `out/datasets/<room>_sim` (LeRobot v2 layout). Needs the `sim` extra. The code lives in `arrival/sim/`:
@@ -164,6 +182,18 @@ python -m arrival sim --episodes 8 --people 2 --save-preview   # contact sheet +
 python -m arrival validate out/datasets/hero_kitchen_sim
 python scripts/check_dataset_loader.py out/datasets/hero_kitchen_sim [--json]
 ```
+
+### Per-episode quality check
+
+`validate` says whether the folder is a dataset; `--episodes` says whether each episode is worth training on, and `--drop` writes a cleaned copy:
+
+```bash
+python -m arrival validate out/datasets/hero_kitchen_sim --episodes            # exit 1 if any episode is flagged
+python -m arrival validate out/datasets/hero_kitchen_sim --episodes --frames --json out/quality.json
+python -m arrival validate out/datasets/hero_kitchen_sim --drop out/datasets/hero_kitchen_sim_clean
+```
+
+Flags, with the thresholds in `arrival/export/quality.py` (all echoed in the `--json` report): `unreadable` (parquet missing or the wrong row count), `nonfinite` (NaN or inf in state or action), `zero_motion` (state moves less than 1e-3 over the episode), `stuck_arm` (the state is frozen for more than 40 consecutive steps while the command is more than 0.15 rad away), `joint_at_limit` (within 3% of a joint's range for more than 40 consecutive steps; `arrival_sim_panda` datasets only, since other datasets carry placeholder joints), `length_outlier` (more than 2.5x off the median of its task family, families of 4 or more), and with `--frames` `blank_video` (more than half the frames of a camera are near-uniform). Not checked, because the dataset does not record it: carried-object tilt, and what the wrist camera actually sees (only uniformity is measured). `--drop` re-indexes the kept episodes 0..K-1, recomputes `episodes_stats.jsonl` and `stats.json`, renames the videos, writes `meta/dropped_episodes.json` (old index to new index, and the reasons), refuses an output folder that already exists or sits inside the source, and re-runs the structural check on the result. `arrival_attempts` is left as collected. `--drop` implies `--episodes`; with either, a structural error no longer stops the run, so a dataset with a NaN episode still gets its per-episode report.
 
 `scripts/check_dataset_loader.py` is an offline stand-in for the GR00T loader (no `gr00t` import, details in `docs/ref/DAT-2a.md`). It exits 0 on pass and 1 on any failure, and refuses the placeholder `demo` dataset.
 
