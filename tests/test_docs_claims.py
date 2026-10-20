@@ -31,10 +31,10 @@ def test_exit_codes(repo_copy, capsys):
 
 def test_reports_invented_flag_broken_link_and_missing_test(repo_copy, capsys):
     readme = repo_copy / "README.md"
-    readme.write_text(readme.read_text() + (
+    readme.write_text(readme.read_text(encoding="utf-8") + (
         "\n```bash\npython -m arrival sim --episodes 2 --warp-speed 9\n```\n"
         "\nSee [the guide](docs/NO-SUCH-GUIDE.md).\n"
-        "\nRun `tests/test_cli.py::test_no_such_thing_exists`.\n"))
+        "\nRun `tests/test_cli.py::test_no_such_thing_exists`.\n"), encoding="utf-8")
     assert check_docs.main(["--root", str(repo_copy)]) == 1
     lines = capsys.readouterr().out.strip().splitlines()
     assert len(lines) == 3

@@ -154,7 +154,7 @@ def test_status_is_never_read_half_written(tmp_path):
     t.start()
     try:
         reads, t0 = 0, time.perf_counter()
-        while time.perf_counter() - t0 < 0.5:
+        while reads <= 100 or time.perf_counter() - t0 < 0.5:
             assert read_job(tmp_path, status["id"])["id"] == status["id"]
             reads += 1
     finally:

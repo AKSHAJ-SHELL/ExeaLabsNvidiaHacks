@@ -87,7 +87,7 @@ def check(root: Path = REPO) -> list[str]:
     probs: list[str] = []
     cache: dict[Path, set[str]] = {}
     for doc in markdown_files(root):
-        rel = doc.relative_to(root)
+        rel = doc.relative_to(root).as_posix()
         for n, target in links(doc.read_text(encoding="utf-8", errors="replace")):
             if EXTERNAL.match(target):
                 continue
@@ -106,7 +106,7 @@ def check(root: Path = REPO) -> list[str]:
                 if dest not in cache:
                     cache[dest] = anchors(dest)
                 if frag.lower() not in cache[dest]:
-                    probs.append(f"{rel}:{n}: no heading anchor #{frag} in {dest.relative_to(root)}")
+                    probs.append(f"{rel}:{n}: no heading anchor #{frag} in {dest.relative_to(root).as_posix()}")
     return probs
 
 

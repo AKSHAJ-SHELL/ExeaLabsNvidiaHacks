@@ -41,6 +41,21 @@ def test_ik_reaches_counter_point(twin):
     assert np.linalg.norm(d.site("eef").xpos - target) < 0.02
 
 
+def test_successive_episodes_have_nonblank_camera_video(twin, tmp_path):
+    import imageio.v2 as imageio
+
+    run = collect(twin, ["open_drawer"], 3, tmp_path, people=0, res=32, log=lambda *_: None)
+    assert run["report_data"]["successes"] == 3
+    for camera in ("ego_view", "wrist"):
+        videos = sorted((run["dataset"] / "videos" / "chunk-000" / f"observation.images.{camera}").glob("*.mp4"))
+        assert len(videos) == 3
+        for video in videos:
+            with imageio.get_reader(video, format="ffmpeg") as reader:
+                frames = [frame for frame in reader]
+            assert frames, video
+            assert all(frame.max() > 0 and frame.std() > 1 for frame in frames), video
+
+
 def test_collect_writes_valid_dataset(twin, tmp_path):
     from arrival.export.validate import validate
 

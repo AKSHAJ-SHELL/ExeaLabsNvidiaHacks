@@ -83,7 +83,7 @@ def check_command(parser, cmd: str) -> str | None:
 def test_defs(root: Path) -> dict[str, set[str]]:
     defs = {}
     for f in (root / "tests").glob("test_*.py"):
-        defs[f"tests/{f.name}"] = set(re.findall(r"^\s*(?:async\s+)?def\s+(test\w*)", f.read_text(), re.M))
+        defs[f"tests/{f.name}"] = set(re.findall(r"^\s*(?:async\s+)?def\s+(test\w*)", f.read_text(encoding="utf-8"), re.M))
     return defs
 
 
@@ -93,7 +93,7 @@ PLANNED_SECTION = re.compile(r"^##\s+.*\bto-?do\b", re.I)
 def check_paths(root: Path, doc: Path, text: str, tests: dict[str, set[str]]) -> list[str]:
     """Links must resolve everywhere. Code paths must exist too, except under a `## ... to-do` heading,
     where they name files that are planned and do not exist yet."""
-    rel = doc.relative_to(root)
+    rel = doc.relative_to(root).as_posix()
     probs = []
     planned = False
     for n, line in enumerate(text.splitlines(), 1):
@@ -130,7 +130,7 @@ def check_status_lists(doc: Path, root: Path, text: str) -> list[str]:
             lists[label.strip().lower()] = set(TASK_ID.findall(body))
         both = lists.get("done", set()) & lists.get("open", set())
         for tid in sorted(both):
-            probs.append(f"{doc.relative_to(root)}:{n}: {tid} is listed as both Done and Open")
+            probs.append(f"{doc.relative_to(root).as_posix()}:{n}: {tid} is listed as both Done and Open")
     return probs
 
 
@@ -141,7 +141,7 @@ def writer_constants(root: Path) -> dict[tuple[str, str], str]:
     for who, f in srcs.items():
         if not f.exists():
             continue
-        t = f.read_text()
+        t = f.read_text(encoding="utf-8")
         for label in ("arrival_physically_valid", "joints_are_placeholder"):
             m = re.search(r"[\"']%s[\"']:\s*(True|False)" % label, t)
             if m:
@@ -161,7 +161,7 @@ def check_labels(doc: Path, root: Path, text: str, consts: dict[tuple[str, str],
             for label, val in LABEL_SENTENCE.findall(sentence):
                 want = consts.get((w, label))
                 if want and want != val.lower():
-                    probs.append(f"{doc.relative_to(root)}:{n}: says {w} writes {label}={val.lower()}, "
+                    probs.append(f"{doc.relative_to(root).as_posix()}:{n}: says {w} writes {label}={val.lower()}, "
                                  f"but the writer sets {want}")
     return probs
 
@@ -176,7 +176,7 @@ def check(root: Path = REPO) -> list[str]:
         if not doc.exists():
             probs.append(f"{name}: file missing")
             continue
-        text = doc.read_text()
+        text = doc.read_text(encoding="utf-8")
         for n, cmd in fenced_commands(text):
             why = check_command(parser, cmd)
             if why:

@@ -196,6 +196,8 @@ python -m pip install -e ".[dev,sim]"
 python -m pytest -q                       # should be all green
 ```
 
+On a machine without an OpenGL context, `python -m pytest -q --no-render -rs` runs the portable checks and reports the rendering skips. CI requires these checks on Linux, macOS and Windows, plus the full suite and offline demo in a separate Linux rendering job. On Windows, the full suite and sim need a desktop session with a working graphics driver.
+
 Run the simulation and look at what it recorded:
 
 ```bash

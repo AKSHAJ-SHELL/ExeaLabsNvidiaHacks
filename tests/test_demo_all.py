@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("mujoco")
+pytestmark = pytest.mark.render  # preflight probes OpenGL in a child process
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "demo_all.py"
 
