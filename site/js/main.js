@@ -1,6 +1,7 @@
 // Boot: load the exported data, build the stage, wire the UI and the scroll layer, then lift the loading sheet.
 import { loadCore, loadEpisode } from './data.js';
 import { bindData, renderEvaluate, renderFallback } from './sections.js';
+import { renderTodo } from './todo.js';
 import { initTilt } from './tilt.js';
 import { initTheme, initToTop, initSteps } from './chrome.js';
 import { initMotion } from './motion.js';
@@ -42,6 +43,7 @@ async function boot() {
 
   bindData(data);
   renderEvaluate(data.stats);
+  try { renderTodo(data.todo); } catch (e) { console.warn('schedule', e); }
 
   try {
     const { Stage } = await import('./stage.js');

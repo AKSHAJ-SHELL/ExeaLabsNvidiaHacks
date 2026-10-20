@@ -462,7 +462,6 @@ code { font-family: var(--font-mono); font-size: .875em; }
   .tasks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .compare__tag--l { left: 5rem; } .compare__tag--r { right: 1rem; top: 11.5rem; }
 }
-@media (min-width: 1280px) { .plates { grid-template-columns: 1.6fr 1fr 1fr 1fr; } .plate:first-child .plate__v { font-size: clamp(4.5rem, 2rem + 5.4vw, 7.5rem); } }   /* the frame count leads; the other three are supporting figures, not equal tiles */
 @media (max-width: 1099px) { .plates { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .plates { grid-template-columns: 1fr; grid-auto-rows: auto; } .plate { min-height: 9.5rem; } }
 @media (max-width: 900px) {
