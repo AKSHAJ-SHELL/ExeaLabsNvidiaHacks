@@ -238,7 +238,7 @@ code { font-family: var(--font-mono); font-size: .875em; }
 #modeBtn[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .chip:active { transform: scale(.97); }
 
-.side { position: absolute; right: 1rem; top: 7.75rem; width: 17rem; z-index: 6; display: grid; gap: .75rem; max-height: calc(100% - 17rem); overflow: auto; opacity: 0; transition: opacity var(--t) var(--ease-out); scrollbar-width: thin; }
+.side { position: absolute; right: 1rem; top: 7.75rem; width: 17rem; z-index: 6; display: grid; gap: .75rem; max-height: calc(100% - 22.5rem); overflow: auto; opacity: 0; transition: opacity var(--t) var(--ease-out); scrollbar-width: thin; }
 .side.is-on { opacity: 1; }
 .readout { background: var(--panel); border: 1px solid var(--ink); padding: .25rem .75rem; }
 .readout div { display: grid; grid-template-columns: 5.25rem 1fr; gap: .5rem; padding: .375rem 0; border-bottom: 1px solid var(--line); align-items: baseline; }

@@ -206,7 +206,7 @@ export function initUI({ stage, data, announce }) {
     const group = (title, names) => {
       names = names.filter((n) => stage.entry(n)); if (!names.length) return;
       const d = document.createElement('div'); d.innerHTML = `<h4>${title}</h4>`;
-      for (const n of names) { const b = document.createElement('button'); b.type = 'button'; b.dataset.name = n; b.textContent = n; b.addEventListener('click', () => select(n, true)); d.appendChild(b); }
+      for (const n of names) { const b = document.createElement('button'); b.type = 'button'; b.dataset.name = n; b.textContent = n; b.addEventListener('click', () => { select(n, true); toggleIndex(false); }); d.appendChild(b); }
       cols.appendChild(d);
     };
     const { rooms } = data;
