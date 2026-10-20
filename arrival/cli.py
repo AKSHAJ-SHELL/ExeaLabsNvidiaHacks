@@ -1,4 +1,4 @@
-"""python -m arrival demo | validate | serve | sim | eval | work"""
+"""python -m arrival demo | validate | serve | sim | eval | work | summary | export-site"""
 
 from __future__ import annotations
 
@@ -92,17 +92,42 @@ def cmd_demo(a) -> int:
 def cmd_validate(a) -> int:
     from arrival.export.validate import validate
 
+    per_episode = a.episodes or a.frames or bool(a.drop)
     errors = validate(a.dataset_dir)
-    if errors:
+    if errors:  # with a per-episode pass requested, a bad episode is what we are here to find: keep going
         for e in errors:
             print(f"INVALID: {e}", file=sys.stderr)
+        if not per_episode:
+            return EXIT_INVALID
+    else:
+        info = json.loads((Path(a.dataset_dir) / "meta" / "info.json").read_text())
+        print(f"OK: {a.dataset_dir}: {info['total_episodes']} episodes, {info['total_frames']} frames, "
+              f"{info['total_tasks']} tasks, {info['total_chunks']} chunk(s), {info['total_videos']} videos, "
+              f"video_policy={info['arrival_video_policy']}, "
+              f"physically_valid={info['arrival_physically_valid']}")
+        if not per_episode:
+            return EXIT_OK
+    from arrival.export.quality import QualityError, check_episodes, drop_flagged, format_report
+
+    try:
+        report = check_episodes(a.dataset_dir, frames=a.frames)
+        if a.drop:
+            report = drop_flagged(a.dataset_dir, a.drop, report)
+    except QualityError as e:
+        print(f"INVALID: {e}", file=sys.stderr)
         return EXIT_INVALID
-    info = json.loads((Path(a.dataset_dir) / "meta" / "info.json").read_text())
-    print(f"OK: {a.dataset_dir}: {info['total_episodes']} episodes, {info['total_frames']} frames, "
-          f"{info['total_tasks']} tasks, {info['total_chunks']} chunk(s), {info['total_videos']} videos, "
-          f"video_policy={info['arrival_video_policy']}, "
-          f"physically_valid={info['arrival_physically_valid']}")
-    return EXIT_OK
+    print(format_report(report))
+    if a.json:
+        Path(a.json).write_text(json.dumps(report, indent=2) + "\n")
+        print(f"report: {a.json}")
+    if a.drop:
+        c = report["cleaned"]
+        left = validate(a.drop)  # the cleaned copy must pass the structural check, or it is not a fix
+        for e in left:
+            print(f"INVALID (cleaned dataset): {e}", file=sys.stderr)
+        print(f"cleaned dataset: {c['output']} ({c['kept']} kept, {len(c['dropped'])} dropped)")
+        return EXIT_INVALID if left else EXIT_OK
+    return EXIT_INVALID if (errors or report["flagged"]) else EXIT_OK
 
 
 def cmd_serve(a) -> int:
@@ -271,6 +296,47 @@ def cmd_work(a) -> int:
     return EXIT_OK
 
 
+def cmd_summary(a) -> int:
+    """Tiny pipeline run on several rooms -> one table of compile / sim / validate results."""
+    try:
+        import mujoco  # noqa: F401
+    except ImportError:
+        print("mujoco is not installed: pip install -e '.[sim]'", file=sys.stderr)
+        return EXIT_USAGE
+    from arrival.eval.summary import summarize, to_markdown, write_summary
+    from arrival.sim.tasks import SIM_FAMILIES
+
+    fams = list(SIM_FAMILIES) if a.families == "all" else [f.strip() for f in a.families.split(",") if f.strip()]
+    bad = [f for f in fams if f not in SIM_FAMILIES]
+    if bad or a.episodes < 1:
+        print(f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
+              file=sys.stderr)
+        return EXIT_USAGE
+    rooms = [r.strip() for r in a.rooms.split(",") if r.strip()] if a.rooms else None
+    kw = {"rooms": rooms} if rooms else {}
+    summary = summarize(out_dir=a.out, scans_dir=resolve_scans(a.scans), episodes=a.episodes, res=a.res,
+                        people=a.people, families=tuple(fams), seed=a.seed, **kw)
+    jp, mp = write_summary(summary, a.out)
+    print(to_markdown(summary))
+    print(f"summary: {jp}\nsummary: {mp}")
+    return EXIT_OK
+
+
+def cmd_export_site(a) -> int:
+    """Pre-render the local page to static HTML + JSON (no server needed, GitHub Pages friendly)."""
+    from arrival.web.static_export import ExportError, export_site
+
+    try:
+        res = export_site(Path(a.out), resolve_scans(a.scans), Path(a.dest), zips=a.zips)
+    except ExportError as e:
+        print(f"export-site: {e}", file=sys.stderr)
+        return EXIT_INVALID
+    print(f"static site: {res['dest']} ({res['pages']} pages, {res['previews']} previews, "
+          f"{len(res['zips'])} zips, rooms: {', '.join(res['rooms']) or 'none'})")
+    print(f"open {Path(res['dest']) / 'index.html'} in a browser, or serve the folder with any static host")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="arrival", description="Arrival: room scan -> GR00T LeRobot v2 dataset")
     sub = p.add_subparsers(dest="cmd")
@@ -286,6 +352,13 @@ def build_parser() -> argparse.ArgumentParser:
     d.set_defaults(fn=cmd_demo)
     v = sub.add_parser("validate", help="structurally check a LeRobot v2 dataset")
     v.add_argument("dataset_dir")
+    v.add_argument("--episodes", action="store_true",
+                   help="also check each episode (NaN, stuck arm, zero motion, joint at limit, length outliers); "
+                        "exit 1 if any is flagged")
+    v.add_argument("--frames", action="store_true", help="with --episodes: also decode videos and flag blank cameras")
+    v.add_argument("--drop", metavar="CLEAN_DIR", default=None,
+                   help="write a cleaned copy without the flagged episodes to CLEAN_DIR (implies --episodes)")
+    v.add_argument("--json", metavar="FILE", default=None, help="write the per-episode report as JSON")
     v.set_defaults(fn=cmd_validate)
     s = sub.add_parser("serve", help="local page on 127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
@@ -344,6 +417,25 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--seed", type=int, default=0)
     w.add_argument("--out", default="out")
     w.set_defaults(fn=cmd_work)
+    u = sub.add_parser("summary", help="tiny run on several rooms: compile / sim / validate table (markdown + json)")
+    u.add_argument("--rooms", default=None,
+                   help="comma list of scan names under --scans or paths to RoomPlan/scan .json files "
+                        "(default: hero_kitchen plus the two real RoomPlan fixtures)")
+    u.add_argument("--episodes", type=int, default=2, help="episode attempts per room")
+    u.add_argument("--families", default="counter_to_sink,open_drawer",
+                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door")
+    u.add_argument("--people", type=int, default=1)
+    u.add_argument("--res", type=int, default=64)
+    u.add_argument("--seed", type=int, default=0)
+    u.add_argument("--out", default="out/summary", help="work and output directory (not out/: datasets are rewritten)")
+    u.add_argument("--scans", default="scans")
+    u.set_defaults(fn=cmd_summary)
+    x = sub.add_parser("export-site", help="pre-render the local page to static HTML + data (no server; GitHub Pages)")
+    x.add_argument("--out", default="out", help="where datasets, twins, reports and previews are read from")
+    x.add_argument("--scans", default="scans")
+    x.add_argument("--dest", default="out/static_site", help="folder to write (replaced if it exists)")
+    x.add_argument("--zips", action="store_true", help="also include each dataset as a downloadable zip (can be large)")
+    x.set_defaults(fn=cmd_export_site)
     return p
 
 
