@@ -16,7 +16,7 @@ from pathlib import Path
 
 from arrival.jobs.queue import write_status
 
-DEFAULT_FAMILIES = ("counter_to_sink", "open_drawer")
+DEFAULT_FAMILIES = ("counter_to_sink", "open_drawer", "move_on_table")  # move_on_table runs only in rooms with a table
 STAGES = ("normalize", "twin", "objects", "sim", "validate", "zip")
 ROOM_RE = re.compile(r"[^a-z0-9_]+")
 

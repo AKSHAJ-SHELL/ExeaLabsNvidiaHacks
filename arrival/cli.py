@@ -344,8 +344,8 @@ def build_parser() -> argparse.ArgumentParser:
     m = sub.add_parser("sim", help="MuJoCo sim of the room: arm + drawers/doors + people -> LeRobot v2 demos")
     m.add_argument("--room", default="hero_kitchen")
     m.add_argument("--episodes", type=int, default=8)
-    m.add_argument("--families", default="counter_to_sink,open_drawer",
-                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door")
+    m.add_argument("--families", default="counter_to_sink,open_drawer,move_on_table",
+                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door,move_on_table (a family with no variation in this room is skipped)")
     m.add_argument("--people", type=int, default=2)
     m.add_argument("--policy", choices=["scripted", "vla"], default="scripted")
     m.add_argument("--planner", choices=["rule", "vlm"], default="rule",
@@ -382,8 +382,8 @@ def build_parser() -> argparse.ArgumentParser:
     e = sub.add_parser("eval", help="score a policy closed-loop in the sim: success, time, human contacts")
     e.add_argument("--room", default="hero_kitchen")
     e.add_argument("--policy", choices=["scripted", "vla"], default="scripted")
-    e.add_argument("--families", default="counter_to_sink,open_drawer",
-                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door")
+    e.add_argument("--families", default="counter_to_sink,open_drawer,move_on_table",
+                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door,move_on_table (a family with no variation in this room is skipped)")
     e.add_argument("--episodes", type=int, default=4, help="episodes per family")
     e.add_argument("--seed", type=int, default=0)
     e.add_argument("--people", type=int, default=2)
@@ -397,8 +397,8 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--once", action="store_true", help="process one job (or none) and exit")
     w.add_argument("--poll", type=float, default=2.0, help="seconds between queue checks")
     w.add_argument("--episodes", type=int, default=8)
-    w.add_argument("--families", default="counter_to_sink,open_drawer",
-                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door")
+    w.add_argument("--families", default="counter_to_sink,open_drawer,move_on_table",
+                   help="all | comma list of counter_to_sink,counter_to_counter,open_drawer,open_door,move_on_table (a family with no variation in this room is skipped)")
     w.add_argument("--people", type=int, default=1)
     w.add_argument("--res", type=int, default=128)
     w.add_argument("--seed", type=int, default=0)

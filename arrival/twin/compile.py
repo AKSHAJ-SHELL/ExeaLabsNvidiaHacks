@@ -10,14 +10,15 @@ from pathlib import Path
 import yaml
 
 from arrival.catalog.fixtures import default_config_name, fixture_type
-from arrival.catalog.objects import catalog_id, sample_size
+from arrival.catalog.objects import ROOM_OBJECTS, catalog_id, room_kind, sample_size
 
 COUNTER_DEPTH = 0.65
 COUNTER_HEIGHT = 0.92
 SYNTH_RADIUS = 0.3
 ADJACENT_GAP = 0.05  # an appliance this close to a counter's footprint is built in beside it
-DEFAULT_OBJECTS = ("mug", "bowl", "plate", "cup", "apple")  # sizes come from the catalog, varied per seed
+DEFAULT_OBJECTS = ROOM_OBJECTS["kitchen"]  # sizes come from the catalog, varied per seed; other rooms: room_kind()
 PLACE_MARGIN = 0.08
+TABLE_EDGE_BAND = 0.40  # outside a kitchen, objects on a table deeper than twice this lie within it of a long edge
 # A kitchen island: counter-height block (RoomPlan calls it a table) clear of every wall.
 # Dining tables measure about 0.75 m, so the band starts above them. Storage stays a cabinet
 # wherever it stands, so a freestanding sideboard is not retyped.
@@ -155,7 +156,8 @@ def compile_twin(bundle: dict) -> dict:
 
 
 def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
-    """RoomPlan captures no small objects: put DEFAULT_OBJECTS on a counter top (the one holding or touching a
+    """RoomPlan captures no small objects: put the default objects for the kind of room (`room_kind`: DEFAULT_OBJECTS
+    in a kitchen, a book, laptop or remote in an office or living room) on a counter or table top (the one holding or touching a
     sink if any), away from sinks/stoves, deterministically from `seed`, each at a seeded size. An object that
     does not fit the counter is skipped. Mutates twin."""
     counters = [f for f in twin["fixtures"] if is_counter_host(f)]
@@ -169,13 +171,19 @@ def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
     sx, sy, _ = counter["size"]
     top = counter["position"][2] + counter["size"][2] / 2
     placed: list[dict] = []
-    for label in DEFAULT_OBJECTS:
+    kind = room_kind(twin["fixtures"])
+    # a big table outside a kitchen: things lie along its long edges, where someone sits (and a fixed arm reaches),
+    # not in the middle of a 1.6 m top
+    edges = kind != "kitchen" and sy > 2 * TABLE_EDGE_BAND
+    for label in ROOM_OBJECTS[kind]:
         size = sample_size(label, rng)
         half = max(size[0], size[1]) / 2 + PLACE_MARGIN
         if sx / 2 <= half or sy / 2 <= half:
             continue
         for _ in range(200):
             local = (rng.uniform(-sx / 2 + half, sx / 2 - half), rng.uniform(-sy / 2 + half, sy / 2 - half))
+            if edges:
+                local = (local[0], rng.choice((-1, 1)) * rng.uniform(sy / 2 - TABLE_EDGE_BAND, sy / 2 - half))
             x, y = to_world(local, counter)
             if any(_rect_distance([x, y], b) < half for b in blockers if b is not counter):
                 continue

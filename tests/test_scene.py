@@ -139,11 +139,15 @@ def test_dishwasher_and_microwave_from_scan():
 
 
 def test_every_catalog_object_rests_on_the_counter_with_a_plausible_mass():
-    objects = []
-    for k, (cid, (_, size, *_)) in enumerate(OBJECT_SPECS.items()):
+    objects, x = [], 0.3
+    for cid, (_, size, *_) in OBJECT_SPECS.items():  # laid out in a row, each clear of the last (a pan has a handle)
+        reach = max(size[:2]) / 2 + (0.28 if cid == "pan" else 0.0)
+        x += max(size[:2]) / 2
         objects.append({"id": f"{cid}_1", "label": cid, "size": list(size),
-                        "position": [0.35 + 0.19 * k, 0.40, 0.92 + size[2] / 2 + 0.003], "yaw": 0.0})
-    twin = compile_twin(_bundle([COUNTER], objects))
+                        "position": [x, 0.40, 0.92 + size[2] / 2 + 0.003], "yaw": 0.0})
+        x += reach + 0.05
+    twin = compile_twin(_bundle([{**COUNTER, "size": [x + 0.3, 0.65, 0.92], "position": [(x + 0.3) / 2, 0.40, 0.46]}],
+                                objects))
     assert {o["catalog_id"] for o in twin["objects"]} == set(OBJECT_SPECS)
     m = _model(twin)
     d = mujoco.MjData(m)
@@ -155,7 +159,7 @@ def test_every_catalog_object_rests_on_the_counter_with_a_plausible_mass():
         assert abs(float(b.xpos[2]) - z0) < 0.012, (o["id"], b.xpos)
         assert np.linalg.norm(b.xpos[:2] - np.array(o["position"][:2])) < 0.02, o["id"]
         mass[o["label"]] = float(m.body_mass[b.id])
-    assert all(0.02 < v < 1.2 for v in mass.values()), mass
+    assert all(0.02 < v < 1.5 for v in mass.values()), mass  # the closed laptop is the heavy one, 1.2 kg
     assert mass["pan"] > mass["bottle"] > mass["mug"] > mass["apple"] > mass["sponge"]
     assert mass["mug"] == pytest.approx(0.30, abs=1e-3)
     assert _no_warnings(d)

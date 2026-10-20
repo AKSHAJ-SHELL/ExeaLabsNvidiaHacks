@@ -1,19 +1,25 @@
 """Sim task families: counter_to_sink, counter_to_counter (when reachable), open_drawer, open_door, the close and
-put-away families, wipe_counter and open_fridge."""
+put-away families, wipe_counter, open_fridge and move_on_table (objects on a scanned table)."""
 
 from __future__ import annotations
 
 import math
 import random
 
-from arrival.catalog.objects import GRASPABLE
+from arrival.catalog.objects import GRASPABLE, TABLE_MOVABLE
+from arrival.sim.scene import is_table
 from arrival.tasks.propose import LIGHTING, POSE_OFFSETS, WORDINGS, top_z
 from arrival.sim.preflight import check_task
 from arrival.twin.compile import is_counter_host, to_local, to_world
 
+TABLE_MOVE = 0.35  # how far along the table edge move_on_table carries the object (m)
+TABLE_REACH = 0.44  # objects further than this from the robot's table edge are out of reach for a fixed base
+# (preflight.REACH 0.745 from a base 0.28 m out, with the object 0.175 m along the edge from the base)
+TARGET_GAP = 0.04  # clear space between the object at its target and any other object on the table (m)
+BASE_CLEAR = 0.25  # the base column (r 0.12 + plate) must stay this far from furniture and walls
 REACH = 0.78  # max horizontal eef reach from the arm base used when placing the base
 SIM_FAMILIES = ("counter_to_sink", "counter_to_counter", "open_drawer", "open_door", "close_drawer", "close_door",
-                "put_in_drawer", "wipe_counter", "open_fridge")
+                "put_in_drawer", "wipe_counter", "open_fridge", "move_on_table")
 HOLDOUT_WORDING = 3  # docs/07-eval.md: template 4 and the (0, +0.08) offset are for evaluation only
 HOLDOUT_OFFSET = [0.0, 0.08]
 SIM_WORDINGS = {
@@ -28,6 +34,8 @@ SIM_WORDINGS = {
     "wipe_counter": ["Wipe the counter with the {name}.", "Clean the counter top with the {name}.",
                      "Scrub the counter using the {name}."],
     "open_fridge": ["Open the fridge.", "Pull the {name} door open.", "Swing the fridge door open."],
+    "move_on_table": ["Move the {name} further along the table.", "Pick up the {name} and set it down along the table.",
+                      "Shift the {name} to another spot on the table."],
 }
 
 
@@ -38,6 +46,43 @@ def finish_task(t: dict) -> dict:
     elif t["family"] in ("open_door", "close_door", "open_fridge"):
         t["joint"] = f'{t["fixture"]}_door'
     return t
+
+
+def table_move(table: dict, obj: dict, fixtures: list[dict], walls: list[dict], objects: list[dict] = ()) -> dict | None:
+    """move_on_table variation for an object on a scanned table: which long edge the robot stands at (the one
+    nearer the object), the target spot TABLE_MOVE along that edge (toward the middle of the table, else the other
+    way), and the base position. None when the object is out of reach of that edge, or in neither direction is
+    the target on the table, free of other objects (it would be set down on one) and reachable from a base that
+    clears furniture and walls."""
+    from arrival.twin.compile import _rect_distance
+
+    sx, sy = table["size"][0], table["size"][1]
+    lx, ly = to_local(obj["position"][:2], table)
+    if abs(lx) > sx / 2 or abs(ly) > sy / 2:
+        return None
+    side = 1.0 if ly >= 0 else -1.0
+    if sy / 2 - abs(ly) > TABLE_REACH:
+        return None
+    toward_middle = -TABLE_MOVE if lx > 0 else TABLE_MOVE
+    half = max(obj["size"][:2]) / 2
+    for step in (toward_middle, -toward_middle):  # the other way along the edge when the first spot is taken
+        tx = lx + step
+        if abs(tx) > sx / 2 - 0.12:
+            continue
+        target = to_world((tx, ly), table)
+        if any(math.dist(target, o["position"][:2]) < half + max(o["size"][:2]) / 2 + TARGET_GAP
+               for o in objects if o is not obj):  # an object set down on another one lands on it and misses
+            continue
+        base = to_world(((lx + tx) / 2, side * (sy / 2 + 0.28)), table)
+        xs = [p[0] for w in walls for p in (w["start"], w["end"])]
+        ys = [p[1] for w in walls for p in (w["start"], w["end"])]
+        if xs and not (min(xs) + BASE_CLEAR <= base[0] <= max(xs) - BASE_CLEAR
+                       and min(ys) + BASE_CLEAR <= base[1] <= max(ys) - BASE_CLEAR):
+            continue
+        if any(_rect_distance(base, f) < BASE_CLEAR for f in fixtures if f is not table and f["type"] != "sink"):
+            continue
+        return {"side": side, "target_xy": list(target), "base_xy": list(base)}
+    return None
 
 
 def _fx(twin: dict, fid: str) -> dict:
@@ -82,6 +127,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
     use_generated_instructions draws from the Nemotron cache (or the template fallback) for `split` instead."""
     rng = random.Random(seed)
     counters = [f for f in twin["fixtures"] if is_counter_host(f)]
+    cabinets = [c for c in counters if not is_table(c)]  # tables have no drawers or doors
     sinks = [f for f in twin["fixtures"] if f["type"] == "sink"]
     pools: dict[str, list[dict]] = {}
     pre = preflight if preflight is not None else {}
@@ -117,7 +163,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
             for o in twin["objects"]:
                 if o["catalog_id"] != "mug":
                     continue
-                src = _holder(o, counters)
+                src = _holder(o, cabinets)
                 if src is None or abs(to_local(o["position"], src)[0] - drawer_x(src, twin["fixtures"])) > 0.6:
                     continue  # the base parks beside the open drawer, so the mug must be within reach of that spot
                 pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"], "fixture": src["id"],
@@ -131,7 +177,16 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
                     pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"],
                                  "fixture": src["id"], "start": list(o["position"])})
         elif fam in ("open_drawer", "open_door", "close_drawer", "close_door"):
-            pool = [{"fixture": c["id"], "name": c["id"].replace("_", " ")} for c in counters]
+            pool = [{"fixture": c["id"], "name": c["id"].replace("_", " ")} for c in cabinets]
+        elif fam == "move_on_table":
+            for c in (c for c in counters if is_table(c)):
+                for o in twin["objects"]:
+                    if o["catalog_id"] not in TABLE_MOVABLE:
+                        continue
+                    m = table_move(c, o, twin["fixtures"], twin["walls"], twin["objects"])
+                    if m:
+                        pool.append({"object_id": o["id"], "object_label": o["label"], "source": c["id"],
+                                     "target": c["id"], "start": list(o["position"]), **m})
         elif fam == "open_fridge":
             pool = [{"fixture": f["id"], "name": "fridge"} for f in twin["fixtures"]
                     if f["type"].startswith("fridge")]
