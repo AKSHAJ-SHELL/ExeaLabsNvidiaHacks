@@ -142,6 +142,10 @@ def cmd_sim(a) -> int:
         print(args, file=sys.stderr)
         return EXIT_USAGE
     fams, twin = args
+    if getattr(a, "tavily", False):
+        from arrival.tasks.tavily_research import TavilyResearchAgent
+        agent = TavilyResearchAgent()
+        twin = agent.enrich_twin(twin)
     from arrival.sim.collect import collect
 
     res = collect(twin, fams, a.episodes, a.out, people=a.people, policy_name=a.policy, res=a.res,
@@ -156,6 +160,53 @@ def cmd_sim(a) -> int:
           + ", ".join(f"{k} {v['successes']}/{v['attempts']}" for k, v in r["families"].items()))
     if a.save_preview:
         print(f"preview: {Path(a.out) / 'previews'}")
+    return EXIT_OK
+
+
+def cmd_research(a) -> int:
+    """Tavily web research agent for appliance specifications and safety guidelines."""
+    from arrival.tasks.tavily_research import TavilyResearchAgent
+
+    agent = TavilyResearchAgent()
+    out_dir = Path(a.out) / "research"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if a.query:
+        print(f"Researching query via Tavily: {a.query!r}")
+        res = agent.search(a.query)
+        print(f"Source: {agent.last_source}")
+        if res.get("answer"):
+            print(f"Summary: {res['answer']}")
+        for r in res.get("results", [])[:3]:
+            print(f" - [{r.get('title')}] {r.get('url')}")
+        target = out_dir / "query_research.json"
+        target.write_text(json.dumps(res, indent=2))
+        print(f"Saved: {target}")
+        return EXIT_OK
+
+    twin_path = Path(a.out) / "twins" / a.room / "twin.json"
+    if twin_path.is_file():
+        twin = json.loads(twin_path.read_text())
+    else:
+        from arrival.scan import bundle as scan_bundle
+        from arrival.twin.compile import compile_twin
+
+        twin = compile_twin(scan_bundle.load_room(a.room, Path(a.scans)))
+
+    print(f"Researching appliances for room '{a.room}' via Tavily...")
+    enriched = agent.enrich_twin(twin)
+    research = enriched.get("tavily_research", {})
+    print(f"Discovered and researched {len(research)} fixture types (source={agent.last_source}):")
+    for ftype, info in research.items():
+        print(f"\n[{ftype.upper()}]")
+        print(f"  Summary: {info['summary']}")
+        print(f"  Safety: {'; '.join(info['safety_guidelines'][:2])}")
+        if info.get("sources"):
+            print(f"  Source: {info['sources'][0]}")
+
+    target = out_dir / f"{a.room}_research.json"
+    target.write_text(json.dumps(research, indent=2))
+    print(f"\nSaved research report: {target}")
     return EXIT_OK
 
 
@@ -243,7 +294,14 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--scans", default="scans")
     m.add_argument("--seed", type=int, default=0)
     m.add_argument("--save-preview", action="store_true")
+    m.add_argument("--tavily", action="store_true", help="Enrich digital twin and VLM planning with Tavily appliance research")
     m.set_defaults(fn=cmd_sim)
+    r = sub.add_parser("research", help="Tavily AI research on kitchen appliances and safety guidelines")
+    r.add_argument("--room", default="hero_kitchen")
+    r.add_argument("--query", default=None, help="direct query string to search via Tavily")
+    r.add_argument("--out", default="out")
+    r.add_argument("--scans", default="scans")
+    r.set_defaults(fn=cmd_research)
     e = sub.add_parser("eval", help="score a policy closed-loop in the sim: success, time, human contacts")
     e.add_argument("--room", default="hero_kitchen")
     e.add_argument("--policy", choices=["scripted", "vla"], default="scripted")
