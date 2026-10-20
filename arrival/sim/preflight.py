@@ -203,7 +203,7 @@ def reach_points(twin: dict, task: dict, obj_xy=None, mobile: bool = False) -> l
         src = next(f for f in twin["fixtures"] if f["id"] == task["source"])
         u = np.array([math.cos(src.get("yaw", 0.0)), math.sin(src.get("yaw", 0.0))])
         p = np.array(obj_xy[:2])
-        return [("the sponge", p), ("the stroke end", p + STROKE * u), ("the stroke end", p - STROKE * u)]
+        return [("the object", p), ("the stroke end", p + STROKE * u), ("the stroke end", p - STROKE * u)]
     return []
 
 

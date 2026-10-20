@@ -13,7 +13,7 @@ import numpy as np
 from arrival.sim import menagerie, robot
 from arrival.sim.people import Walkers, frame
 from arrival.sim.safety import SafetyMonitor
-from arrival.catalog.objects import HANDLE_HELD, RIM_HELD
+from arrival.catalog.objects import HANDLE_HELD, RIM_HELD, THIN_HELD
 from arrival.sim.export import STATE_DIM
 from arrival.sim.preflight import DRAWER_OPEN_PUT, base_pose, corners, drive_spot, front, mobile_drive, place_point, rack_spot
 from arrival.sim.scene import BOWL_WALL, DOOR_FLAT, PLATE_FLOOR, PLATE_RIM, RACK_OUT, build_mjcf
@@ -25,6 +25,7 @@ SETTLE_STEPS = 12
 DRAWER_OPEN = 0.30  # start state (m) for close_drawer; open_drawer counts > 0.15 as open
 HANDLE_ROOT = 0.017  # grasp point out from a pan's ring: pad half-width 0.01 plus 7 mm
 PAD_BELOW_EEF = 0.023  # the finger pads reach this far below the eef site (robot.py hand geometry)
+PAD_CLEAR = 0.003  # pad tips over the counter when pinching a flat object: lower and they drag on the top
 DOOR_OPEN = np.radians(70)  # start state for close_door; open_door counts > 60 deg as open
 FRIDGE_OPEN = np.radians(60)  # open_fridge counts the door open past this, the same bar as open_door
 SKIP_REASONS_KEPT = 50  # reasons kept in the report and the dataset info
@@ -165,7 +166,8 @@ class SimEnv:
         """How the expert holds an object it cannot grip by the body: xy offset from the body centre to the grasp
         point, the yaw for ik.down (fingers close across the wall or the handle) and the eef height. A bowl and a
         plate are pinched by the rim nearest the robot, the bowl 2 cm under its lip, the plate with the pads just
-        above its bottom disc; a pan by its handle, 1.7 cm out from the ring. None for objects held by the body."""
+        above its bottom disc; a pan by its handle, 1.7 cm out from the ring; a spatula across its width with the pad
+        tips 3 mm over the top it lies on. None for objects held by the body."""
         o = self.objs[oid]
         cid, p = o["catalog_id"], self.body_pos(oid)
         radius, sz = min(o["size"][0], o["size"][1]) / 2, o["size"][2]
@@ -178,7 +180,27 @@ class SimEnv:
         if cid in HANDLE_HELD:  # the handle runs along +x from the ring (object_xml ignores the twin yaw); the pads
             # sit at its root, the thickest part; the pan tips and hangs from the handle during the carry
             return {"off": np.array([radius + HANDLE_ROOT, 0.0]), "yaw": 0.0, "z": p[2] + sz / 2 - 0.008}
+        if cid in THIN_HELD:  # lying flat, too thin to hold from above the body: the pads close across the short
+            # side with their tips PAD_CLEAR over the top it lies on (object_xml ignores the twin yaw, so that is x)
+            across = 0 if o["size"][0] < o["size"][1] else 1
+            return {"off": np.zeros(2), "yaw": np.pi / 2 if across == 0 else 0.0,
+                    "z": p[2] - sz / 2 + self.pad_reach() + PAD_CLEAR}
         return None
+
+    def pad_reach(self) -> float:
+        """How far the fingers' collision geoms reach past the eef site along the approach axis: 23 mm on the
+        procedural fingers, about 10 mm on the Menagerie hand. Read from the model so both arms use one rule."""
+        m, d = self.model, self.data
+        R, e = d.site("eef").xmat.reshape(3, 3), d.site("eef").xpos
+        reach = 0.0
+        for i in range(m.ngeom):
+            if m.body(m.geom_bodyid[i]).name not in ("finger_l", "finger_r") or not m.geom_contype[i]:
+                continue
+            c, h = m.geom_aabb[i][:3], m.geom_aabb[i][3:]
+            G = d.geom_xmat[i].reshape(3, 3)
+            for s in np.array(np.meshgrid(*[(-1, 1)] * 3)).T.reshape(-1, 3):
+                reach = max(reach, float((R.T @ (d.geom_xpos[i] + G @ (c + s * h) - e))[2]))
+        return reach
 
     def place_point(self, task: dict) -> np.ndarray:
         return place_point(self.twin, task)

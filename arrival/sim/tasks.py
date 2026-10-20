@@ -7,7 +7,7 @@ from __future__ import annotations
 import math
 import random
 
-from arrival.catalog.objects import GRASPABLE, PICKABLE, TABLE_MOVABLE
+from arrival.catalog.objects import GRASPABLE, PICKABLE, TABLE_MOVABLE, WIPE_TOOLS
 from arrival.sim.scene import is_table
 from arrival.tasks.propose import LIGHTING, POSE_OFFSETS, WORDINGS, top_z
 from arrival.sim.preflight import DISHWASHER_SIDE, check_task
@@ -151,7 +151,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
         pool = []
         if fam in ("counter_to_sink", "counter_to_counter"):
             for o in twin["objects"]:
-                if o["catalog_id"] not in GRASPABLE:  # the spatula stays out of the pick pool
+                if o["catalog_id"] not in GRASPABLE:  # the laptop stays out of the pick pool
                     continue
                 src = _holder(o, counters)
                 if src is None:
@@ -185,7 +185,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
                              "start": list(o["position"])})
         elif fam == "wipe_counter":
             for o in twin["objects"]:
-                if o["catalog_id"] != "sponge":
+                if o["catalog_id"] not in WIPE_TOOLS:
                     continue
                 src = _holder(o, counters)
                 if src is not None:
