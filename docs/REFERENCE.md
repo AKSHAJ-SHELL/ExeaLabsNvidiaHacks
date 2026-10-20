@@ -75,6 +75,15 @@ python scripts/render_rooms.py                              # out/renders/<room>
 python scripts/render_rooms.py tests/fixtures/roomplan/amal.json
 ```
 
+## One-command demo
+
+```bash
+python scripts/demo_all.py --quick     # 2 episodes, 1 person, 64 px; --full is 8, 2, 128
+python scripts/demo_all.py --room hero_kitchen --out out/demo --serve
+```
+
+Runs scan and compile, twin layout PNG, sim dataset, validate, scripted-expert eval and contact sheet, prints PASS or FAIL per stage, and writes `<out>/demo_summary.md` and `demo_summary.json`. Exits 1 if a stage fails. See `docs/ref/DEM-4.md`.
+
 ## Simulation (MuJoCo)
 
 `python -m arrival sim --episodes N` builds a MuJoCo scene from the compiled twin and records episodes to `out/datasets/<room>_sim` (LeRobot v2 layout). Needs the `sim` extra. The code lives in `arrival/sim/`:
