@@ -86,6 +86,27 @@ def test_door_pull_keeps_joint7_off_its_stop(twin, fixture):
             "seed": 0}
     ep = run_episode(SimEnv(twin, task, res=32), ScriptedExpert(), task)
     assert np.abs(ep["states"][:, 6]).max() < robot.RANGES[6][1] - 0.3
+def test_scripted_expert_opens_fridge(twin):
+    from arrival.sim.collect import FRIDGE_OPEN, run_episode
+    from arrival.sim.policy import ScriptedExpert
+
+    task = {"family": "open_fridge", "fixture": "fridge_1", "joint": "fridge_1_door", "lighting": "neutral",
+            "people": 0, "seed": 0}
+    env = SimEnv(twin, task, res=32)
+    ep = run_episode(env, ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+    assert ep["detail"]["qpos"] > FRIDGE_OPEN + np.radians(10)  # measured 79 deg against the 60 deg bar
+    assert ep["ik_error"] < 0.01  # every waypoint, the hooked pull and the push, is in reach
+
+
+def test_open_fridge_is_one_task_per_fridge_and_not_a_default(twin):
+    from arrival.cli import build_parser
+    from arrival.sim.tasks import SIM_FAMILIES, make_tasks
+
+    tasks = make_tasks(twin, ["open_fridge"], 4, seed=0, log=lambda *_: None)
+    assert len(tasks) == 4 and {t["fixture"] for t in tasks} == {"fridge_1"}
+    assert "open_fridge" in SIM_FAMILIES
+    assert "open_fridge" not in build_parser().parse_args(["sim"]).families
 
 
 @pytest.mark.parametrize("family,fixture", [("close_drawer", "counter_a"), ("close_drawer", "counter_b"),

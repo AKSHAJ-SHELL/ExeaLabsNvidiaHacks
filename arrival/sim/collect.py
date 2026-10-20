@@ -25,6 +25,10 @@ PAD_BELOW_EEF = 0.023  # the finger pads reach this far below the eef site (robo
 DRAWER_OPEN_PUT = 0.14  # start state for put_in_drawer: wide enough for a mug on the exposed tray, and the base
 # can then park straight in front without the pulled-out front reaching its column
 DOOR_OPEN = np.radians(70)  # start state for close_door; open_door counts > 60 deg as open
+FRIDGE_OPEN = np.radians(60)  # open_fridge counts the door open past this, the same bar as open_door
+FRIDGE_BASE_ALONG = 0.1  # base centre past the door's free edge, along the front
+FRIDGE_BASE_OUT = 0.75  # base centre out from the fridge front: nearer, the handle's arc folds the elbow onto its stop
+FRIDGE_BASE_YAW = 0.0  # degrees the base turns toward the hinge from facing the front
 WIPE_MIN = 0.4  # metres the sponge must travel pressed to the counter for wipe_counter to count
 
 
@@ -111,6 +115,17 @@ class SimEnv:
             along = (lx + mug_lx) / 2
             out = c["size"][1] / 2 + DRAWER_OPEN_PUT + 0.07 + 0.14  # front + handle bar + base column + margin
             base = (c["position"][0] + np.cos(yaw) * along, c["position"][1] + np.sin(yaw) * along + n[1] * out, 0.75)
+        elif fam == "open_fridge":
+            # beside the door's free edge and out of its swing (the hinge is on the fixture's left edge), facing the
+            # front like the cabinet door tasks
+            f = self.fx[task["fixture"]]
+            n = _front(f)
+            sx, sy = f["size"][0], f["size"][1]
+            yaw = f.get("yaw", 0.0)
+            lx, out = sx / 2 + FRIDGE_BASE_ALONG, sy / 2 + FRIDGE_BASE_OUT
+            base = (f["position"][0] + np.cos(yaw) * lx + n[0] * out,
+                    f["position"][1] + np.sin(yaw) * lx + n[1] * out, 0.75)
+            return base, float(np.degrees(np.arctan2(-n[1], -n[0])) - FRIDGE_BASE_YAW)
         else:
             c = self.fx[task["fixture"]]
             n = _front(c)
@@ -268,7 +283,7 @@ class SimEnv:
                 "object_pos": p.round(4).tolist(), "wiped_m": round(self.wiped, 3)}
         jn = task["joint"]
         q = float(self.data.joint(jn).qpos[0])
-        ok = {"open_drawer": q > 0.15, "open_door": q > np.radians(60),
+        ok = {"open_drawer": q > 0.15, "open_door": q > np.radians(60), "open_fridge": q > FRIDGE_OPEN,
               "close_drawer": q < 0.03, "close_door": q < np.radians(5)}[fam]
         return bool(ok), {"joint": jn, "qpos": round(q, 4)}
 
@@ -324,7 +339,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     for t in tasks:
         if t["family"] in ("open_drawer", "close_drawer", "put_in_drawer"):
             t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
-        elif t["family"] in ("open_door", "close_door"):
+        elif t["family"] in ("open_door", "close_door", "open_fridge"):
             t["joint"] = f'{t["fixture"]}_door'
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
     planner = VLMPlanner(log=log, cache_path=cache_path) if planner_name == "vlm" else None
