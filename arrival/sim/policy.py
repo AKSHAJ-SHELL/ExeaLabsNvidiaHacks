@@ -7,7 +7,6 @@ VLAClient       HTTP client for a GR00T N1.x policy server (GR00T_POLICY_URL); n
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import os
@@ -420,10 +419,11 @@ class VLAClient(Policy):
     """Client for a GR00T N1.x policy server (e.g. gr00t inference service behind an HTTP shim).
 
     POST {GR00T_POLICY_URL}/act  JSON:
-      {"video.ego_view": <base64 PNG HxWx3 uint8>, "state.single_arm": [7], "state.gripper": [1],
-       "annotation.human.task_description": "<instruction>"}
+      {"video.ego_view": <base64 PNG HxWx3 uint8>, "video.wrist": <base64 PNG>, "state.single_arm": [7],
+       "state.gripper": [1], "annotation.human.task_description": "<instruction>"}
     Response: {"action.single_arm": [[7], ...], "action.gripper": [[1], ...]}  (absolute joint targets, chunk)
-    Matches meta/modality.json of datasets written by `arrival sim`.
+    Matches meta/modality.json of datasets written by `arrival sim`; the wire helpers live in
+    arrival.policy_server.protocol, which also checks the response (ProtocolError, a ValueError).
     """
 
     def __init__(self, url: str | None = None, timeout: float = 10.0):
@@ -439,18 +439,11 @@ class VLAClient(Policy):
 
     def act(self, obs: dict) -> np.ndarray:
         if not self.queue:
-            import io
+            from arrival.policy_server.protocol import decode_response, encode_request
 
-            from PIL import Image
-
-            buf = io.BytesIO()
-            Image.fromarray(obs["ego_view"]).save(buf, format="PNG")
-            body = json.dumps({"video.ego_view": base64.b64encode(buf.getvalue()).decode(),
-                               "state.single_arm": obs["state"][:7].tolist(), "state.gripper": obs["state"][7:8].tolist(),
-                               "annotation.human.task_description": self.instruction}).encode()
+            body = json.dumps(encode_request(obs, self.instruction)).encode()
             req = urllib.request.Request(self.url.rstrip("/") + "/act", data=body, method="POST",
                                          headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                out = json.load(r)
-            self.queue = [np.concatenate([a, g]) for a, g in zip(out["action.single_arm"], out["action.gripper"])]
+                self.queue = list(decode_response(json.load(r)))
         return np.asarray(self.queue.pop(0), dtype=float)
