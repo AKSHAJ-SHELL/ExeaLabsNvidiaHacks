@@ -4,7 +4,7 @@
 
 [![Arrival demo: scan → digital twin → MuJoCo simulation → GR00T dataset](docs/media/demo.gif)](docs/media/demo.mp4)
 
-*30-second demo, rendered from the real code (an early cut: the room and arm visuals are being fixed under SIM-1 and MAN-1). Click for the full-quality mp4. Regenerate it with `python scripts/make_demo_video.py`.*
+*31-second demo rendered from the current room and arm code. It uses the authored sample kitchen; real iPhone scan footage is still pending. Click for the full-quality mp4. Regenerate it with `python scripts/make_demo_video.py`.*
 
 ---
 
@@ -209,6 +209,8 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 - **DEM-1: Hosted page.** Deploy the web app, with a 3D or video viewer for each room and its dataset.
 - **DEM-2: Pitch video.** Re-render `scripts/make_demo_video.py` once SIM-1 and MAN-1 land, and add real scan footage from CAP.
 - **DEM-3: Release QA.** Before each demo, run a fresh-clone install, the full test suite, `sim` + `validate`, and check every README claim. Update the status table. The checklist and the last run's results are in `docs/RELEASE-QA.md`.
+- **DEM-2: Pitch video.** Re-rendered with the SIM-1 and MAN-1 visuals. Add real scan footage from CAP when it exists.
+- **DEM-3: Release QA.** Before each demo, run a fresh-clone install, the full test suite, `sim` + `validate`, and check every README claim. Update the status table.
 
 ### Everyone: definition of done for a PR
 
