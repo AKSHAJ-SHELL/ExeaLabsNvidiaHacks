@@ -102,7 +102,7 @@ Sizes: S under half a day, M about a day, L multi-day. Priority: **must** (the d
 2. **L5 + L6 + L7**: shardable sim, a fresh-clone install check on macOS/Windows, and a stale-docs sweep.
 3. **C2 + L3 + L4**: hosted demo with a pre-seeded room, plus job limits and upload hardening so a public URL is safe.
 4. **G1** (in parallel, needs a GPU): load `hero_kitchen_sim` in the real GR00T loader and run the 100-step fine-tune. Nothing has trained yet.
-5. **P3 + P1**: one real consented scan through the pipeline, and the iOS RGB-D recorder if a LiDAR iPhone is free. Report anything not measured as "not measured".
+5. **P2 + P1**: one real consented scan through the pipeline, and the iOS RGB-D recorder if a LiDAR iPhone is free. Report anything not measured as "not measured".
 
 ### Laptop
 
@@ -135,7 +135,7 @@ Sizes: S under half a day, M about a day, L multi-day. Priority: **must** (the d
 | L25 | Real Menagerie Franka behind `--arm menagerie`. Rebase #25, retune door grasp offsets (open and close door failed there), keep the 34 MB mesh fetch out of CI and git. Do last or skip | M | nice | #26 (PR #25) |
 | L26 | Thin-object (spatula) pinch grasp, then add it to `counter_to_sink` and `wipe` | M | nice | #32, #31 |
 | L27 | People pass: yield and stop behaviour from the safety distance, counter-use pause, height-aware clearance, a test running `open_fridge` with a walker, mirrored right-hinged fridge plan. Do after L1 so `people.py` is rebased once | M | nice | #24 |
-| L28 | Three-room summary page: tape vs twin error, sim pass rate and realism per room. After P3 and L16 | S | nice | #59, #65 |
+| L28 | Three-room summary page: tape vs twin error, sim pass rate and realism per room. After P2 and L16 | S | nice | #59, #65 |
 
 ### GPU or Linux box
 
@@ -156,7 +156,7 @@ Sizes: S under half a day, M about a day, L multi-day. Priority: **must** (the d
 |---|---|---|---|---|
 | C1 | Nebius Serverless Jobs submit and monitor client with S3 storage, done-markers for resume, fake-backend tests with one injected failed shard, then one real small run (about 4 shards) and a merge. Builds on L5 | L | must | #66 |
 | C2 | Hosted demo: docker-compose with web and worker, TLS, non-root, `/healthz`, persistent volume, pre-seeded room so output shows in under 30 s, `scripts/smoke_hosted.py` (good and bad upload), `docs/DEPLOY.md`, Playwright browser smoke. The page has only been checked with curl | M | must | #68 |
-| C3 | Measured time and cost per demo from a real Nebius run against real pricing and the teleop baseline (P4). Report measured numbers only | S | should | #67 |
+| C3 | Measured time and cost per demo from a real Nebius run against real pricing and the teleop baseline (P3). Report measured numbers only | S | should | #67 |
 | C4 | Detect small objects from posed frames with a VLM (cached offline fixture for tests), back-project into the twin, label defaults `synthetic`. Needs P1 and L14 | M | should | #60 |
 | C5 | Real Cosmos variation on a deterministic 10% of validated frames with source tracking, plus hosted Cosmos and policy-server endpoints. Pointless while frames are 64 px | M | nice | #70, #63 |
 
