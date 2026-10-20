@@ -1,0 +1,342 @@
+"""Offline conformance check for what the GR00T/LeRobot loader reads from a dataset. Does not import GR00T.
+
+Goes beyond validate.py's structure checks: it recomputes the statistics the loader normalises with,
+decodes sample videos for frame count / fps / shape, and reproduces the 16-step action window the training
+config asks for. Refuses placeholder datasets: arrival_physically_valid must be true and
+joints_are_placeholder false. Parquet is streamed per episode; only the first, middle and last episode's
+mp4 per camera is decoded.
+
+    res = check_loader(root)      # {"ok", "errors", "warnings", "info", "stats"}; each finding is {"code", "msg"}
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+HORIZON = 16  # len(delta_indices) of the action modality in configs/gr00t/arrival_panda_config.py
+TS_TOL = 1e-4  # seconds, same as validate.py and LeRobot's timestamp sync check
+STAT_RTOL, STAT_ATOL = 1e-3, 1e-4
+CONST_STD = 1e-8
+ARROW = {"float32": pa.float32(), "int64": pa.int64(), "bool": pa.bool_()}
+STAT_KEYS = ("mean", "std", "min", "max")
+Q = (0.01, 0.99)
+MAX_ERRORS = 60
+
+
+class _Findings:
+    def __init__(self):
+        self.errors: list[dict] = []
+        self.warnings: list[dict] = []
+        self._seen: set[tuple] = set()
+
+    def err(self, code: str, msg: str) -> None:
+        if (code, msg) not in self._seen and len(self.errors) < MAX_ERRORS:
+            self._seen.add((code, msg))
+            self.errors.append({"code": code, "msg": msg})
+
+    def warn(self, code: str, msg: str) -> None:
+        self.warnings.append({"code": code, "msg": msg})
+
+
+def _jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _arrow_type(feat: dict) -> pa.DataType | None:
+    base = ARROW.get(feat.get("dtype"))
+    if base is None:
+        return None
+    return pa.list_(base) if feat.get("shape", [1]) != [1] else base
+
+
+def _decode(path: Path):
+    """(frames, fps, first-frame shape) or an error string."""
+    import imageio.v2 as imageio
+
+    try:
+        with imageio.get_reader(str(path)) as r:  # closed on every path: an open ffmpeg blocks deletes on Windows
+            fps = r.get_meta_data().get("fps")
+            n, shape = 0, None
+            for fr in r:
+                if n == 0:
+                    shape = list(fr.shape)
+                n += 1
+    except Exception as e:  # noqa: BLE001 - any decode failure is a dataset error
+        return f"cannot decode ({e})"
+    return n, fps, shape
+
+
+def _close(a, b) -> bool:
+    return bool(np.allclose(a, b, rtol=STAT_RTOL, atol=STAT_ATOL))
+
+
+def check_loader(root: str | Path) -> dict:
+    root = Path(root)
+    f = _Findings()
+    out = {"ok": False, "errors": f.errors, "warnings": f.warnings, "info": {}, "stats": {}}
+    meta = root / "meta"
+    need = ("info.json", "modality.json", "tasks.jsonl", "episodes.jsonl", "episodes_stats.jsonl", "stats.json",
+            "embodiment.json")
+    missing = [m for m in need if not (meta / m).is_file()]
+    if missing:
+        for m in missing:
+            f.err("missing_meta", f"missing meta/{m}")
+        return out
+    info = json.loads((meta / "info.json").read_text())
+    modality = json.loads((meta / "modality.json").read_text())
+    emb = json.loads((meta / "embodiment.json").read_text())
+    tasks = _jsonl(meta / "tasks.jsonl")
+    episodes = _jsonl(meta / "episodes.jsonl")
+    ep_stats = _jsonl(meta / "episodes_stats.jsonl")
+    stats = json.loads((meta / "stats.json").read_text())
+    features = info.get("features", {})
+
+    # what the loader would train on must be physics-checked, not scripted placeholder motion
+    if info.get("arrival_physically_valid") is not True:
+        f.err("placeholder", "refusing: info.arrival_physically_valid is not true; this is the scripted placeholder "
+              "demo dataset, not physics-checked sim data (generate one with 'python -m arrival sim')")
+    if emb.get("joints_are_placeholder") is not False:
+        f.err("placeholder", "refusing: embodiment.joints_are_placeholder is not false; the arm joints are "
+              "placeholder zeros, do not fine-tune on this dataset")
+    if f.errors:
+        return out
+
+    fps = info.get("fps")
+    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or fps <= 0:
+        f.err("fps_invalid", f"info.fps must be a positive number, got {fps!r}")
+        return out
+    s_dim = (features.get("observation.state", {}).get("shape") or [0])[0]
+    a_dim = (features.get("action", {}).get("shape") or [0])[0]
+
+    # modality.json slices against the state/action dims
+    arm_s = arm_a = None
+    for group, dim in (("state", s_dim), ("action", a_dim)):
+        parts = modality.get(group) or {}
+        if not parts:
+            f.err("modality_slices", f"modality.json has no {group} slices")
+        for k, p in parts.items():
+            st, en = p.get("start"), p.get("end")
+            if not (isinstance(st, int) and isinstance(en, int) and 0 <= st < en <= dim):
+                f.err("modality_slices", f"modality {group}.{k} slice [{st}, {en}) outside 0..{dim}")
+            elif k == "single_arm":
+                if group == "state":
+                    arm_s = (st, en)
+                else:
+                    arm_a = (st, en)
+    if arm_s is None or arm_a is None:
+        f.err("modality_slices", "modality.json needs state.single_arm and action.single_arm for the relative arm action")
+    elif arm_s[1] - arm_s[0] != arm_a[1] - arm_a[0]:
+        f.err("modality_slices", "state.single_arm and action.single_arm have different widths")
+        arm_s = arm_a = None
+
+    # video keys: original_key must be a video feature in info.json; every episode needs an mp4 per key
+    video_tpl = info.get("video_path") or ""
+    size = info.get("chunks_size", 1000)
+    cams: dict[str, dict] = {}
+    for name, v in (modality.get("video") or {}).items():
+        ok_key = v.get("original_key")
+        feat = features.get(ok_key)
+        if not feat or feat.get("dtype") != "video":
+            f.err("video_key", f"modality video.{name} original_key {ok_key!r} is not a video feature in info.json")
+            continue
+        cams[name] = {"key": ok_key, "shape": feat.get("shape")}
+        decl = (feat.get("info") or {}).get("video.fps")
+        if decl != fps:
+            f.err("video_fps", f"info.features.{ok_key}.info video.fps={decl} != info.fps={fps}")
+    if not cams:
+        f.err("video_key", "modality.json declares no usable video keys")
+
+    # annotation columns must exist and resolve in tasks.jsonl
+    task_ids = {t["task_index"] for t in tasks}
+    ann_cols = []
+    for name, a in (modality.get("annotation") or {}).items():
+        col = (a or {}).get("original_key") or f"annotation.{name}"
+        if col not in features:
+            f.err("annotation_key", f"modality annotation.{name} column {col} is not in info.features")
+        else:
+            ann_cols.append(col)
+
+    data_tpl = info.get("data_path", "")
+    n_ep = len(episodes)
+    sample = {0, n_ep - 1, n_ep // 2} if n_ep else set()
+    stat_cols = ("observation.state", "action")
+    acc = {c: {"n": 0, "sum": 0.0, "sq": 0.0, "min": None, "max": None, "rows": []} for c in stat_cols}
+    ep_local: dict[int, dict] = {}
+    rel_min, rel_max, rel_finite = np.inf, -np.inf, True
+    padded = windows = short = frames = 0
+    nonfinite_cols: set[str] = set()
+    for e in episodes:
+        ep, length = e["episode_index"], e["length"]
+        path = root / data_tpl.format(episode_chunk=ep // size, episode_index=ep)
+        name = str(path.relative_to(root))
+        if not path.is_file():
+            f.err("missing_parquet", f"missing {name}")
+            continue
+        try:
+            t = pq.read_table(path)
+        except Exception as ex:  # noqa: BLE001 - any read failure is a dataset error
+            f.err("parquet_unreadable", f"{name}: cannot read ({ex})")
+            continue
+        for c, feat in features.items():
+            want = _arrow_type(feat)
+            if want is None:
+                continue
+            if c not in t.column_names:
+                f.err("schema", f"{name}: info.features column {c} not in parquet")
+            elif t.schema.field(c).type != want:
+                f.err("schema", f"{name}: column {c} dtype {t.schema.field(c).type} != info.features {want}")
+        if t.num_rows != length:
+            f.err("episode_length", f"{name}: {t.num_rows} rows, episodes.jsonl length {length}")
+        frames += t.num_rows
+        for c in ["task_index", *ann_cols]:
+            if c in t.column_names:
+                bad = sorted(set(t.column(c).to_pylist()) - task_ids)
+                if bad:
+                    f.err("task_index_unresolved", f"{name}: {c} {bad} has no row in tasks.jsonl")
+        if "timestamp" in t.column_names and t.num_rows:
+            ts = np.asarray(t.column("timestamp").to_pylist(), dtype=np.float64)
+            off = np.abs(ts - np.arange(ts.size) / fps)
+            if not (off <= TS_TOL).all():
+                k = int(np.argmax(~(off <= TS_TOL)))
+                f.err("timestamp_fps", f"{name}: timestamp row {k} is {ts[k]:.6f}s, expected {k / fps:.6f}s "
+                      f"(frame_index / info.fps={fps})")
+        # action horizon: starts in the last HORIZON-1 frames read past the end and are padded
+        windows += t.num_rows
+        if t.num_rows < HORIZON:
+            short += 1
+            padded += t.num_rows
+            f.err("short_episode", f"{name}: {t.num_rows} frames < {HORIZON}-step action horizon")
+        else:
+            padded += HORIZON - 1
+        if any(c not in t.column_names for c in stat_cols) or not t.num_rows:
+            continue
+        s = np.asarray(t.column("observation.state").to_pylist(), dtype=np.float64)
+        a = np.asarray(t.column("action").to_pylist(), dtype=np.float64)
+        if s.ndim != 2 or a.ndim != 2 or s.shape[1] != s_dim or a.shape[1] != a_dim:
+            f.err("schema", f"{name}: state {s.shape} / action {a.shape} do not match info.features dims "
+                  f"({s_dim}, {a_dim})")
+            continue
+        fin = True
+        for c, x in (("observation.state", s), ("action", a)):
+            if not np.isfinite(x).all():
+                fin = False
+                nonfinite_cols.add(c)
+                f.err("nonfinite", f"{name}: {c} has NaN or inf")
+        if not fin:
+            continue
+        if arm_s and arm_a:
+            # relative arm action as the loader builds it: action[t+k] - state[t], tail padded with the last action
+            idx = np.minimum(np.arange(len(s))[:, None] + np.arange(HORIZON)[None, :], len(s) - 1)
+            rel = a[idx][:, :, arm_a[0]:arm_a[1]] - s[:, None, arm_s[0]:arm_s[1]]
+            rel_min, rel_max = min(rel_min, float(rel.min())), max(rel_max, float(rel.max()))
+        for c, x in (("observation.state", s), ("action", a)):
+            d = acc[c]
+            d["n"] += len(x)
+            d["sum"] = d["sum"] + x.sum(0)
+            d["sq"] = d["sq"] + (x ** 2).sum(0)
+            d["min"] = x.min(0) if d["min"] is None else np.minimum(d["min"], x.min(0))
+            d["max"] = x.max(0) if d["max"] is None else np.maximum(d["max"], x.max(0))
+            d["rows"].append(x.astype(np.float32))
+            ep_local.setdefault(ep, {})[c] = {"mean": x.mean(0), "std": x.std(0), "min": x.min(0), "max": x.max(0)}
+
+    # stats: recompute from the parquet, compare with stats.json and episodes_stats.jsonl
+    out_stats = {}
+    for c, d in acc.items():
+        if not d["n"] or c in nonfinite_cols:
+            continue
+        mean = d["sum"] / d["n"]
+        std = np.sqrt(np.maximum(d["sq"] / d["n"] - mean ** 2, 0.0))
+        q = np.quantile(np.concatenate(d["rows"]).astype(np.float64), Q, axis=0)
+        mine = {"mean": mean, "std": std, "min": d["min"], "max": d["max"], "q01": q[0], "q99": q[1]}
+        out_stats[c] = {k: v.tolist() for k, v in mine.items()}
+        const = np.flatnonzero(std <= CONST_STD)
+        if len(const):
+            f.warn("constant_dim", f"{c} dims {const.tolist()} are constant (std 0); std normalisation divides by it, "
+                   f"so the loader must clamp it")
+        got = stats.get(c)
+        if not got:
+            f.err("stats_missing", f"stats.json has no entry for {c}")
+            continue
+        if not {"q01", "q99"} <= set(got):
+            f.warn("stats_no_quantiles", f"stats.json {c} has no q01/q99; the recomputed values are in the --json "
+                   f"report (the writer only stores min/max/mean/std)")
+        for k in (*STAT_KEYS, "q01", "q99"):
+            if k not in got:
+                if k not in ("q01", "q99"):
+                    f.err("stats_missing", f"stats.json {c} has no {k}")
+                continue
+            g = np.asarray(got[k], dtype=np.float64)
+            if g.shape != mine[k].shape or not np.isfinite(g).all():
+                f.err("stats_mismatch", f"stats.json {c}.{k} has the wrong shape or is not finite")
+                continue
+            zero = np.flatnonzero((g <= CONST_STD) & (std > CONST_STD)) if k == "std" else []
+            if len(zero):
+                f.err("stats_std_zero", f"stats.json {c}.std is 0 on dims {zero.tolist()} that move in the parquet "
+                      f"(normalisation would divide by zero)")
+            elif not _close(g, mine[k]):
+                f.err("stats_mismatch", f"stats.json {c}.{k} differs from the parquet recompute "
+                      f"(max abs diff {float(np.abs(g - mine[k]).max()):.3g})")
+    if len(ep_stats) != n_ep:
+        f.err("stats_mismatch", f"episodes_stats.jsonl has {len(ep_stats)} rows, episodes.jsonl {n_ep}")
+    for row in ep_stats:
+        for c, loc in ep_local.get(row.get("episode_index"), {}).items():
+            for k in STAT_KEYS:
+                g = (row.get("stats", {}).get(c) or {}).get(k)
+                if g is None or not _close(np.asarray(g, dtype=np.float64), loc[k]):
+                    f.err("stats_mismatch", f"episodes_stats.jsonl episode {row.get('episode_index')} {c}.{k} "
+                          f"differs from the parquet recompute")
+
+    # videos: an mp4 per episode and camera; decode the first, middle and last episode only
+    n_decoded = 0
+    for cv in cams.values():
+        for e in episodes:
+            ep = e["episode_index"]
+            path = root / video_tpl.format(episode_chunk=ep // size, video_key=cv["key"], episode_index=ep)
+            rel_path = path.relative_to(root)
+            if not path.is_file():
+                f.err("missing_video", f"missing {rel_path}")
+            elif ep in sample:
+                r = _decode(path)
+                n_decoded += 1
+                if isinstance(r, str):
+                    f.err("video_decode", f"{rel_path}: {r}")
+                    continue
+                n, vfps, shape = r
+                if n != e["length"]:
+                    f.err("video_frames", f"{rel_path}: {n} frames, episode length {e['length']}")
+                if vfps is None or abs(float(vfps) - fps) > 1e-3:
+                    f.err("video_fps", f"{rel_path}: mp4 fps {vfps} != info.fps {fps}")
+                if shape != list(cv["shape"] or []):
+                    f.err("video_shape", f"{rel_path}: frame shape {shape} != info.json {cv['shape']}")
+
+    out["stats"] = out_stats
+    out["info"] = {
+        "episodes": n_ep, "frames": frames, "fps": fps, "state_dim": s_dim, "action_dim": a_dim,
+        "horizon": HORIZON, "windows": windows, "padded_windows": padded, "short_episodes": short,
+        "videos_decoded": n_decoded, "cameras": sorted(cams),
+        "relative_action_range": [rel_min, rel_max] if np.isfinite(rel_min) else None,
+    }
+    out["ok"] = not f.errors
+    return out
+
+
+def format_report(root, res: dict) -> str:
+    i = res["info"]
+    lines = [f"loader check: {root}: {'PASS' if res['ok'] else 'FAIL'}"]
+    if i:
+        lines.append(f"  {i['episodes']} episodes, {i['frames']} frames @ {i['fps']} fps, state {i['state_dim']}d / "
+                     f"action {i['action_dim']}d, cameras {', '.join(i['cameras'])}, {i['videos_decoded']} mp4s decoded")
+        pct = 100 * i["padded_windows"] / max(i["windows"], 1)
+        lines.append(f"  {i['horizon']}-step action windows: {i['padded_windows']}/{i['windows']} padded at the tail "
+                     f"({pct:.0f}%), {i['short_episodes']} episode(s) shorter than the horizon")
+        if i["relative_action_range"]:
+            lo, hi = i["relative_action_range"]
+            lines.append(f"  relative arm action (action - state): finite, range [{lo:.3f}, {hi:.3f}] rad")
+    lines += [f"  WARN {w['code']}: {w['msg']}" for w in res["warnings"]]
+    lines += [f"  FAIL {e['code']}: {e['msg']}" for e in res["errors"]]
+    return "\n".join(lines)

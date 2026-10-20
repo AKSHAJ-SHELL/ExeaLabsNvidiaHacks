@@ -93,7 +93,10 @@ Run it:
 python -m pip install -e ".[dev,sim]"
 python -m arrival sim --episodes 8 --people 2 --save-preview   # contact sheet + mp4 in out/previews/
 python -m arrival validate out/datasets/hero_kitchen_sim
+python scripts/check_dataset_loader.py out/datasets/hero_kitchen_sim [--json]
 ```
+
+`scripts/check_dataset_loader.py` is an offline stand-in for the GR00T loader (no `gr00t` import, details in `docs/ref/DAT-2a.md`). It exits 0 on pass and 1 on any failure, and refuses the placeholder `demo` dataset.
 
 Status as of Oct 17 (scripted expert, friction grasps, physics-checked; 16/16 over these seven families with `--families all --episodes 16 --people 2 --seed 1` on a fresh clone):
 
