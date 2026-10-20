@@ -334,7 +334,7 @@
   </div>
 
   <div class="plates" id="plates" aria-label="Dataset figures">
-    <article class="plate plate--wide tilt"><p class="mono plate__k">Frames written</p><p class="plate__v" data-bind="stats.dataset.frames|int"></p><p class="plate__s">across <b data-bind="stats.dataset.episodes"></b> episodes from <b data-bind="stats.families|len"></b> task families</p></article>
+    <article class="plate tilt"><p class="mono plate__k">Frames written</p><p class="plate__v" data-bind="stats.dataset.frames|int"></p><p class="plate__s">across <b data-bind="stats.dataset.episodes"></b> episodes from <b data-bind="stats.families|len"></b> task families</p></article>
     <article class="plate tilt"><p class="mono plate__k">Control rate</p><p class="plate__v"><span data-bind="stats.dataset.fps"></span><small>Hz</small></p><p class="plate__s">this page plays them back resampled to <span data-bind="stats.out_fps"></span> fps</p></article>
     <article class="plate tilt"><p class="mono plate__k">State and action</p><p class="plate__v"><span data-bind="stats.dataset.state_dim"></span><small class="sep">/</small><span data-bind="stats.dataset.action_dim"></span></p><p class="plate__s">seven joint angles plus gripper opening, per frame</p></article>
     <article class="plate tilt"><p class="mono plate__k">Cameras</p><p class="plate__v"><span data-bind="stats.dataset.cameras|len"></span><small>at <span data-bind="stats.dataset.resolution|res"></span> px</small></p><p class="plate__s">ego_view and wrist, shown live in the stage</p></article>
