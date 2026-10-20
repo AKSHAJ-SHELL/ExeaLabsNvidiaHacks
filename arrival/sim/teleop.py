@@ -327,11 +327,18 @@ class TeleopWindow:
             m = self.mj.mjtMouse
             act = m.mjMOUSE_ROTATE_V if self._drag == "rotate" else m.mjMOUSE_MOVE_V
             h = max(1, self.glfw.get_window_size(w)[1])
-            self.mj.mjv_moveCamera(self.env.model, act, dx / h, dy / h, self.scn, self.cam)
+            self._move_camera(act, dx / h, dy / h)
 
     def _on_scroll(self, w, xoff, yoff):
         if self.env is not None:
-            self.mj.mjv_moveCamera(self.env.model, self.mj.mjtMouse.mjMOUSE_ZOOM, 0.0, -0.05 * yoff, self.scn, self.cam)
+            self._move_camera(self.mj.mjtMouse.mjMOUSE_ZOOM, 0.0, 0.05 * yoff)  # scroll up zooms in
+
+    def _move_camera(self, action, dx: float, dy: float) -> None:
+        """mjv_moveCamera dropped its scene argument in MuJoCo 3.16; pyproject allows >= 3.1, so try both."""
+        try:
+            self.mj.mjv_moveCamera(self.env.model, int(action), dx, dy, self.cam)
+        except TypeError:
+            self.mj.mjv_moveCamera(self.env.model, int(action), dx, dy, self.scn, self.cam)
 
     def attach(self, env) -> TeleopWindow:
         """Show `env` (the first time, from over the robot's shoulder; after that the operator's camera stays)."""

@@ -135,6 +135,11 @@ def test_window_turns_typed_keys_into_frames(twin):
             win._on_key(win.win, win.glfw.KEY_ENTER, 0, win.glfw.PRESS, 0)
             win._on_key(win.win, win.glfw.KEY_ESCAPE, 0, win.glfw.RELEASE, 0)  # releases are not keys
             assert next(frames) == ["w", "A", " ", "\r"]
+            az, dist = win.cam.azimuth, win.cam.distance
+            win._on_scroll(win.win, 0.0, 1.0)  # zoom in
+            win._drag = "rotate"
+            win._on_cursor(win.win, win._last[0] + 40, win._last[1])
+            assert win.cam.distance < dist and win.cam.azimuth != az
             win.sync()
     finally:
         win.shutdown()
