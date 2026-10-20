@@ -10,6 +10,8 @@
 <meta name="theme-color" content="#111418" media="(prefers-color-scheme: dark)">
 <link rel="preload" href="fonts/fraunces-opsz.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/dm-mono-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/dm-mono-500.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/fraunces-opsz-italic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/style.css">
 <script>
   // Set the theme before first paint so there is no flash. Storage may be blocked; the page works without it.
@@ -24,7 +26,16 @@
 <div class="loader" id="loader" role="status" aria-live="polite">
   <div class="loader__sheet">
     <p class="mono loader__top"><span>Exea Labs</span><span>Sheet A-00</span></p>
-    <p class="loader__title">Arrival</p>
+    <!-- Hyperframes intro: the plan sheet draws itself while the data loads. Sources are added below so reduced motion
+         and Save-Data never download the clip; the poster (the settled sheet) stands in for them. -->
+    <div class="loader__plan"><video id="loaderMotion" autoplay muted loop playsinline preload="auto" tabindex="-1" aria-label="Arrival title sheet: a kitchen plan being drawn" ></video></div>
+    <script>(function () {
+      var v = document.getElementById('loaderMotion'); if (!v) return;
+      var rm = matchMedia('(prefers-reduced-motion: reduce)').matches, sd = navigator.connection && navigator.connection.saveData;
+      if (rm || sd) { v.poster = 'motion/intro.jpg'; v.removeAttribute('autoplay'); return; }
+      v.innerHTML = '<source src="motion/intro.webm" type="video/webm"><source src="motion/intro.mp4" type="video/mp4">'; v.load();
+    })();</script>
+    <p class="mono loader__brand">Arrival</p>
     <div class="loader__line" aria-hidden="true"><i id="loaderFill"></i></div>
     <p class="mono loader__msg" id="loaderMsg">Opening survey data 0 / 8</p>
   </div>
@@ -85,6 +96,7 @@
 
     <div class="stage-wrap" id="stageWrap">
       <div class="stage" id="stage">
+        <p class="glnote mono" id="glNote" role="status" hidden>The 3D view paused because the graphics context was lost. Waiting for the browser to give it back.</p>
         <canvas id="gl" role="img" aria-label="Interactive 3D view of the kitchen twin with the recorded robot trajectory and the two walking people. The chapter text and the task list carry the same information."></canvas>
         <div class="dims" id="dims" aria-hidden="true"></div>
 
@@ -111,7 +123,7 @@
         </div>
 
         <!-- readouts + camera feeds (right column) -->
-        <aside class="side" id="side" aria-label="Live readouts">
+        <aside class="side" id="side" aria-label="Live readouts" data-lenis-prevent>
           <dl class="readout mono" id="readout">
             <div><dt>Task</dt><dd id="rdTask">Open the top drawer.</dd></div>
             <div><dt>Time</dt><dd id="rdTime">00.00 / 00.00 s</dd></div>
@@ -124,12 +136,12 @@
             <figure class="feed"><div id="feedEgo" class="feed__view"></div><figcaption class="mono">ego_view</figcaption></figure>
             <figure class="feed"><div id="feedWrist" class="feed__view"></div><figcaption class="mono">wrist</figcaption></figure>
           </div>
-          <aside class="callout" id="callout" aria-live="polite" hidden>
+          <div class="callout" id="callout" role="group" aria-label="Selected part" hidden>
             <button class="callout__x" id="calloutX" type="button" aria-label="Close details">&times;</button>
             <p class="mono callout__kind" id="coKind"></p>
             <h3 class="callout__name" id="coName"></h3>
             <dl class="callout__rows mono" id="coRows"></dl>
-          </aside>
+          </div>
         </aside>
 
         <!-- chapter notes: solid paper cards, one on at a time -->
@@ -197,7 +209,7 @@
           </div>
         </div>
 
-        <div class="index" id="indexPanel" hidden>
+        <div class="index" id="indexPanel" hidden data-lenis-prevent>
           <p class="mono index__h">Plan index <span>click to select</span></p>
           <div class="index__cols" id="indexCols"></div>
         </div>
@@ -220,6 +232,18 @@
     <h2 class="chapter__title" id="dsTitle">What the robot is trained on</h2>
     <p class="chapter__lead">Each run is written in the LeRobot v2.1 layout that NVIDIA GR00T reads: eight-number state and action per frame, plus the ego and wrist cameras. Six steps get it there.</p>
   </header>
+
+  <figure class="reel" id="reel">
+    <div class="reel__view">
+      <video id="pipelineClip" muted playsinline preload="none" aria-label="Animated pipeline: scan, twin, simulate, dataset" aria-describedby="reelCap"></video>
+    </div>
+    <figcaption class="reel__cap mono" id="reelCap">
+      <span class="reel__fig">Fig. 04a</span>
+      <span class="reel__t">Scan, twin, simulate, dataset in 12 s</span>
+      <span class="reel__n">Drawn animation of the pipeline, not recorded data</span>
+      <button class="chip" id="reelBtn" type="button">Play</button>
+    </figcaption>
+  </figure>
 
   <div class="sticky">
     <ol class="steps" id="steps">
@@ -249,7 +273,7 @@
       </li>
     </ol>
 
-    <div class="spec" id="spec" aria-live="polite">
+    <div class="spec" id="spec">
       <div class="spec__sheet">
         <p class="mono spec__h"><span id="specStep">Step 1</span><span id="specFile">scan</span></p>
         <div class="spec__panels">
@@ -308,11 +332,10 @@
   </div>
 
   <div class="plates" id="plates" aria-label="Dataset figures">
-    <article class="plate plate--wide tilt"><p class="mono plate__k">Frames written</p><p class="plate__v" data-bind="stats.dataset.frames|int"></p><p class="plate__s">across <b data-bind="stats.dataset.episodes"></b> episodes, one per task family</p></article>
+    <article class="plate plate--wide tilt"><p class="mono plate__k">Frames written</p><p class="plate__v" data-bind="stats.dataset.frames|int"></p><p class="plate__s">across <b data-bind="stats.dataset.episodes"></b> episodes from <b data-bind="stats.families|len"></b> task families</p></article>
     <article class="plate tilt"><p class="mono plate__k">Control rate</p><p class="plate__v"><span data-bind="stats.dataset.fps"></span><small>Hz</small></p><p class="plate__s">this page plays them back resampled to <span data-bind="stats.out_fps"></span> fps</p></article>
     <article class="plate tilt"><p class="mono plate__k">State and action</p><p class="plate__v"><span data-bind="stats.dataset.state_dim"></span><small class="sep">/</small><span data-bind="stats.dataset.action_dim"></span></p><p class="plate__s">seven joint angles plus gripper opening, per frame</p></article>
     <article class="plate tilt"><p class="mono plate__k">Cameras</p><p class="plate__v"><span data-bind="stats.dataset.cameras|len"></span><small>at <span data-bind="stats.dataset.resolution|res"></span> px</small></p><p class="plate__s">ego_view and wrist, shown live in the stage</p></article>
-    <article class="plate plate--wide tilt plate--check"><p class="mono plate__k">Loader check</p><p class="plate__v plate__v--ok"><span data-bind="stats.dataset.loader_check.ok|okword"></span><small><span data-bind="stats.dataset.loader_check.errors|len"></span> errors, <span data-bind="stats.dataset.loader_check.warnings|len"></span> warnings</small></p><p class="plate__s" id="warnText"></p></article>
   </div>
 </section>
 
@@ -321,11 +344,12 @@
   <header class="chapter__head">
     <p class="mono chapter__tag">05 &middot; Evaluate <span>Sheet A-05</span></p>
     <h2 class="chapter__title" id="evTitle">What worked, and how little that proves yet</h2>
-    <p class="chapter__lead">The evaluation harness ran <b data-bind="stats.eval.episodes_per_family"></b> episode per task family with the <b data-bind="stats.eval.policy"></b> expert, with <b data-bind="stats.eval.people"></b> people walking. Every episode succeeded. One episode per family is a demonstration that the pipeline runs, not a success rate.</p>
+    <p class="chapter__lead" id="evLead">The evaluation harness ran a small run with the scripted expert, with people walking. The figures below are read from the export.</p>
   </header>
 
   <figure class="eval" id="eval">
-    <figcaption class="mono eval__cap">Success per family, with the 95% Wilson interval for what one trial can show <span>0 &nbsp;&nbsp;&nbsp;&nbsp;0.5&nbsp;&nbsp;&nbsp;&nbsp; 1</span></figcaption>
+    <figcaption class="mono eval__cap">Success per family, with the 95% Wilson interval for what these trials can show</figcaption>
+    <div class="erow eval__scale mono" aria-hidden="true"><span></span><span class="scale"><i>0</i><i>0.5</i><i>1</i></span><span></span></div>
     <div class="eval__rows" id="evalRows"></div>
     <div class="eval__total" id="evalTotal"></div>
   </figure>
@@ -348,7 +372,7 @@
 <section class="close" id="close" data-chapter="close" aria-labelledby="clTitle">
   <p class="mono chapter__tag">06 &middot; Close <span>Sheet A-06</span></p>
   <h2 class="close__title" id="clTitle">One scan in. A dataset for that room out.</h2>
-  <p class="close__lead">The twin, the physics and the dataset on this page are real and run on a laptop. A GR00T fine-tune and a scan of a real kitchen are what turn this from a working pipeline into a result.</p>
+  <p class="close__lead">The twin, the physics and the dataset on this page are real, produced by the pipeline in this repository. A GR00T fine-tune and a scan of a real kitchen are what turn this from a working pipeline into a result.</p>
   <div class="close__actions">
     <button class="btn" id="toTop" type="button">Back to the plan</button>
     <p class="mono close__run">Run it: <code>make site</code> then open <code>localhost:8765</code></p>

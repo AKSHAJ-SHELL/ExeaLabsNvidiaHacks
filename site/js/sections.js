@@ -46,15 +46,18 @@ export function renderEvaluate(stats) {
       <div class="erow__fig"><strong>${e.successes} / ${e.episodes}</strong><small>closest person ${e.min_human_distance_m.toFixed(2)} m · ${e.human_contacts} contacts${arm}</small></div>`;
     rows.appendChild(row);
   }
-  const t = ev.totals;
-  total.innerHTML = `<div class="erow__name">All six<small>pooled, still only ${t.episodes} runs</small></div>${ci(t.wilson_95[0], t.wilson_95[1], t.success_rate)}
+  const t = ev.totals, per = ev.episodes_per_family;
+  // the lead is built from the data, so "every episode succeeded" and "one per family" can never drift from stats.json
+  const lead = document.getElementById('evLead');
+  if (lead) lead.innerHTML = `The evaluation harness ran <b>${per}</b> ${per === 1 ? 'episode' : 'episodes'} per task family with the <b>${ev.policy}</b> expert, with <b>${ev.people}</b> people walking. ${t.successes === t.episodes ? 'Every episode succeeded.' : `${t.successes} of ${t.episodes} episodes succeeded.`} ${per === 1 ? 'One episode per family is a demonstration that the pipeline runs, not a success rate.' : `${per} episodes per family still give wide intervals.`}`;
+  total.innerHTML = `<div class="erow__name">All families<small>pooled, still only ${t.episodes} runs</small></div>${ci(t.wilson_95[0], t.wilson_95[1], t.success_rate)}
     <div class="erow__fig"><strong>${t.successes} / ${t.episodes}</strong><small>${t.human_contacts} human contacts · ${t.arm_contact_episodes} runs touched furniture</small></div>`;
 
   const minD = Math.min(...Object.values(ev.families).map((e) => e.min_human_distance_m));
   const maxArm = Math.max(...Object.values(ev.families).map((e) => e.arm_contact_max_depth_m));
   const f1 = ev.families[FAMILIES[0]];
   document.getElementById('caveats').innerHTML = [
-    `<b>One run per task.</b> One success out of one has a 95% Wilson interval from ${f1.wilson_95[0].toFixed(2)} to ${f1.wilson_95[1].toFixed(2)}. Pooled, ${t.successes} of ${t.episodes} runs from ${t.wilson_95[0].toFixed(2)} to ${t.wilson_95[1].toFixed(2)}. It shows the pipeline runs, not that it is reliable.`,
+    `<b>${per === 1 ? 'One run per task.' : `${per} runs per task.`}</b> ${f1.successes} of ${f1.episodes} succeeding has a 95% Wilson interval from ${f1.wilson_95[0].toFixed(2)} to ${f1.wilson_95[1].toFixed(2)}. Pooled, ${t.successes} of ${t.episodes} runs from ${t.wilson_95[0].toFixed(2)} to ${t.wilson_95[1].toFixed(2)}. It shows the pipeline runs, not that it is reliable.`,
     `<b>The policy is a scripted expert.</b> The harness ran <code>policy: ${ev.policy}</code>, not a learned model. Nothing here measures GR00T.`,
     `<b>Not held out.</b> <code>holdout: ${ev.holdout}</code>, with ${ev.people} people walking in the room.`,
     `<b>One room, authored not scanned.</b> The twin is the sample kitchen. Safety figures are for this room only.`,
@@ -70,13 +73,14 @@ export function renderEvaluate(stats) {
   ].map((s) => `<li>${s}</li>`).join('');
 
   document.getElementById('measured').innerHTML = `
-    <div><p class="mono">Local CPU cost</p><p>$${c.dollars.local_cpu.usd}</p><p>Measured, ${rep.attempts} attempts, no cloud used.</p></div>
-    <div><p class="mono">Throughput</p><p>${fmt.n(rep.demos_per_hour, 1)} <small class="mono">demos/h</small></p><p>${rep.successes} demos in ${rep.seconds} s on a laptop CPU.</p></div>
-    <div><p class="mono">Dropped</p><p>${rep.dropped} of ${rep.attempts}</p><p>Every attempt passed the physics success check.</p></div>`;
+    <div><p class="mono">Local CPU cost</p><p>$${c.dollars.local_cpu.usd}</p><p>Measured over ${rep.attempts} attempts on the local CPU. Other cost lines are not measured.</p></div>
+    <div><p class="mono">Throughput</p><p>${fmt.n(rep.demos_per_hour, 1)} <small class="mono">demos/h</small></p><p>${rep.successes} demos in ${rep.seconds} s on the local CPU.</p></div>
+    <div><p class="mono">Dropped</p><p>${rep.dropped} of ${rep.attempts}</p><p>${rep.dropped === 0 && rep.successes === rep.attempts ? 'Every attempt passed the physics success check.' : `${rep.successes} of ${rep.attempts} attempts passed the physics success check.`}</p></div>`;
 
-  const warns = stats.dataset.loader_check.warnings, by = {};
-  for (const w of warns) (by[w.code] ||= []).push(w.msg);
-  document.getElementById('warnText').textContent = Object.entries(by).map(([k, v]) => `${k} x${v.length}: stats.json carries min, max, mean and std but no q01 and q99 quantiles.`).join(' ') || 'No warnings.';
+  // print the loader's own warnings, code and message, rather than an explanation written for one particular code
+  const warns = stats.dataset.loader_check.warnings;
+  const warnEl = document.getElementById('warnText');
+  if (warnEl) warnEl.textContent = warns.map((w) => `${w.code}: ${w.msg}`).join(' ') || 'No warnings.';
 }
 
 export function renderFallback(stats) {
