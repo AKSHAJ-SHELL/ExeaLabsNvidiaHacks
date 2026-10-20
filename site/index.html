@@ -37,7 +37,7 @@
     })();</script>
     <p class="mono loader__brand">Arrival</p>
     <div class="loader__line" aria-hidden="true"><i id="loaderFill"></i></div>
-    <p class="mono loader__msg" id="loaderMsg">Opening survey data 0 / 8</p>
+    <p class="mono loader__msg" id="loaderMsg">Opening survey data 0 / 9</p>
   </div>
 </div>
 
@@ -368,6 +368,17 @@
   </div>
 
   <div class="measured" id="measured"></div>
+
+  <!-- revision schedule: filled in by js/todo.js from data/todo.json -->
+  <section class="sched" id="schedWrap" aria-labelledby="schedTitle" hidden>
+    <p class="mono sched__tag">Revision schedule <span id="schedAsOf"></span></p>
+    <h3 class="sched__h" id="schedTitle">What is built, and what is left</h3>
+    <p class="sched__lead">Three things are not done. GR00T has not been fine-tuned on this dataset, so no policy has learned from it. No real kitchen has been scanned and run through the pipeline; the room on this page is authored. The hosted demo that takes many rooms is not built. The list below is every other open task, grouped by what it needs. A diamond is filled only when the pull request is merged on main.</p>
+    <div class="sched__sum" id="schedSum"></div>
+    <div class="chips sched__chips" id="schedChips" role="group" aria-label="Filter the schedule by status"></div>
+    <p class="mono sched__shown" id="schedShown" role="status" aria-live="polite"></p>
+    <div class="sched__groups" id="schedGroups"></div>
+  </section>
 </section>
 
 <!-- ============ CLOSE ============ -->
