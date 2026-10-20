@@ -1,0 +1,12 @@
+{
+  "authored": true,
+  "note": "AUTHORED, NOT TAPE-MEASURED: values derived from the authored scans/hero_kitchen/scan.json to exercise the harness. Not evidence of scan accuracy.",
+  "counter_length_m": 3.25,
+  "counter_height_m": 0.92,
+  "sink_width_m": 0.6,
+  "stove_width_m": 0.7,
+  "fridge_width_m": 0.75,
+  "tolerance_m": 0.05,
+  "measured_by": "authored, not tape-measured",
+  "date": "2026-10-19"
+}

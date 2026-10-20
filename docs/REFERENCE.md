@@ -92,6 +92,7 @@ python scripts/intake_scan.py kitchen_01 --roomplan roomplan.json --photos a.jpg
 ```
 
 `arrival.scan.intake.validate_scan_dir(path)` lists what is still missing. Details in `docs/ref/CAP-3a.md`.
+To check the twin against tape measurements, put a `measurements.json` beside a room's `scan.json` (format and extraction rules in `docs/ref/TWN-1a.md`) and run `python scripts/scan_accuracy.py [scans/<room> ...]`: it prints the signed error per dimension and exits 1 when any is over `tolerance_m` (default 0.05 m); rooms without the file are skipped.
 
 ## Simulation (MuJoCo)
 
