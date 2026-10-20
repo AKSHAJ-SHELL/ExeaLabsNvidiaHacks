@@ -158,6 +158,17 @@ python -m arrival work --once --episodes 2
 
 Measured on a laptop CPU: a `scan.json` upload with `--episodes 2` took 5.9 s end to end, 2/2 episodes, 322 frames, zip 77,624 bytes. One worker runs at a time; there is no lock against two workers claiming the same job, no automatic retry of failed jobs, and nothing runs on Nebius (OPS-2).
 
+### Smoke test for a running server
+
+`scripts/smoke_hosted.py URL` checks a running web server, local or hosted, with the standard library only:
+
+```bash
+python scripts/smoke_hosted.py http://127.0.0.1:8000
+python scripts/smoke_hosted.py http://127.0.0.1:8000 --wait 600 --json   # also wait for `work` to finish the job
+```
+
+It needs the index page to load; the hero `roomplan.json` uploaded as `scan` to be queued (202) with a readable status; uploads without a `scan` field, with a non-multipart body or with an empty file to be refused with a 4xx; and crafted job and download paths (`../`, encoded `%2F`) to give 400, 403 or 404 without file contents. `/healthz` is reported but only required with `--require-healthz`, since the server does not have one yet (C2). With `--wait N` it polls the job until the worker marks it `done` and then downloads `dataset.zip`. Exit 0 when every required check passes, 1 otherwise. The good upload is a real job (`smoke_<unix time>.json`), so run it only against a server whose queue you may write to. Checked against `serve` plus `work` on a laptop: every check passed and the job's 637 KB `dataset.zip` downloaded.
+
 ## Tavily research
 
 `python -m arrival research` looks up appliance specs (door and handle mechanisms, clearances, safety guidance) and caches the answers in `arrival/models/tavily_cache.json`, so repeat runs need no network. With no `TAVILY_API_KEY`, or when the call fails, it serves the cache and then a small built-in knowledge table; the source of each answer (`tavily_api`, `cache` or `fallback`) is printed.
