@@ -7,6 +7,8 @@ the whole API. This module must not import the compiler or generator.
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -53,12 +55,32 @@ def create_job(jobs_root: Path, filename: str, data: bytes | None = None,
         "filename": Path(filename or "upload.bin").name,
         "bytes": length,
     }
-    (job_dir / "status.json").write_text(json.dumps(status, indent=2) + "\n")
+    return write_status(job_dir, status)
+
+
+def write_status(job_dir: Path, status: dict) -> dict:
+    """Replace ``<job_dir>/status.json`` in one step, so the web page and the capture app never read a half-written
+    file while the worker updates it. On Windows the replace fails while a reader has the file open; retry briefly."""
+    path = Path(job_dir) / "status.json"
+    tmp = path.with_name(f".status.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(status, indent=2) + "\n", encoding="utf-8")
+    for _ in range(100):
+        try:
+            os.replace(tmp, path)
+            return status
+        except PermissionError:
+            time.sleep(0.005)
+    os.replace(tmp, path)
     return status
 
 
 def read_job(jobs_root: Path, job_id: str) -> dict | None:
     path = Path(jobs_root) / job_id / "status.json"
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text())
+    for _ in range(100):
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except PermissionError:  # Windows: write_status is swapping the file in right now
+            time.sleep(0.005)
+    return json.loads(path.read_text(encoding="utf-8"))
