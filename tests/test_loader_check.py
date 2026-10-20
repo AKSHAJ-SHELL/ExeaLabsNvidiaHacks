@@ -119,3 +119,77 @@ def test_cli_exit_codes(sim_ds, copy, capsys):
     edit_json(copy / "meta" / "info.json", lambda d: d.update(fps=30))
     assert check_main([str(copy)]) == 1
     assert "FAIL" in capsys.readouterr().out
+
+
+# ---- the 11-float schema: base x, y, yaw at state/action[8:11] (MAN-3, L13) ----
+
+@pytest.fixture(scope="module")
+def mobile_ds(tmp_path_factory):
+    twin = compile_twin(load_room("hero_kitchen", "scans"))
+    res = collect(twin, ["counter_to_counter"], 1, tmp_path_factory.mktemp("mobile"), people=0, res=64,
+                  base="mobile", log=lambda *_: None)
+    assert res["report_data"]["successes"] == 1
+    return res["dataset"]
+
+
+@pytest.fixture
+def mcopy(mobile_ds, tmp_path):
+    dst = tmp_path / "mds"
+    shutil.copytree(mobile_ds, dst)
+    return dst
+
+
+def _set_col(path: Path, col: str, fn):
+    t = pq.read_table(path)
+    x = np.asarray(t.column(col).to_pylist(), dtype=np.float32)
+    fn(x)
+    pq.write_table(t.set_column(t.schema.get_field_index(col), t.schema.field(col),
+                                pa.array(list(x), type=pa.list_(pa.float32()))), path)
+
+
+def test_fixed_base_dataset_is_11_wide_and_the_parked_base_is_a_warning_not_a_defect(sim_ds):
+    res = check_loader(sim_ds)
+    assert res["ok"], res["errors"]
+    assert res["info"]["state_dim"] == res["info"]["action_dim"] == 11 and res["info"]["base"] == "fixed"
+    warn = {w["code"] for w in res["warnings"]}
+    assert "fixed_base_constant" in warn and "constant_dim" not in warn
+    assert "fixed base in state/action[8:11]" in format_report(sim_ds, res)
+
+
+def test_mobile_dataset_passes_and_its_base_columns_move(mobile_ds):
+    res = check_loader(mobile_ds)
+    assert res["ok"], res["errors"]
+    assert res["info"]["base"] == "mobile"
+    assert "fixed_base_constant" not in {w["code"] for w in res["warnings"]}
+    std = np.asarray(res["stats"]["action"]["std"])
+    assert std[8:10].max() > 0.05  # it drove metres
+
+
+def test_a_base_that_moves_on_a_fixed_embodiment_is_an_error(mcopy):
+    edit_json(mcopy / "meta" / "embodiment.json", lambda d: d.update(base_actuated=False))
+    assert "base_fixed_moves" in codes(check_loader(mcopy))
+
+
+def test_a_teleporting_base_is_an_error(mcopy):
+    p = mcopy / "data" / "chunk-000" / "episode_000000.parquet"
+
+    def jump(x):
+        x[30:, 8] += 1.0  # one metre in a single step
+
+    _set_col(p, "observation.state", jump)
+    assert "base_speed" in codes(check_loader(mcopy))
+
+
+def test_base_slice_must_be_8_to_11(mcopy):
+    def shrink(d):
+        d["action"]["base"]["end"] = 10
+    edit_json(mcopy / "meta" / "modality.json", shrink)
+    assert "base_slice" in codes(check_loader(mcopy))
+
+
+def test_embodiment_with_a_base_needs_the_slice(mcopy):
+    def drop(d):
+        d["state"].pop("base")
+        d["action"].pop("base")
+    edit_json(mcopy / "meta" / "modality.json", drop)
+    assert "base_slice" in codes(check_loader(mcopy))  # dof_base 3 in embodiment.json, no base slice in modality.json

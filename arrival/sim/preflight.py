@@ -27,6 +27,8 @@ FRIDGE_BASE_ALONG = 0.1  # base centre past the door's free edge, along the fron
 FRIDGE_BASE_OUT = 0.75  # base centre out from the fridge front: nearer, the handle's arc folds the elbow onto its stop
 FRIDGE_BASE_YAW = 0.0  # degrees the base turns toward the hinge from facing the front
 PICK_PLACE = ("counter_to_sink", "counter_to_counter")
+MOBILE_STEP = 0.3  # a mobile base parks this far along the source run toward the target, as counter_to_sink parks
+# between the object and the sink; it then drives to `drive_spot` once the object is held
 
 
 def front(f: dict) -> np.ndarray:
@@ -62,15 +64,33 @@ def place_point(twin: dict, task: dict) -> np.ndarray:
     return np.array([task["target_x"], task.get("target_y", tgt["position"][1]), tops + hh + 0.012])
 
 
-def base_pose(twin: dict, task: dict, obj_xy=None) -> tuple[tuple[float, float, float], float, dict]:
+def mobile_drive(task: dict, mobile: bool) -> bool:
+    """True when the base drives during this task: only counter_to_counter does, and only on a mobile base."""
+    return mobile and task["family"] == "counter_to_counter"
+
+
+def drive_spot(twin: dict, task: dict) -> tuple[float, float, float]:
+    """Where a mobile base stands to set the object down: in front of the place point, the same 0.28 m out from the
+    target counter's front that the parked pose keeps from the source's. World xy and the stand height."""
+    tgt = next(f for f in twin["fixtures"] if f["id"] == task["target"])
+    return park(tgt, to_local(place_point(twin, task)[:2], tgt)[0], 0.28)
+
+
+def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False
+              ) -> tuple[tuple[float, float, float], float, dict]:
     """(base position, base yaw in degrees, anchor fixture): in front of the fixture the task works at, facing it,
-    on any wall. `obj_xy` is the object's xy at the start (the task's `start` when omitted)."""
+    on any wall. `obj_xy` is the object's xy at the start (the task's `start` when omitted). `mobile` moves the
+    counter_to_counter stand spot MOBILE_STEP toward the target instead of midway: the base drives the rest."""
     fx = {f["id"]: f for f in twin["fixtures"]}
     fam, fixtures = task["family"], twin["fixtures"]
     if obj_xy is None and "object_id" in task:
         obj_xy = task["start"][:2]
     yaw_off = 0.0
-    if fam in PICK_PLACE:
+    if mobile_drive(task, mobile):
+        src = fx[task["source"]]
+        ox, tx = to_local(obj_xy[:2], src)[0], to_local(place_point(twin, task)[:2], src)[0]
+        base = park(src, ox + MOBILE_STEP * float(np.sign(tx - ox)), 0.28)
+    elif fam in PICK_PLACE:
         src = fx[task["source"]]
         mid = (np.array(obj_xy[:2]) + place_point(twin, task)[:2]) / 2
         base = park(src, to_local(mid, src)[0], 0.28)
@@ -108,12 +128,15 @@ def _footprint_distance(xy, f: dict) -> float:
     return math.hypot(max(abs(lx) - f["size"][0] / 2, 0.0), max(abs(ly) - f["size"][1] / 2, 0.0))
 
 
-def reach_points(twin: dict, task: dict, obj_xy=None) -> list[tuple[str, np.ndarray]]:
+def reach_points(twin: dict, task: dict, obj_xy=None, mobile: bool = False) -> list[tuple[str, np.ndarray]]:
     """The horizontal points the hand must reach for the task: the object, where it goes, the wipe strokes.
-    Drawer, door and fridge tasks have none here: their stand spot is derived from the part's own geometry."""
+    Drawer, door and fridge tasks have none here: their stand spot is derived from the part's own geometry.
+    On a mobile base the place point is measured from the drive spot, not from the parked pose (see `check_task`)."""
     fam = task["family"]
     if obj_xy is None and "object_id" in task:
         obj_xy = task["start"][:2]
+    if mobile_drive(task, mobile):
+        return [("the object", np.array(obj_xy[:2]))]
     if fam in PICK_PLACE:
         return [("the object", np.array(obj_xy[:2])), ("the place point", place_point(twin, task)[:2])]
     if fam == "put_in_drawer":
@@ -128,30 +151,46 @@ def reach_points(twin: dict, task: dict, obj_xy=None) -> list[tuple[str, np.ndar
     return []
 
 
-def check_task(twin: dict, task: dict, obj_xy=None) -> str | None:
-    """None when the base can stand where the task needs it and reach what it needs; otherwise one sentence saying
-    why not. `task` is a pool entry (fixture, or object_id, source and start) or a finished task."""
-    try:
-        base, _, anchor = base_pose(twin, task, obj_xy)
-    except (KeyError, StopIteration, IndexError, TypeError, ValueError) as e:  # a task naming a fixture the twin lacks
-        return f"no stand spot: the task does not match the twin ({type(e).__name__}: {e})"
-    b = np.array(base[:2])
+def _stand_problem(twin: dict, b, anchor: dict, what: str = "base stand spot") -> str | None:
     walls = twin.get("walls") or []
     if walls:
         xs = [p[0] for w in walls for p in (w["start"], w["end"])]
         ys = [p[1] for w in walls for p in (w["start"], w["end"])]
         if not (min(xs) < b[0] < max(xs) and min(ys) < b[1] < max(ys)):
-            return f"base stand spot ({b[0]:.2f}, {b[1]:.2f}) at {anchor['id']} is outside the room"
+            return f"{what} ({b[0]:.2f}, {b[1]:.2f}) at {anchor['id']} is outside the room"
         for w in walls:
             d = _segment_distance(b, w["start"], w["end"]) - w.get("thickness", 0.0) / 2
             if d < WALL_CLEAR:
-                return (f"base stand spot at {anchor['id']} is {max(d, 0.0):.2f} m from {w.get('id', 'a wall')}, "
-                        f"needs {WALL_CLEAR:.2f} m")
+                return f"{what} at {anchor['id']} is {max(d, 0.0):.2f} m from {w.get('id', 'a wall')}, needs {WALL_CLEAR:.2f} m"
     for f in twin["fixtures"]:
         d = _footprint_distance(b, f)
         if d < BASE_CLEAR:
-            return f"base stand spot at {anchor['id']} is {d:.2f} m from {f['id']}, needs {BASE_CLEAR:.2f} m"
-    for what, p in reach_points(twin, task, obj_xy):
+            return f"{what} at {anchor['id']} is {d:.2f} m from {f['id']}, needs {BASE_CLEAR:.2f} m"
+    return None
+
+
+def check_task(twin: dict, task: dict, obj_xy=None, mobile: bool = False) -> str | None:
+    """None when the base can stand where the task needs it and reach what it needs; otherwise one sentence saying
+    why not. `task` is a pool entry (fixture, or object_id, source and start) or a finished task. On a mobile base
+    a counter_to_counter task is checked at both stand spots and along the straight drive between them."""
+    try:
+        base, _, anchor = base_pose(twin, task, obj_xy, mobile)
+    except (KeyError, StopIteration, IndexError, TypeError, ValueError) as e:  # a task naming a fixture the twin lacks
+        return f"no stand spot: the task does not match the twin ({type(e).__name__}: {e})"
+    b = np.array(base[:2])
+    why = _stand_problem(twin, b, anchor)
+    if why:
+        return why
+    if mobile_drive(task, mobile):
+        end = np.array(drive_spot(twin, task)[:2])
+        for k in range(1, 9):  # the drive is one straight line: its whole length must be clear, not just its ends
+            why = _stand_problem(twin, b + (end - b) * k / 8, anchor, "base drive path")
+            if why:
+                return why
+        d = float(np.linalg.norm(place_point(twin, task)[:2] - end))
+        if d > REACH:
+            return f"the place point is {d:.2f} m from the drive spot at {anchor['id']}, beyond the {REACH:.3f} m reach"
+    for what, p in reach_points(twin, task, obj_xy, mobile):
         d = float(np.linalg.norm(np.asarray(p) - b))
         if d > REACH:
             return f"{what} is {d:.2f} m from the base at {anchor['id']}, beyond the {REACH:.3f} m reach"

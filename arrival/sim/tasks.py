@@ -69,11 +69,13 @@ def _start_variants(twin: dict, v: dict) -> list:
 
 def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: int = 0, holdout: bool = False,
                split: str = "train", use_generated_instructions: bool = False,
-               log=print, preflight: dict | None = None) -> list[dict]:
+               mobile: bool = False, log=print, preflight: dict | None = None) -> list[dict]:
     """n task variations cycling through the requested families. Every candidate variation first passes the
     geometric pre-flight (`arrival.sim.preflight.check_task`: stand spot inside the room and clear of walls and
     fixtures, pick and place points within the arm's horizontal reach); a rejected one is logged with its reason and
-    never becomes a task, and a family left with none is skipped. When `preflight` is a dict it is filled with
+    never becomes a task, and a family left with none is skipped. mobile=True means the base drives (MAN-3): a
+    counter_to_counter target may then be any counter of the same run, not only one within 1 m of the object, and the
+    pre-flight checks the drive's stand spot and path. When `preflight` is a dict it is filled with
     {"rejected": count, "families": [skipped families], "reasons": [{"family", "reason"}, ...]}.
     holdout=False draws the training set: wording HOLDOUT_WORDING (families with 4 templates) and HOLDOUT_OFFSET
     are excluded. holdout=True draws only those; families with 3 templates keep all 3 either way.
@@ -105,7 +107,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
                             continue  # the target must continue the source run
                         side = 1 if to_local(c["position"], src)[0] > ox else -1
                         tx, ty = to_world((-side * (c["size"][0] / 2 - 0.12), 0.0), c)  # the target's near end
-                        if abs(to_local((tx, ty), src)[0] - ox) < 1.0:  # base sits between source and target
+                        if mobile or abs(to_local((tx, ty), src)[0] - ox) < 1.0:  # a fixed base sits between source and target
                             tgt_xy.append((c, tx, ty))
                 for tgt, tx, ty in tgt_xy:
                     pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"],
@@ -137,7 +139,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
         for v in pool:
             why = None
             for xy in _start_variants(twin, v):  # every start pose the offsets can give must be reachable
-                why = why or check_task(twin, {"family": fam, **v}, xy)
+                why = why or check_task(twin, {"family": fam, **v}, xy, mobile)
             if why is None:
                 kept.append(v)
             else:
@@ -145,7 +147,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
                 pre["reasons"].append({"family": fam, "reason": why})
                 log(f"[sim] family {fam}: variation {v.get('object_id') or v['fixture']} rejected by pre-flight: {why}")
         if not kept:
-            log(f"[sim] family {fam}: no reachable variation in this room for a fixed-base arm; skipped")
+            log(f"[sim] family {fam}: no reachable variation in this room for a {'mobile' if mobile else 'fixed'}-base arm; skipped")
             pre["families"].append(fam)
             continue
         pools[fam] = kept

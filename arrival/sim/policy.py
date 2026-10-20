@@ -17,7 +17,10 @@ from pathlib import Path
 import numpy as np
 
 from arrival.sim import ik
-from arrival.sim.robot import FINGER_OPEN, HOME
+from arrival.sim.robot import BASE_SPEED, BASE_TURN, FINGER_OPEN, HOME
+
+MINJERK_PEAK = 1.875  # peak over mean speed of a min-jerk move: sizes a base drive so it never exceeds BASE_SPEED
+STOP_CLEAR = 0.7  # the base waits while a person is this close ahead of it (0.12 pedestal + 0.17 torso + margin)
 
 
 class Policy:
@@ -61,8 +64,11 @@ class ScriptedExpert(Policy):
         return yaw + np.pi if np.cos(yaw - np.arctan2(x[1], x[0])) < -0.5 else yaw
 
     def _waypoints(self, env, task: dict) -> list[tuple]:
-        """(pos, R, gripper, steps[, via]) list."""
+        """(pos, R, gripper, steps[, via[, base]]) list. base is a room-frame (x, y, yaw) the base stands at for
+        that waypoint (None: where it already is); pos None keeps the arm's joints while the base drives."""
         fam, o, c = task["family"], FINGER_OPEN, 0.0
+        if fam == "counter_to_counter" and env.drive_to is not None:
+            return self._drive_and_place(env, task, o, c)
         if fam in ("counter_to_sink", "counter_to_counter"):
             p = env.body_pos(task["object_id"])
             gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
@@ -252,7 +258,37 @@ class ScriptedExpert(Policy):
             return out
         raise ValueError(f"unknown family {fam}")
 
+    def _drive_and_place(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """counter_to_counter on a mobile base: grasp in front of the object, tuck the object in front of the base
+        and above the counter top, drive along the counter front to the target, then place as counter_to_sink does."""
+        from arrival.sim.collect import _front
+
+        p = env.body_pos(task["object_id"])
+        gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
+        tgt = env.place_point(task)
+        g = env.grasp(task["object_id"])
+        yaw = env.run_yaw()
+        if g is not None:  # rim or handle grasp: same xy offset at the set-down, eef kept at its height over the body
+            p = p + np.array([g["off"][0], g["off"][1], 0.0])
+            tgt = tgt + np.array([g["off"][0], g["off"][1], g["z"] - env.body_pos(task["object_id"])[2]])
+            gz, yaw = g["z"], g["yaw"]
+        R = ik.down(self._grip_yaw(env, yaw))
+        s = self.seg_steps
+        here, there = env.base_pose(), env.drive_to
+        n = _front(env.fx[task["source"]])[:2]
+        carry = (here[0] - 0.25 * n[0], here[1] - 0.25 * n[1], 1.1)  # just off the counter front, above its top
+        lift = [((p[0], p[1], gz + 0.22), R, c, s)]
+        if g is not None:  # a wide object tips in the pads as it leaves the counter: lift it in short steps
+            lift = [((p[0], p[1], gz + dz), R, c, s, dz < 0.22) for dz in (0.03, 0.08, 0.15, 0.22)]
+        return [((p[0], p[1], gz + 0.18), R, o, s, False, here), ((p[0], p[1], gz + 0.02), R, o, s),
+                ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps)] + lift + [
+                (carry, R, c, s),
+                (None, None, c, s, False, there),
+                ((tgt[0], tgt[1], gz + 0.22), R, c, 2 * s), ((tgt[0], tgt[1], tgt[2]), R, c, s),
+                ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps), ((tgt[0], tgt[1], tgt[2] + 0.2), R, o, s)]
+
     def reset(self, env, task: dict) -> None:
+        self.env, self.last, self.held = env, None, 0
         if task["family"] in ("close_drawer", "close_door"):
             self.open_at = float(env.data.joint(task["joint"]).qpos[0])  # how far the part starts open
         wps = self._waypoints(env, task)
@@ -264,25 +300,39 @@ class ScriptedExpert(Policy):
         if task["family"] not in ("open_door", "close_door"):
             # flipped, the cabinet-door grasp lands on the other wrist branch (joint 5 negative): link5 or the elbow
             # then meets the solid panel (#47) and the bar slips out of the pads at 26 to 36 deg
-            plans.append(self._plan(env, [(p, R @ flip, *rest) for p, R, *rest in wps]))
+            plans.append(self._plan(env, [(p, None if R is None else R @ flip, *rest) for p, R, *rest in wps]))
         best_err = min(err for _, err, _ in plans)
         self.plan, self.ik_error, _ = min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])
         self.t = 0
 
     @staticmethod
     def _plan(env, waypoints) -> tuple[list[np.ndarray], float, float]:
-        """Joint-space plan for the waypoints: (targets per step, worst IK position error, peak |joint 7|)."""
+        """Joint-space plan for the waypoints: (targets per step, worst IK position error, peak |joint 7|). Every
+        target is 11 wide: 7 arm joints, the gripper, then the base pose (the parked one unless a waypoint drives)."""
+        from arrival.sim.collect import FPS
+
         q = np.array(HOME)
         plan: list[np.ndarray] = []
-        prev = np.concatenate([q, [FINGER_OPEN]])
+        base = env.base_pose()
+        prev = np.concatenate([q, [FINGER_OPEN], base])
         ik_error, q7 = 0.0, abs(q[6])
         chain: list[tuple[np.ndarray, int]] = []
-        for pos, R, g, steps, *via in waypoints:
-            q, err = ik.solve(env.model, env.data, pos, R, q, env.qadr, env.dofadr)
-            ik_error, q7 = max(ik_error, err), max(q7, abs(float(q[6])))
-            nxt = np.concatenate([q, [g]])
+        for pos, R, g, steps, *rest in waypoints:
+            via = bool(rest[0]) if rest else False
+            nxt_base = np.asarray(rest[1], dtype=float) if len(rest) > 1 and rest[1] is not None else base
+            if pos is not None:
+                pin = (env.badr, nxt_base - env.base0) if env.mobile else None  # solve with the base where it will stand
+                q, err = ik.solve(env.model, env.data, pos, R, q, env.qadr, env.dofadr, fixed=pin)
+                ik_error, q7 = max(ik_error, err), max(q7, abs(float(q[6])))
+            d_xy = float(np.hypot(*(nxt_base[:2] - base[:2])))
+            d_yaw = abs(float(nxt_base[2] - base[2]))
+            if d_xy > 1e-6 or d_yaw > 1e-6:  # a drive: long enough that the min-jerk peak stays under the limits
+                steps = max(steps, int(np.ceil(MINJERK_PEAK * d_xy / BASE_SPEED * FPS)) + 2,
+                            int(np.ceil(MINJERK_PEAK * d_yaw / BASE_TURN * FPS)) + 2)
+            base = nxt_base
+            nxt = np.concatenate([q, [g], base])
             chain.append((nxt, steps))
-            if via and via[0]:
+            if via:
                 continue
             total = sum(n for _, n in chain)
             knots = np.cumsum([0] + [n for _, n in chain]) / total
@@ -299,6 +349,16 @@ class ScriptedExpert(Policy):
 
     def act(self, obs: dict) -> np.ndarray:
         a = self.plan[min(self.t, len(self.plan) - 1)]
+        if self.last is not None and self.t < len(self.plan) and getattr(self.env, "mobile", False):
+            cur = self.env.base_pose()[:2]
+            d = a[8:10] - cur
+            if np.linalg.norm(d) > 1e-5:  # about to drive: wait for anyone close in front, the plan resumes after
+                for p in self.env.people_xy:
+                    v = np.asarray(p, dtype=float) - cur
+                    if np.linalg.norm(v) < STOP_CLEAR and v @ d > 0:
+                        self.held += 1
+                        return self.last
+        self.last = a
         self.t += 1
         return a
 

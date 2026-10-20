@@ -170,6 +170,9 @@ def _sim_args(a):
     bad = [f for f in fams if f not in SIM_FAMILIES]
     if bad or a.episodes < 1:
         return f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1"
+    if getattr(a, "base", "fixed") == "mobile" and getattr(a, "policy", "scripted") != "scripted":
+        return ("--base mobile needs --policy scripted: the policy server wire format carries no base pose yet "
+                "(8-float arm only), so a served policy could not drive the base")
     twin_path = Path(a.out) / "twins" / a.room / "twin.json"
     if twin_path.is_file():
         twin = json.loads(twin_path.read_text())
@@ -202,7 +205,7 @@ def cmd_sim(a) -> int:
         res = collect(twin, fams, a.episodes, a.out, people=a.people, policy_name=a.policy, res=a.res,
                       seed=a.seed, save_preview=a.save_preview,
                       planner_name=a.planner, split=a.split,
-                      use_generated_instructions=(a.instructions == "nemotron"))
+                      use_generated_instructions=(a.instructions == "nemotron"), base=getattr(a, "base", "fixed"))
     except VLANotConfigured as e:
         print(f"policy vla: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -291,7 +294,7 @@ def cmd_eval(a) -> int:
 
     try:
         rep = evaluate(twin, fams, a.episodes, policy_name=a.policy, seed=a.seed, people=a.people,
-                       holdout=a.holdout, res=a.res, out_dir=a.out)
+                       holdout=a.holdout, res=a.res, out_dir=a.out, base=getattr(a, "base", "fixed"))
     except VLANotConfigured as e:
         print(f"policy vla: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -459,6 +462,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Instruction source: template (fixed wordings) or nemotron (varied wordings with train/eval split)")
     m.add_argument("--split", choices=["train", "eval"], default="train",
                    help="Dataset instruction split: train or held-out eval")
+    m.add_argument("--base", choices=["fixed", "mobile"], default="fixed",
+                   help="mobile: the pedestal drives (MAN-3); counter_to_counter becomes reachable")
     m.add_argument("--res", type=int, default=128)
     m.add_argument("--out", default="out")
     m.add_argument("--scans", default="scans")
@@ -481,6 +486,7 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--seed", type=int, default=0)
     e.add_argument("--people", type=int, default=2)
     e.add_argument("--holdout", action="store_true", help="held-out wording and start offset (docs/07-eval.md)")
+    e.add_argument("--base", choices=["fixed", "mobile"], default="fixed", help="mobile: the pedestal drives (MAN-3)")
     e.add_argument("--res", type=int, default=128)
     e.add_argument("--out", default="out")
     e.add_argument("--scans", default="scans")
