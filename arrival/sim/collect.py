@@ -205,6 +205,14 @@ class SimEnv:
         r.update_scene(self.data, cam)
         return r.render().copy()
 
+    def close(self) -> None:
+        """Free the GL contexts. On Windows, letting an old renderer be collected after a new one exists leaves
+        no context current, and every frame from then on is black."""
+        for r in (self.renderer, self.big):
+            if r is not None:
+                r.close()
+        self.renderer = self.big = None
+
     def obs(self) -> dict:
         o = {"state": self.state()}
         for c in self.cameras:
@@ -283,6 +291,7 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
             if tail > 10:
                 break
     ok, detail = env.success(task)
+    env.close()
     return {"states": np.array(states), "actions": np.array(actions), "videos": {c: np.array(v) for c, v in frames.items()},
             "success": ok, "detail": detail, "people_xy": people, "ik_error": getattr(policy, "ik_error", None),
             "safety": env.safety.summary()}

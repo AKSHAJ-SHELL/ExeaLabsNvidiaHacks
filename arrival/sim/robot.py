@@ -49,8 +49,11 @@ def arm_xml(base_pos: tuple[float, float, float], base_yaw_deg: float) -> str:
     hand = (f'<body name="hand" pos="0 0 0.107" quat="0.9238795 0 0 -0.3826834" gravcomp="1">'
             f'<inertial pos="0 0 0.03" mass="0.6" diaginertia="0.002 0.002 0.002"/>'
             f'<geom type="box" size="0.03 0.09 0.025" pos="0 0 0.03" rgba="0.2 0.2 0.22 1" {HID} {COL}/>'
-            + hand_vis +
-            f'<camera name="wrist" pos="0.08 0 0.02" xyaxes="0 -1 0 0.5 0 0.86" fovy="75"/>'
+            + hand_vis
+            # eye-in-hand camera on a housing beside the palm, looking along the approach axis and 20 deg inward,
+            # so the fingertips and whatever is between them sit in the lower half of the frame
+            + _vis("box", DARK, size="0.016 0.012 0.01", pos="0.044 0 0.03") +
+            f'<camera name="wrist" pos="0.06 0 0.045" xyaxes="0 1 0 0.94 0 0.342" fovy="75"/>'
             f'<site name="eef" pos="0 0 0.115" size="0.01" rgba="1 0 0 0"/>'
             + "".join(
                 f'<body name="finger_{s}" pos="0 0 0.0584" gravcomp="1">'
