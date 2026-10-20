@@ -826,15 +826,27 @@ export class Stage {
 
   _labels() {
     const J = this.J, W = this.w, H = this.h, cam = this.camera, v = this._v2;
+    if (this._lw !== W) { this._lw = W; for (const L of this.labels) L.w = 0; }   // label widths change with the viewport
+    const placed = [];                                  // part labels already on the sheet this frame, so two never print over each other
     for (const L of this.labels) {
-      let show = L.group === 'twin' ? J.dims > 0.15 : (J.exF > 0.5 && J.exA < 0.01);
+      const isNote = L.group !== 'twin';
+      let show = isNote ? (J.exF > 0.5 && J.exA < 0.01) : J.dims > 0.15;
       if (show) {
         if (L.follow) { L.follow.getWorldPosition(v); v.y += 0.05; } else v.copy(L.pos);
         v.project(cam);
         if (v.z > 1 || v.z < -1) show = false;
         else {
-          const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H;
-          if (Math.abs(x - L.x) > 0.1 || Math.abs(y - L.y) > 0.1) { L.x = x; L.y = y; L.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0) translate(-50%,-135%)`; }
+          let x = (v.x * 0.5 + 0.5) * W; const y = (-v.y * 0.5 + 0.5) * H;
+          if (isNote) {
+            // a part label stays inside the frame (a narrow phone cuts them otherwise) and yields to one placed before it
+            const w = L.w || (L.w = L.el.offsetWidth || 160), h = 16, pad = 10;
+            if (x < -w * 0.25 || x > W + w * 0.25) show = false;
+            else {
+              x = Math.min(Math.max(x, w / 2 + pad), Math.max(W - w / 2 - pad, w / 2 + pad));
+              if (placed.some((p) => Math.abs(p.x - x) < (p.w + w) / 2 + 4 && Math.abs(p.y - y) < h + 4)) show = false; else placed.push({ x, y, w });
+            }
+          }
+          if (show && (Math.abs(x - L.x) > 0.1 || Math.abs(y - L.y) > 0.1)) { L.x = x; L.y = y; L.el.style.transform = `translate3d(${x.toFixed(1)}px,${y.toFixed(1)}px,0) translate(-50%,-135%)`; }
         }
       }
       if (show !== L.shown) { L.shown = show; L.el.classList.toggle('is-on', show); }

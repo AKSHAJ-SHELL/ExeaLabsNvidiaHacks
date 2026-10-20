@@ -195,7 +195,8 @@ code { font-family: var(--font-mono); font-size: .875em; }
 .titleblock div:nth-child(2n) { border-right: 0; } .titleblock div:nth-last-child(-n+2) { border-bottom: 0; }
 .titleblock dt { font: 400 .625rem/1.2 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .titleblock dd { font: 500 .75rem/1.35 var(--font-mono); letter-spacing: .02em; overflow-wrap: anywhere; }
-.hero__cue { position: absolute; left: var(--gutter-l); bottom: 1.5rem; display: flex; align-items: center; gap: .75rem; color: var(--ink-2); z-index: 8; pointer-events: none; }
+.hero__cue { position: absolute; left: var(--gutter-l); bottom: 1.5rem; display: flex; align-items: center; gap: .75rem; color: var(--ink-2); z-index: 8; pointer-events: none;
+  background: var(--panel); border: 1px solid var(--line-2); padding: .375rem .75rem; }       /* a label on the sheet, legible over the scan cloud */
 .hero__cue i { width: 1px; height: 2rem; background: var(--ink); animation: cue 2.4s var(--ease-in-out) infinite; transform-origin: 0 0; }
 @keyframes cue { 0% { transform: scaleY(0); } 55% { transform: scaleY(1); } 100% { transform: scaleY(1); opacity: 0; } }
 
@@ -309,7 +310,7 @@ code { font-family: var(--font-mono); font-size: .875em; }
 .tray:not(.is-open) .tasks { opacity: 0; transform: translateY(8px) scale(.985); pointer-events: none; visibility: hidden; height: 0; overflow: hidden; }
 .task { position: relative; display: grid; grid-template-columns: 2rem minmax(0, 1fr) auto; gap: .5rem; padding: .375rem .5rem; text-align: left; background: var(--panel); border: 1px solid var(--line-2); min-height: 2.75rem; align-items: center; }
 .task img { width: 2rem; height: 2rem; object-fit: cover; border: 1px solid var(--line-2); background: var(--paper); }
-.task__t { font-size: .8125rem; line-height: 1.2; letter-spacing: -.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task__t { font-size: .8125rem; line-height: 1.2; letter-spacing: -.005em; text-wrap: balance; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }   /* wraps to two lines; the full instruction is never cut to an ellipsis */
 .task__m { color: var(--ink-3); font-size: .625rem; white-space: nowrap; }
 .task__f { display: none; } .task:hover .task__f, .task:focus-visible .task__f { display: inline; } .task:hover .task__d, .task:focus-visible .task__d { display: none; }
 .task.is-loading { cursor: progress; background-image: repeating-linear-gradient(135deg, transparent 0 7px, var(--hatch) 7px 8px); }
@@ -336,7 +337,8 @@ code { font-family: var(--font-mono); font-size: .875em; }
 .index { position: absolute; left: 4.75rem; bottom: 8.5rem; z-index: 8; width: min(36rem, calc(100% - 6rem)); max-height: 55%; overflow: auto; background: var(--panel); border: 1px solid var(--ink); padding: .75rem; box-shadow: 6px 6px 0 var(--line); }
 .index__h { display: flex; justify-content: space-between; color: var(--ink-3); margin-bottom: .5rem; }
 .index__cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; }
-.index__cols h4 { margin: 0 0 .25rem; font: 500 .625rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--signal-ink); }
+.index__cols button:focus-visible { outline-offset: -2px; }
+.index__cols h4 { margin: 0 0 .5rem; font: 500 .625rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--signal-ink); }
 .index__cols button { display: block; width: 100%; min-height: 2rem; text-align: left; padding: .25rem .5rem; font: 400 .75rem/1.2 var(--font-mono); letter-spacing: .02em; border-left: 1px solid var(--line-2); color: var(--ink-2); overflow-wrap: anywhere; }
 .index__cols button:hover, .index__cols button[aria-current="true"] { color: var(--ink); border-left-color: var(--signal); background: var(--hatch); }
 
@@ -460,6 +462,7 @@ code { font-family: var(--font-mono); font-size: .875em; }
   .tasks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .compare__tag--l { left: 5rem; } .compare__tag--r { right: 1rem; top: 11.5rem; }
 }
+@media (min-width: 1280px) { .plates { grid-template-columns: 1.6fr 1fr 1fr 1fr; } .plate:first-child .plate__v { font-size: clamp(4.5rem, 2rem + 5.4vw, 7.5rem); } }   /* the frame count leads; the other three are supporting figures, not equal tiles */
 @media (max-width: 1099px) { .plates { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .plates { grid-template-columns: 1fr; grid-auto-rows: auto; } .plate { min-height: 9.5rem; } }
 @media (max-width: 900px) {
