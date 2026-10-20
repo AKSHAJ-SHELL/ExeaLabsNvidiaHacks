@@ -41,6 +41,57 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 
 There are two datasets. `python -m arrival sim` writes **physics-simulated** data with real joint states (`arrival_physically_valid: true`). `python -m arrival demo` writes a fast **scripted placeholder** with zero joint values (`arrival_physically_valid: false`). Never train on the placeholder.
 
+## Before the deadline
+
+What is left, who it is waiting on, and what is already being done on a laptop. Check here before starting something so we do not duplicate work.
+
+### Blocked on hardware, accounts or people
+
+| Item | Who / what is needed | Why it is blocked |
+|---|---|---|
+| Scan 10 kitchens and 5 other rooms, commit with notes, photos and tape measurements (CAP-3, #59). Also the licensing check of the two public scans in `tests/fixtures/roomplan/` (CAP-5) | Teammates with LiDAR iPhones/iPads, consent from room owners, a human to read the scan sources | Needs physical rooms and a tape measure. Real TWN-1 numbers, SIM-5 office, DEM-1 and CAP-5 all depend on it |
+| Field-test the iOS capture app (CAP-1); RGB-D/pose recorder in Swift (CAP-2, #58) | A Mac with Xcode 26.1+ and a LiDAR iPhone | ARKit/RoomPlan cannot be built, signed or run without the device |
+| Load `hero_kitchen_sim` with Isaac-GR00T's real loader, 100-step N1.7 fine-tune smoke test (DAT-2, #63, #37 third box) | GPU host (H100/L40S, 40 GB+), Isaac-GR00T, access to `nvidia/GR00T-N1.7-3B`, Nebius account | No GPU on the laptop |
+| Real GR00T N1.7 inference server (POL-3) and the three-cell 50-episode held-out eval (DAT-3, #64) | GPU host, a fine-tuned checkpoint, plus the generic-RoboCasa fine-tune for the control cell | Needs GPU inference and training |
+| Nebius Serverless Jobs fan-out, Object Storage with resume (OPS-2, #66); real cost measurement and 20 teleoperated `counter_to_sink` demos (OPS-3, #67) | Nebius account with credits, an operator to teleoperate in the twin | Cloud accounts, billing, a human baseline |
+| Hosted HTTPS demo with a seeded real room (DEM-1, #68) | Cloud deploy access, a consented real scan from CAP-3 | Cloud deploy, HTTPS and secret decisions |
+| Generated layouts load in real RoboCasa (TWN-4, #69); real MimicGen with RoboCasa seeds (DAT-4, #62) | Linux machine with RoboCasa/MimicGen/robomimic, licensed seeds or about ten teleop seeds | RoboCasa does not run on macOS |
+| Small-object detection (TWN-5, #60), Gaussian splats (SIM-6, #61), real Cosmos (SIM-7) | GPU box, Token Factory/Nemotron and Cosmos 3 credentials, posed RGB-D frames from CAP-2 | GPU, paid APIs and real frames |
+| Merge or rebase the open contributor PRs: #77 (includes #75 and #49: fixtures on any wall for #42, solid scanned fixtures, no duplicate counters), #57 (SIM-5 office), #33 vs #36 (MAN-3 mobile base, pick one), #27 (MAN-5b oven, dishwasher, faucet), #25 (MAN-6 Menagerie Panda) | The PR authors rebasing onto `main` after #80 merges; the repo owner picks #33 or #36 | Other people's branches that conflict with `integrate` in `collect.py`, `scene.py`, `people.py`, `tasks.py`, `policy.py`. Issue #42, SIM-5, `counter_to_counter`, dishwasher/oven/faucet tasks and MAN-3 are deliberately not in the laptop sprint |
+| Close or update stale issues: #18, #22, #24, #26, #28, #30, #32, #34 | Repo owner | They look done or tracked by merged PRs |
+| Refresh the pitch video with real footage; browser check of the redesigned page (DEM-2, DEM-3) | A human with a screen, plus CAP-3 footage | `demo.gif` predates the SIM-1/MAN-1 fixes; the page was only checked with curl and tests |
+
+### Being finished on the laptop
+
+Each is its own PR against `main`, based on `integrate`. Do not start these; review them instead.
+
+| ID | Title | Branch | Issue |
+|---|---|---|---|
+| INF-1 | CI workflow, Makefile and CPU Dockerfile | `feat/INF-1-ci-makefile-docker` | DEM-3, README "Get started" |
+| POL-3 | GR00T policy-server contract: offline mock server, shim, `VLAClient` fix | `feat/POL-3-policy-server-mock` | POL-3, `docs/07-eval.md` |
+| DAT-2a | Offline GR00T/LeRobot dataset loader conformance check | `feat/DAT-2a-loader-check` | #37, #63 (offline part) |
+| DEM-4 | One-command demo pipeline (`make demo`) with summary | `feat/DEM-4-demo-all` | DEM-2, DEM-3 |
+| CAP-3a | Scan intake tool: privacy strip, notes, checks, render | `feat/CAP-3a-scan-intake` | CAP-3, CAP-5, #59 |
+| OPS-3a | Time and cost report from local runs, no unsupported savings claim | `feat/OPS-3a-cost-report` | #67 (laptop part) |
+| CAP-2a | RGB-D scan-frame manifest, loader, validator, unprojection test | `feat/CAP-2a-rgbd-format` | #58 (format and loader only) |
+| EVAL-1a | Realism metrics: render twin from a camera pose, score RGB and depth | `feat/EVAL-1a-realism-metrics` | #65 |
+| DAT-4a | Seed-demo replay retargeting, labelled `seed_replay_retarget` (not MimicGen) | `feat/DAT-4a-seed-retarget` | #62 (offline slice) |
+| TWN-1a | Scan accuracy harness: twin dimensions vs tape measurements | `feat/TWN-1a-accuracy-harness` | TWN-1, #59 |
+| DEM-3a | Docs and README claim checker | `feat/DEM-3a-docs-checker` | DEM-3 release QA, #30 |
+| SIM-7a | Appearance-variation stage with source tracking (Cosmos client plus local stub) | `feat/SIM-7a-appearance-variation` | #70 (offline part) |
+
+Anything built here that needs real data (realism numbers, cost dollars, accuracy against tape) reports "not measured" until the blocked items above land.
+
+### Known bugs
+
+- `VLAClient` sends only `video.ego_view`, but `configs/gr00t/arrival_panda_config.py` and `meta/modality.json` declare two video keys (`ego_view`, `wrist`), so a real GR00T server would reject every request. Fix is in POL-3.
+- The GR00T loader has not read our dataset since the latest fixes; only our own validator has. DAT-2a checks what it can offline, the real check needs a GPU box.
+- `counter_to_counter` is skipped: the pick point and target are about 2 m apart and the base does not move (needs MAN-3).
+- `open_door` stops at about 63-66° because the arm is mounted at 0.75 m (needs MAN-3).
+- Fixtures cannot sit on every wall and scanned fixtures can be duplicated or non-solid (issue #42, fixed in the open PR #77, not in `integrate`).
+- The web page was checked with curl and tests only, not in a browser. Uploads are processed by one local worker.
+- Package description in `pyproject.toml` is stale ("MVP, placeholder motion"); an untracked `walkin_arrival.egg-info` exists locally. Fix is in DEM-3a.
+
 ## Get started (5 minutes)
 
 Requires Python 3.11+ on macOS, Linux or Windows (the suite and the MuJoCo sim run as is on Windows; use `.venv\Scripts\activate` there). No GPU and no API keys needed.
