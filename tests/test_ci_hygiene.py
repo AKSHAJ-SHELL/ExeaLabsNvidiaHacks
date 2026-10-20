@@ -219,7 +219,7 @@ def test_watchdog_writes_a_fail_summary_and_exits_1(tmp_path, capsys):
     assert done.wait(5)
     t.cancel()
     assert codes == [1]
-    s = json.loads((tmp_path / "o" / "demo_summary.json").read_text())
+    s = json.loads((tmp_path / "o" / "demo_summary.json").read_text(encoding="utf-8"))
     assert s["overall"] == "FAIL" and "timed out" in s["error"]
     assert capsys.readouterr().err.strip() == "demo_all: FAIL timed out after 0.05 s"
 
@@ -264,18 +264,22 @@ def test_index_html_without_a_contact_sheet(tmp_path):
 # ---- CI workflow and repo files ----------------------------------------------------------------------
 
 def _ci():
-    return yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text())
+    return yaml.safe_load((REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
 
 
-def test_ci_matrix_covers_three_oses_and_ubuntu_is_the_only_gate():
-    job = _ci()["jobs"]["test"]
-    m = job["strategy"]["matrix"]
-    assert m["os"] == ["ubuntu-latest", "macos-latest", "windows-latest"]
-    assert m["python-version"] == ["3.11", "3.12"]
-    flags = {i["os"]: i["experimental"] for i in m["include"]}
-    assert flags == {"ubuntu-latest": False, "macos-latest": True, "windows-latest": True}
-    assert job["continue-on-error"] == "${{ matrix.experimental }}"
-    assert job["strategy"]["fail-fast"] is False
+def test_ci_gates_portable_checks_on_every_os_and_rendering_on_linux():
+    jobs = _ci()["jobs"]
+    job = jobs["test"]
+    assert job["strategy"]["matrix"]["os"] == ["ubuntu-latest", "macos-latest", "windows-latest"]
+    assert job["strategy"]["matrix"]["python-version"] == ["3.11", "3.12"]
+    assert not job.get("continue-on-error")
+    assert any("--no-render" in step.get("run", "") for step in job["steps"])
+    render = jobs["render"]
+    assert render["runs-on"] == "ubuntu-latest" and not render.get("continue-on-error")
+    commands = [step.get("run", "") for step in render["steps"]]
+    assert "python -m pytest -q -p no:cacheprovider" in commands
+    assert not any("--no-render" in command for command in commands)
+    assert any("preflight()" in command and "raise SystemExit(why)" in command for command in commands)
 
 
 def test_ci_has_lint_package_and_docker_jobs():
@@ -289,7 +293,7 @@ def test_ci_has_lint_package_and_docker_jobs():
 
 
 def test_ci_runs_the_offline_demo_and_uploads_its_summary():
-    steps = _ci()["jobs"]["test"]["steps"]
+    steps = _ci()["jobs"]["render"]["steps"]
     assert any("scripts/demo_all.py --quick" in s.get("run", "") for s in steps)
     up = next(s for s in steps if str(s.get("uses", "")).startswith("actions/upload-artifact@"))
     assert up["if"] == "always()"
@@ -299,17 +303,17 @@ def test_ci_runs_the_offline_demo_and_uploads_its_summary():
 
 
 def test_dependabot_and_ruff_config_exist():
-    d = yaml.safe_load((REPO / ".github" / "dependabot.yml").read_text())
+    d = yaml.safe_load((REPO / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
     assert {u["package-ecosystem"] for u in d["updates"]} == {"github-actions", "pip", "docker"}
-    py = (REPO / "pyproject.toml").read_text()
+    py = (REPO / "pyproject.toml").read_text(encoding="utf-8")
     assert "[tool.ruff.lint]" in py and 'lint = ["ruff==' in py
 
 
 def test_gitignore_and_contributing_cover_the_basics():
-    ignored = (REPO / ".gitignore").read_text().split()
+    ignored = (REPO / ".gitignore").read_text(encoding="utf-8").split()
     for p in ("out/", ".venv/", ".env", "build/", "dist/", ".ruff_cache/", "*.egg-info/"):
         assert p in ignored
-    text = (REPO / "CONTRIBUTING.md").read_text()
+    text = (REPO / "CONTRIBUTING.md").read_text(encoding="utf-8")
     for needle in ("make test", "make demo", "make lint", "make docs-check", "make package-smoke"):
         assert needle in text
 
@@ -317,7 +321,7 @@ def test_gitignore_and_contributing_cover_the_basics():
 def test_make_demo_is_the_quick_offline_demo():
     import re
 
-    mk = (REPO / "Makefile").read_text()
+    mk = (REPO / "Makefile").read_text(encoding="utf-8")
     body = mk.split("\ndemo:", 1)[1].split("\n\n", 1)[0]
     assert "scripts/demo_all.py --quick" in body
     assert {"lint", "docs-check", "package-smoke"} <= set(re.findall(r"^([A-Za-z_][\w-]*):", mk, re.M))
