@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Arrival: scan a room once, get robot training data for that room</title>
-<meta name="description" content="Arrival turns one scan of a kitchen into a physics twin, simulates a robot arm and walking people in it, and writes the runs out as a GR00T-format dataset. Every number on the page is read from the real export.">
+<meta name="description" content="Arrival turns one scan of a kitchen into a physics twin, simulates a robot arm and walking people in it, and writes the runs as a GR00T-format dataset. Every number on the page comes from the real export. The room is an authored sample; no real kitchen has been scanned yet.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#EFE9DC" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#111418" media="(prefers-color-scheme: dark)">
@@ -28,7 +28,7 @@
     <p class="mono loader__top"><span>Exea Labs</span><span>Sheet A-00</span></p>
     <!-- Hyperframes intro: the plan sheet draws itself while the data loads. Sources are added below so reduced motion
          and Save-Data never download the clip; the poster (the settled sheet) stands in for them. -->
-    <div class="loader__plan"><video id="loaderMotion" autoplay muted loop playsinline preload="auto" tabindex="-1" aria-label="Arrival title sheet: a kitchen plan being drawn" ></video></div>
+    <div class="loader__plan"><video id="loaderMotion" autoplay muted loop playsinline preload="auto" tabindex="-1" aria-label="Arrival title sheet with a kitchen plan being drawn" ></video></div>
     <script>(function () {
       var v = document.getElementById('loaderMotion'); if (!v) return;
       var rm = matchMedia('(prefers-reduced-motion: reduce)').matches, sd = navigator.connection && navigator.connection.saveData;
@@ -86,7 +86,7 @@
     <div class="hero" id="hero">
       <p class="mono eyebrow">Survey <i aria-hidden="true">&rarr;</i> Twin <i aria-hidden="true">&rarr;</i> Simulation <i aria-hidden="true">&rarr;</i> Dataset</p>
       <h1 class="hero__title">Scan a room once. Get robot training data for <span class="dimmed">that exact room.</span></h1>
-      <p class="hero__deck">One scan of a kitchen becomes a physics twin. A robot arm and two walking people are simulated in it, and every run is written out as a GR00T-format dataset. This sheet is drawn from that real export.</p>
+      <p class="hero__deck">One scan of a kitchen becomes a physics twin. We simulate a robot arm and two walking people in it and write every run as a GR00T-format dataset. This sheet is drawn from that export. The room is an authored sample, and no real kitchen has been scanned yet.</p>
       <dl class="titleblock" aria-label="Title block">
         <div><dt>Sheet</dt><dd>A-01 / 06</dd></div>
         <div><dt>Scale</dt><dd>1 : 1, metres</dd></div>
@@ -100,7 +100,7 @@
 
     <div class="stage-wrap" id="stageWrap">
       <div class="stage" id="stage">
-        <p class="glnote mono" id="glNote" role="status" hidden>The 3D view paused because the graphics context was lost. Waiting for the browser to give it back.</p>
+        <p class="glnote mono" id="glNote" role="status" hidden>The 3D view paused because the browser dropped the graphics context. It resumes when the browser returns it.</p>
         <canvas id="gl" role="img" aria-label="Interactive 3D view of the kitchen twin with the recorded robot trajectory and the two walking people. The chapter text and the task list carry the same information."></canvas>
         <div class="dims" id="dims" aria-hidden="true"></div>
 
@@ -151,14 +151,14 @@
           <article class="note" data-note="scan" aria-hidden="true">
             <p class="note__tag mono">01 &middot; Survey</p>
             <h2 class="note__title">Scan</h2>
-            <p class="note__lead">A phone walks the room. LiDAR returns a cloud of points, each one a distance and a colour with a little noise.</p>
-            <p class="note__body">This cloud is simulated from the twin, not captured on a phone: rays from <b data-bind="scan.stations|len"></b> stations at 1.3 m, range noise of 3 mm plus 0.25% of range, <b data-bind="scan.n|int"></b> points. A real iPhone capture is not wired in yet.</p>
+            <p class="note__lead">Someone walks the room with a phone. LiDAR returns a cloud of points, each with a distance, a colour and a little noise.</p>
+            <p class="note__body">We simulated this cloud from the twin by casting rays from <b data-bind="scan.stations|len"></b> stations at 1.3 m. Range noise is 3 mm plus 0.25% of range, and the cloud has <b data-bind="scan.n|int"></b> points. No real iPhone capture is wired in yet.</p>
           </article>
           <article class="note" data-note="twin" aria-hidden="true">
             <p class="note__tag mono">02 &middot; Twin &middot; a</p>
             <h2 class="note__title">Twin</h2>
             <p class="note__lead">The points become a room a physics engine can run: walls, fixtures, objects, and every drawer and door as a joint.</p>
-            <p class="note__body"><b data-bind="rooms.walls|len"></b> walls, <b data-bind="rooms.fixtures|len"></b> fixtures, <b data-bind="rooms.parts|len"></b> articulated parts and <b data-bind="rooms.objects|len"></b> objects, measured in metres. The dimension lines are read from the twin.</p>
+            <p class="note__body"><b data-bind="rooms.walls|len"></b> walls, <b data-bind="rooms.fixtures|len"></b> fixtures, <b data-bind="rooms.parts|len"></b> articulated parts and <b data-bind="rooms.objects|len"></b> objects, measured in metres. The dimension lines come from the twin.</p>
           </article>
           <article class="note" data-note="compare" aria-hidden="true">
             <p class="note__tag mono">02 &middot; Twin &middot; b</p>
@@ -169,14 +169,14 @@
           <article class="note" data-note="explode" aria-hidden="true">
             <p class="note__tag mono">02 &middot; Twin &middot; c</p>
             <h2 class="note__title">Every moving part is a joint</h2>
-            <p class="note__lead">Pull the twin apart. Nothing here is a picture: each door and drawer opens, and the simulator moves it with physics.</p>
+            <p class="note__lead">Pull the twin apart. Each door and drawer opens, and the simulator moves it with physics.</p>
             <p class="note__body"><b data-bind="rooms.parts|count:slide"></b> slides and <b data-bind="rooms.parts|count:hinge"></b> hinges, each with the opening range the sim uses.</p>
           </article>
           <article class="note" data-note="simulate" aria-hidden="true">
             <p class="note__tag mono">03 &middot; Simulate</p>
             <h2 class="note__title">Simulate</h2>
-            <p class="note__lead">A seven-joint arm and two walking people share the room. The arm assembles, then runs a real recorded trajectory.</p>
-            <p class="note__body">MuJoCo steps physics at <b data-bind="stats.sim.physics_hz|int"></b> Hz and the arm is controlled at <b data-bind="stats.sim.control_hz|int"></b> Hz. Success is checked by the physics, never by a label.</p>
+            <p class="note__lead">A seven-joint arm and two walking people share the room. The arm assembles, then runs a recorded trajectory.</p>
+            <p class="note__body">MuJoCo steps physics at <b data-bind="stats.sim.physics_hz|int"></b> Hz and the arm is controlled at <b data-bind="stats.sim.control_hz|int"></b> Hz. The physics decides whether a run succeeded.</p>
           </article>
           <article class="note" data-note="bench" aria-hidden="true">
             <p class="note__tag mono">03 &middot; Simulate &middot; b</p>
@@ -223,7 +223,7 @@
 <!-- no-WebGL fallback: the recorded camera frames -->
 <section class="fallback" id="fallback" hidden aria-label="Recorded camera frames">
   <h2 class="chapter__title">Recorded camera frames</h2>
-  <p class="chapter__lead">This browser could not start WebGL, so here are the frames the robot actually recorded for each task.</p>
+  <p class="chapter__lead">This browser could not start WebGL, so this page shows the frames the robot recorded for each task.</p>
   <div class="fallback__grid" id="fallbackGrid"></div>
 </section>
 
@@ -231,18 +231,18 @@
 <section class="chapter" id="dataset" data-chapter="dataset" aria-labelledby="dsTitle">
   <header class="chapter__head">
     <p class="mono chapter__tag">04 &middot; Dataset <span>Sheet A-04</span></p>
-    <h2 class="chapter__title" id="dsTitle">What the robot is trained on</h2>
-    <p class="chapter__lead">Each run is written in the LeRobot v2.1 layout that NVIDIA GR00T reads: eight-number state and action per frame, plus the ego and wrist cameras. Six steps get it there.</p>
+    <h2 class="chapter__title" id="dsTitle">What the robot would train on</h2>
+    <p class="chapter__lead">Each run is written in the LeRobot v2.1 layout that NVIDIA GR00T reads, with an eight-number state and action per frame plus the ego and wrist cameras. Six steps produce it.</p>
   </header>
 
   <figure class="reel" id="reel">
     <div class="reel__view">
-      <video id="pipelineClip" muted playsinline preload="none" aria-label="Animated pipeline: scan, twin, simulate, dataset" aria-describedby="reelCap"></video>
+      <video id="pipelineClip" muted playsinline preload="none" aria-label="Animated pipeline from scan to twin to simulation to dataset" aria-describedby="reelCap"></video>
     </div>
     <figcaption class="reel__cap mono" id="reelCap">
       <span class="reel__fig">Fig. 04a</span>
       <span class="reel__t">Scan, twin, simulate, dataset in 12 s</span>
-      <span class="reel__n">Drawn animation of the pipeline, not recorded data</span>
+      <span class="reel__n">Drawn animation of the pipeline. It contains no recorded data.</span>
       <button class="chip" id="reelBtn" type="button">Play</button>
     </figcaption>
   </figure>
@@ -251,27 +251,27 @@
     <ol class="steps" id="steps">
       <li class="step" data-step="0">
         <p class="mono step__n">Step 1</p><h3>Scan the room</h3>
-        <p>An iPhone LiDAR scan (Apple RoomPlan) describes the walls, counters, sink, stove and fridge. The twin on this page came from the authored sample, because no real kitchen has been scanned in this repository yet.</p>
+        <p>An iPhone LiDAR scan (Apple RoomPlan) captures the walls, counters, sink, stove and fridge. The twin on this page comes from the authored sample, since no real kitchen has been scanned in this repository.</p>
       </li>
       <li class="step" data-step="1">
         <p class="mono step__n">Step 2</p><h3>Compile the twin</h3>
-        <p>The scan is normalised and compiled into fixtures with sizes, positions and colours, plus the drawers, doors and hinges they carry. Objects come from a small catalogue with mass and friction.</p>
+        <p>The compiler normalises the scan into fixtures with sizes, positions and colours, plus the drawers, doors and hinges they carry. Objects come from a small catalogue with mass and friction.</p>
       </li>
       <li class="step" data-step="2">
         <p class="mono step__n">Step 3</p><h3>Run the physics</h3>
-        <p>MuJoCo advances the room at 500 Hz. People are kinematic capsule walkers on seeded waypoint loops, and the closest approach to the robot is measured at every step.</p>
+        <p>MuJoCo steps the room at 500 Hz. People are kinematic capsule walkers on seeded waypoint loops, and every step records their closest approach to the robot.</p>
       </li>
       <li class="step" data-step="3">
         <p class="mono step__n">Step 4</p><h3>Record an expert</h3>
-        <p>A scripted inverse-kinematics expert performs each task. A run only counts if the physics says it worked: the drawer is open, the bowl is in the sink.</p>
+        <p>A scripted inverse-kinematics expert performs each task. A run counts only if the physics says it worked, such as the drawer being open or the bowl being in the sink.</p>
       </li>
       <li class="step" data-step="4">
         <p class="mono step__n">Step 5</p><h3>Export</h3>
-        <p>Frames, states, actions and two 128 px cameras are written as LeRobot v2.1 in the GR00T layout.</p>
+        <p>The export writes frames, states, actions and two 128 px cameras as LeRobot v2.1 in the GR00T layout.</p>
       </li>
       <li class="step" data-step="5">
         <p class="mono step__n">Step 6</p><h3>Validate</h3>
-        <p>A loader check reads the dataset back the way a trainer would, windows the actions, decodes the videos and reports anything odd.</p>
+        <p>A loader check reads the dataset back the way a trainer would, windows the actions, decodes the videos and reports any problems.</p>
       </li>
     </ol>
 
@@ -346,11 +346,11 @@
   <header class="chapter__head">
     <p class="mono chapter__tag">05 &middot; Evaluate <span>Sheet A-05</span></p>
     <h2 class="chapter__title" id="evTitle">What worked, and how little that proves yet</h2>
-    <p class="chapter__lead" id="evLead">The evaluation harness ran a small run with the scripted expert, with people walking. The figures below are read from the export.</p>
+    <p class="chapter__lead" id="evLead">The evaluation harness ran a small batch with the scripted expert while people walked through the room. The figures below come from the export.</p>
   </header>
 
   <figure class="eval" id="eval">
-    <figcaption class="mono eval__cap">Success per family, with the 95% Wilson interval for what these trials can show</figcaption>
+    <figcaption class="mono eval__cap">Success per family, with a 95% Wilson interval around each result</figcaption>
     <div class="erow eval__scale mono" aria-hidden="true"><span></span><span class="scale"><i>0</i><i>0.5</i><i>1</i></span><span></span></div>
     <div class="eval__rows" id="evalRows"></div>
     <div class="eval__total" id="evalTotal"></div>
@@ -358,7 +358,7 @@
 
   <div class="two">
     <section class="box" aria-labelledby="boxCaveat">
-      <h3 id="boxCaveat" class="box__h mono">Read these numbers with care</h3>
+      <h3 id="boxCaveat" class="box__h mono">Limits of these numbers</h3>
       <ul class="list" id="caveats"></ul>
     </section>
     <section class="box box--hatch" aria-labelledby="boxTodo">
@@ -373,7 +373,7 @@
   <section class="sched" id="schedWrap" aria-labelledby="schedTitle" hidden>
     <p class="mono sched__tag">Revision schedule <span id="schedAsOf"></span></p>
     <h3 class="sched__h" id="schedTitle">What is built, and what is left</h3>
-    <p class="sched__lead">Three things are not done. GR00T has not been fine-tuned on this dataset, so no policy has learned from it. No real kitchen has been scanned and run through the pipeline; the room on this page is authored. The hosted demo that takes many rooms is not built. The list below is every other open task, grouped by what it needs. A diamond is filled only when the pull request is merged on main.</p>
+    <p class="sched__lead">Three things are not done. GR00T has not been fine-tuned on this dataset, so no policy has learned from it. No real kitchen has been scanned and run through the pipeline, and the room on this page is authored. The hosted demo that takes many rooms is not built. Below is every other open task, grouped by what it needs. A diamond is filled only when its pull request is merged on main.</p>
     <div class="sched__sum" id="schedSum"></div>
     <div class="chips sched__chips" id="schedChips" role="group" aria-label="Filter the schedule by status"></div>
     <p class="mono sched__shown" id="schedShown" role="status" aria-live="polite"></p>
@@ -384,8 +384,8 @@
 <!-- ============ CLOSE ============ -->
 <section class="close" id="close" data-chapter="close" aria-labelledby="clTitle">
   <p class="mono chapter__tag">06 &middot; Close <span>Sheet A-06</span></p>
-  <h2 class="close__title" id="clTitle">One scan in. A dataset for that room out.</h2>
-  <p class="close__lead">The twin, the physics and the dataset on this page are real, produced by the pipeline in this repository. A GR00T fine-tune and a scan of a real kitchen are what turn this from a working pipeline into a result.</p>
+  <h2 class="close__title" id="clTitle">One scan in, one dataset for that room out.</h2>
+  <p class="close__lead">The twin, physics and dataset on this page were produced by the pipeline in this repository. Two things are missing: a GR00T fine-tune and a scan of a real kitchen. Until both exist, we have a working pipeline and no result.</p>
   <div class="close__actions">
     <button class="btn" id="toTop" type="button">Back to the plan</button>
   </div>
@@ -398,7 +398,7 @@
 
 <div class="sr-only" id="status" role="status" aria-live="polite"></div>
 <section class="sr-only" id="srNotes" aria-label="Chapter notes, text version"></section>
-<noscript><p class="noscript">This page draws a live 3D scene from the real exported data and needs JavaScript. The data is in site/data (see site/data/README.md).</p></noscript>
+<noscript><p class="noscript">This page needs JavaScript to draw its 3D scene from the exported data. The data is in site/data (see site/data/README.md).</p></noscript>
 
 <script src="vendor/gsap/gsap.min.js"></script>
 <script src="vendor/gsap/ScrollTrigger.min.js"></script>

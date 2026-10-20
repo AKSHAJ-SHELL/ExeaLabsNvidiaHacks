@@ -49,7 +49,7 @@ export function renderEvaluate(stats) {
   const t = ev.totals, per = ev.episodes_per_family;
   // the lead is built from the data, so "every episode succeeded" and "one per family" can never drift from stats.json
   const lead = document.getElementById('evLead');
-  if (lead) lead.innerHTML = `The evaluation harness ran <b>${per}</b> ${per === 1 ? 'episode' : 'episodes'} per task family with the <b>${ev.policy}</b> expert, with <b>${ev.people}</b> people walking. ${t.successes === t.episodes ? 'Every episode succeeded.' : `${t.successes} of ${t.episodes} episodes succeeded.`} ${per === 1 ? 'One episode per family is a demonstration that the pipeline runs, not a success rate.' : `${per} episodes per family still give wide intervals.`}`;
+  if (lead) lead.innerHTML = `The evaluation harness ran <b>${per}</b> ${per === 1 ? 'episode' : 'episodes'} per task family with the <b>${ev.policy}</b> expert and <b>${ev.people}</b> people walking. ${t.successes === t.episodes ? 'Every episode succeeded.' : `${t.successes} of ${t.episodes} episodes succeeded.`} ${per === 1 ? 'One episode per family shows that the pipeline runs and says nothing about a success rate.' : `${per} episodes per family still give wide intervals.`}`;
   total.innerHTML = `<div class="erow__name">All families<small>pooled, still only ${t.episodes} runs</small></div>${ci(t.wilson_95[0], t.wilson_95[1], t.success_rate)}
     <div class="erow__fig"><strong>${t.successes} / ${t.episodes}</strong><small>${t.human_contacts} human contacts · ${t.arm_contact_episodes} runs touched furniture</small></div>`;
 
@@ -57,17 +57,17 @@ export function renderEvaluate(stats) {
   const maxArm = Math.max(...Object.values(ev.families).map((e) => e.arm_contact_max_depth_m));
   const f1 = ev.families[FAMILIES[0]];
   document.getElementById('caveats').innerHTML = [
-    `<b>${per === 1 ? 'One run per task.' : `${per} runs per task.`}</b> ${f1.successes} of ${f1.episodes} succeeding has a 95% Wilson interval from ${f1.wilson_95[0].toFixed(2)} to ${f1.wilson_95[1].toFixed(2)}. Pooled, ${t.successes} of ${t.episodes} runs from ${t.wilson_95[0].toFixed(2)} to ${t.wilson_95[1].toFixed(2)}. It shows the pipeline runs, not that it is reliable.`,
-    `<b>The policy is a scripted expert.</b> The harness ran <code>policy: ${ev.policy}</code>, not a learned model. Nothing here measures GR00T.`,
+    `<b>${per === 1 ? 'One run per task.' : `${per} runs per task.`}</b> ${f1.successes} of ${f1.episodes} succeeding has a 95% Wilson interval from ${f1.wilson_95[0].toFixed(2)} to ${f1.wilson_95[1].toFixed(2)}. Pooled, ${t.successes} of ${t.episodes} runs have an interval from ${t.wilson_95[0].toFixed(2)} to ${t.wilson_95[1].toFixed(2)}. This shows the pipeline runs; it does not show reliability.`,
+    `<b>The policy is a scripted expert.</b> The harness ran <code>policy: ${ev.policy}</code>, so no learned model was involved. Nothing here measures GR00T.`,
     `<b>Not held out.</b> <code>holdout: ${ev.holdout}</code>, with ${ev.people} people walking in the room.`,
-    `<b>One room, authored not scanned.</b> The twin is the sample kitchen. Safety figures are for this room only.`,
+    `<b>One authored room.</b> The twin is the sample kitchen. Safety figures apply to this room only.`,
     `<b>Contacts.</b> ${t.human_contacts} contacts with people; the closest approach was ${minD.toFixed(2)} m. ${t.arm_contact_episodes} of ${t.episodes} runs brushed furniture, at most ${(maxArm * 1000).toFixed(1)} mm deep.`,
   ].map((s) => `<li>${s}</li>`).join('');
 
   const c = stats.cost, rep = stats.dataset.report;
   document.getElementById('todo').innerHTML = [
     `<b>GR00T N1.7 fine-tune on this dataset (DAT-2).</b> The dataset is written and passes the offline loader check. The fine-tune needs a GPU host and has not run.`,
-    `<b>GR00T policy server and the held-out comparison (POL-3, DAT-3).</b> Base model, generic data and this-room data, 50 episodes per cell, is a protocol, not a result.`,
+    `<b>GR00T policy server and the held-out comparison (POL-3, DAT-3).</b> The protocol compares the base model, generic data and this-room data at 50 episodes per cell. It has produced no results yet.`,
     `<b>A real scan of a real kitchen (CAP-3).</b> The iPhone capture app exists but is untested on a kitchen; the point cloud on this page is simulated.`,
     `<b>Cost against teleoperation.</b> No teleop baseline exists, so no saving is claimed (<code>comparison.measured: ${c.comparison.measured}</code>).`,
   ].map((s) => `<li>${s}</li>`).join('');
