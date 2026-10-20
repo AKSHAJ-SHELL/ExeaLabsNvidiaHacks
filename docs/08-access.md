@@ -29,7 +29,7 @@ The implementing agent does not open these accounts and does not block on them. 
 ## What to request
 
 1. Nebius account and a project id.
-2. Token Factory API key. Put it in an untracked `.env` as `TOKEN_FACTORY_API_KEY`.
+2. Token Factory API key. Copy `.env.example` to an untracked `.env` and set `TOKEN_FACTORY_API_KEY`.
 3. Serverless Jobs quota for at least one GPU preset. The jobs quickstart uses platform `gpu-l40s-a` and preset `1gpu-8vcpu-32gb`. Confirm those ids in the console; do not assume they are still current.
 4. Hugging Face access: `nvidia/GR00T-N1.7-3B` is not gated, but the Cosmos-Reason2-2B backbone it loads is; accept that model's license first. Record whether `NEW_EMBODIMENT` is the supported path for a 7-DoF arm. It was, in the public README, via `--embodiment-tag NEW_EMBODIMENT` and a modality config. Recheck before writing that config.
 5. An Object Storage bucket, S3-compatible, only when artifacts leave the laptop.

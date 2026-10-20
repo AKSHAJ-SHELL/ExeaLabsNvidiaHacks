@@ -12,7 +12,6 @@ import hashlib
 import io
 import json
 import math
-import os
 import shutil
 import time
 import urllib.error
@@ -134,7 +133,9 @@ class CosmosClient:
 
     def __init__(self, url: str | None = None, timeout: float = 30.0, retries: int = 2, backoff: float = 0.5,
                  prompt: str = "same scene, different lighting and surface appearance"):
-        self.url = url if url is not None else os.environ.get("COSMOS_URL")
+        from arrival import config as settings
+
+        self.url = url if url is not None else settings.get("COSMOS_URL")
         self.timeout, self.retries, self.backoff, self.prompt = timeout, retries, backoff, prompt
         self.model, self.version = "unknown", "unknown"
 
