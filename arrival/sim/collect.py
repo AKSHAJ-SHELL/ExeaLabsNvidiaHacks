@@ -418,7 +418,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     pre: dict = {}
     tasks = make_tasks(twin, families, episodes, seed=seed, people=people,
                        split=split, use_generated_instructions=use_generated_instructions, mobile=base == "mobile", log=log,
-                       preflight=pre)
+                       preflight=pre, arm=arm)
     lo, hi = shard_range(len(tasks), *shard) if shard else (0, len(tasks))
     if shard:
         out_dir = shard_dir(out_dir, *shard)

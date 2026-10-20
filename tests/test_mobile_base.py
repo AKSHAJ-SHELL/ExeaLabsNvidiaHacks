@@ -109,7 +109,7 @@ def test_people_keep_off_the_drive_and_the_base_waits_for_them(hero_twin):
 def test_preflight_checks_the_drive_spot_and_the_whole_path(hero_twin):
     import copy
 
-    from arrival.sim.preflight import REACH, base_pose, check_task, drive_spot, place_point
+    from arrival.sim.preflight import base_pose, check_task, drive_spot, place_point
 
     task = _task(hero_twin, "counter_to_counter", seed=1, mobile=True)
     assert check_task(hero_twin, task, mobile=True) is None
@@ -128,7 +128,7 @@ def test_preflight_checks_the_drive_spot_and_the_whole_path(hero_twin):
     away = 1.0 if tgt["position"][1] > end[1] else -1.0
     far["target_y"] = place_point(hero_twin, task)[1] + away * 0.9
     why = check_task(hero_twin, far, mobile=True)
-    assert why and "drive spot" in why and f"{REACH:.3f}" in why
+    assert why and "from the drive spot" in why and "beyond the arm's reach" in why and "IK solve misses" in why
 
 
 def test_mobile_counter_to_counter_on_a_south_wall_run(tmp_path):

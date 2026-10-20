@@ -41,7 +41,7 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
     t_all = time.perf_counter()
     for j, fam in enumerate(families):
         tasks = [finish_task(t) for t in make_tasks(twin, [fam], episodes, seed=seed + EVAL_SEED_BASE + j, people=people,
-                                                     holdout=holdout, mobile=base == "mobile", log=log)]
+                                                     holdout=holdout, mobile=base == "mobile", log=log, arm=arm)]
         if not tasks:
             continue
         rows = []

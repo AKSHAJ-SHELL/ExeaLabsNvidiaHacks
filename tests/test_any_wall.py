@@ -22,7 +22,7 @@ from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim.collect import SimEnv, collect  # noqa: E402
 from arrival.sim.people import Walkers, frame  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
-from arrival.sim.preflight import REACH, base_pose, check_task  # noqa: E402
+from arrival.sim.preflight import base_pose, check_task  # noqa: E402
 from arrival.sim.tasks import SIM_FAMILIES, make_tasks  # noqa: E402
 from arrival.twin.compile import compile_twin, to_local  # noqa: E402
 
@@ -54,13 +54,16 @@ def test_preflight_keeps_every_hero_variation(hero_twin):
     assert all(check_task(hero_twin, t) is None for t in tasks)
 
 
-def test_mug_beyond_the_hands_reach_is_rejected_at_the_worst_offset(rotated):
-    # mug_2 on the east run is 0.75 m from the base once the +0.08 m offset is applied (0.742 m was the last that
-    # succeeded in a sweep), so the variation is dropped instead of becoming a task that misses
-    pre = {}
-    tasks = make_tasks(rotated, ["put_in_drawer"], 8, seed=1, log=QUIET, preflight=pre)
-    assert {t["object_id"] for t in tasks} == {"mug_1"} and pre["rejected"] == 1
-    assert "the object" in pre["reasons"][0]["reason"] and "counter_e" in pre["reasons"][0]["reason"]
+def test_mug_beyond_the_hands_reach_gets_a_base_that_reaches_it(rotated):
+    # over mug_2 on the east run the IK solve from the rule's stand spot falls 1.3 cm short at the 0 offset (0.76 m
+    # out) and 2.6 cm at +0.08 m (0.77 m out), and those episodes miss (L17 sweep), so the reach planner moves the
+    # base 0.1 m along the run instead of dropping the variation; from there it succeeds at all four offsets
+    pre, log = {}, []
+    tasks = make_tasks(rotated, ["put_in_drawer"], 8, seed=1, log=log.append, preflight=pre)
+    assert {t["object_id"] for t in tasks} == {"mug_1", "mug_2"} and pre["rejected"] == 0 and pre["shifted"] == 1
+    assert all(t.get("base_shift") == [0.1, 0.0] for t in tasks if t["object_id"] == "mug_2")
+    assert all("base_shift" not in t for t in tasks if t["object_id"] == "mug_1")
+    assert any("mug_2 stands +0.10 m along" in line and "counter_e" in line for line in log)
 
 
 def test_fridge_in_the_corner_is_rejected_because_the_base_would_stand_outside(rotated):
@@ -90,7 +93,7 @@ def test_pick_and_place_points_must_be_within_reach(hero_twin):
     sink = next(f for f in far["fixtures"] if f["id"] == task["target"])
     sink["position"][0] += 1.2  # the base parks between the mug and the sink, so a far sink pulls it out of reach
     why = check_task(far, task)
-    assert why and "beyond the" in why and f"{REACH:.3f}" in why
+    assert why and "beyond the arm's reach" in why and "IK solve misses" in why
 
 
 def test_preflight_rejection_is_counted_in_the_dataset_stats(ushape, tmp_path):
