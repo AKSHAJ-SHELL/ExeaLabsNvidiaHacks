@@ -1,0 +1,112 @@
+"""The /act + /health contract of arrival.policy_server.protocol wrapped around Isaac-GR00T's Gr00tPolicy.
+
+UNTESTED AGAINST REAL GR00T: it needs a GPU, the Isaac-GR00T package and a fine-tuned checkpoint, none of which exist on
+the laptop it was written on. The request/response side is covered by the mock-server tests; the calls into `gr00t`
+below follow Isaac-GR00T's N1.x policy API from memory and may need small changes (module path, `get_action`
+signature, whether relative arm actions come back already absolute) on first contact.
+
+    python -m arrival.policy_server.gr00t_shim --model-path <checkpoint dir> --port 8000 \
+        --modality-config-path configs/gr00t/arrival_panda_config.py
+
+then `export GR00T_POLICY_URL=http://<host>:8000` on the machine running `python -m arrival eval --policy vla`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import numpy as np
+
+from arrival.policy_server.protocol import (ARM_DOF, TASK_KEY, VIDEO_KEYS, ProtocolError, decode_request,
+                                            encode_response)
+
+
+def load_policy(model_path: str, modality_config_path: str, device: str, embodiment_tag: str):
+    """Import gr00t lazily; exit with a message when it is not installed."""
+    try:
+        import importlib.util
+
+        from gr00t.data.embodiment_tags import EmbodimentTag
+        from gr00t.policy.gr00t_policy import Gr00tPolicy
+    except ImportError as e:
+        sys.exit(f"gr00t_shim: Isaac-GR00T is not installed here ({e}). Install it on the GPU box "
+                 "(https://github.com/NVIDIA/Isaac-GR00T) and run this module there.")
+    # importing the config registers the Arrival Panda modality config for NEW_EMBODIMENT
+    spec = importlib.util.spec_from_file_location("arrival_panda_config", modality_config_path)
+    spec.loader.exec_module(importlib.util.module_from_spec(spec))
+    return Gr00tPolicy(embodiment_tag=EmbodimentTag(embodiment_tag), model_path=model_path, device=device)
+
+
+def to_observation(req: dict) -> dict:
+    """Decoded request -> Gr00tPolicy observation (batch 1, one time step)."""
+    state = req["state"]
+    return {"video": {k: req["video"][k][None, None] for k in VIDEO_KEYS},
+            "state": {"single_arm": state[None, None, :ARM_DOF].astype(np.float32),
+                      "gripper": state[None, None, ARM_DOF:].astype(np.float32)},
+            "language": {TASK_KEY: [[req["instruction"]]]}}
+
+
+def to_chunk(action: dict) -> np.ndarray:
+    """Gr00tPolicy action dict ({key: [1,T,D]}) -> chunk [T,8]."""
+    return np.concatenate([np.asarray(action["single_arm"])[0], np.asarray(action["gripper"])[0]], axis=1)
+
+
+def make_handler(policy):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def _send(self, code: int, obj: dict) -> None:
+            data = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            if self.path == "/health":
+                self._send(200, {"ok": True, "server": "gr00t_shim"})
+            else:
+                self._send(404, {"error": "not found"})
+
+        def do_POST(self):
+            if self.path != "/act":
+                return self._send(404, {"error": "not found"})
+            try:
+                req = decode_request(json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)))))
+            except (ProtocolError, ValueError) as e:
+                return self._send(400, {"error": str(e)})
+            try:
+                action, _info = policy.get_action(to_observation(req))
+                self._send(200, encode_response(to_chunk(action)))
+            except Exception as e:  # the client sees a 500 with the reason, the server keeps running
+                self._send(500, {"error": f"{type(e).__name__}: {e}"})
+
+    return Handler
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(description="HTTP shim around Isaac-GR00T's Gr00tPolicy (untested against real GR00T)")
+    p.add_argument("--model-path", required=True)
+    p.add_argument("--modality-config-path", default="configs/gr00t/arrival_panda_config.py")
+    p.add_argument("--embodiment-tag", default="new_embodiment")
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--host", default="0.0.0.0")
+    p.add_argument("--port", type=int, default=8000)
+    a = p.parse_args(argv)
+    policy = load_policy(a.model_path, a.modality_config_path, a.device, a.embodiment_tag)
+    srv = ThreadingHTTPServer((a.host, a.port), make_handler(policy))
+    print(f"gr00t shim at http://{a.host}:{srv.server_address[1]}", flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
