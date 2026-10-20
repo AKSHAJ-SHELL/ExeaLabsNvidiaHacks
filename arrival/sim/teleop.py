@@ -252,11 +252,27 @@ def run(twin: dict, frames: Iterable[list[str]], out_dir: str | Path = "out", op
     return summary
 
 
+def frame_camera(env, cam) -> None:
+    """Point a free camera over the robot's shoulder at its workspace. MuJoCo's default free camera frames the
+    whole model from ~12 m away, which in a twin is outside the walls."""
+    import mujoco
+
+    b = env.model.body("robot_base").id
+    base, fwd = env.data.xpos[b], env.data.xmat[b].reshape(3, 3)[:, 0]
+    cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+    cam.lookat[:] = [base[0] + 0.45 * fwd[0], base[1] + 0.45 * fwd[1], 0.95]
+    cam.azimuth = float(np.degrees(np.arctan2(fwd[1], fwd[0]))) + 30.0
+    cam.elevation, cam.distance = -48.0, 1.9
+
+
 def passive_viewer(env):
     """The MuJoCo viewer on the env's model and data. On macOS this needs `mjpython` instead of `python`."""
     import mujoco.viewer
 
-    return mujoco.viewer.launch_passive(env.model, env.data, show_left_ui=False, show_right_ui=False)
+    v = mujoco.viewer.launch_passive(env.model, env.data, show_left_ui=False, show_right_ui=False)
+    with v.lock():
+        frame_camera(env, v.cam)
+    return v
 
 
 def main(argv=None) -> int:
