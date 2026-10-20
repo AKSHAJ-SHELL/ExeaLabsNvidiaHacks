@@ -28,6 +28,15 @@ SIM_WORDINGS = {
 }
 
 
+def finish_task(t: dict) -> dict:
+    """Add the handle/joint names the scripted policy and the success check read; shared by collect and eval."""
+    if t["family"] in ("open_drawer", "close_drawer", "put_in_drawer"):
+        t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
+    elif t["family"] in ("open_door", "close_door", "open_fridge"):
+        t["joint"] = f'{t["fixture"]}_door'
+    return t
+
+
 def _fx(twin: dict, fid: str) -> dict:
     return next(f for f in twin["fixtures"] if f["id"] == fid)
 

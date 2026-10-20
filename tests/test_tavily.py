@@ -1,3 +1,4 @@
+import os
 import json
 from pathlib import Path
 import pytest
@@ -126,3 +127,17 @@ def test_enrich_twin_skips_non_appliances_and_negative_caches(tmp_path, monkeypa
     agent.research_appliance("fridge")
     agent.research_appliance("fridge")
     assert len(calls) == 1
+
+
+def test_load_dotenv_reads_every_file(monkeypatch, tmp_path):
+    from arrival.models import tavily, token_factory
+
+    (tmp_path / "a.env").write_text("UNRELATED=1\n")
+    (tmp_path / "b.env").write_text("TAVILY_KEY_TEST=real\n")
+    monkeypatch.delenv("TAVILY_KEY_TEST", raising=False)
+    for mod in (tavily, token_factory):
+        monkeypatch.delenv("TAVILY_KEY_TEST", raising=False)
+        mod.load_dotenv([tmp_path / "a.env", tmp_path / "b.env"])
+        assert os.environ["TAVILY_KEY_TEST"] == "real"
+    monkeypatch.delenv("TAVILY_KEY_TEST", raising=False)
+    os.environ.pop("UNRELATED", None)

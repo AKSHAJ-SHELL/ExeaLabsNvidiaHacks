@@ -342,17 +342,14 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     """Collect `episodes` attempts; failed attempts are dropped and counted."""
     from arrival.sim.export import SimDatasetWriter
     from arrival.sim.policy import ScriptedExpert, VLAClient, VLMPlanner
-    from arrival.sim.tasks import make_tasks
+    from arrival.sim.tasks import finish_task, make_tasks
 
     out_dir = Path(out_dir)
     room = twin["room_id"]
     tasks = make_tasks(twin, families, episodes, seed=seed, people=people,
                        split=split, use_generated_instructions=use_generated_instructions, log=log)
     for t in tasks:
-        if t["family"] in ("open_drawer", "close_drawer", "put_in_drawer"):
-            t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
-        elif t["family"] in ("open_door", "close_door", "open_fridge"):
-            t["joint"] = f'{t["fixture"]}_door'
+        finish_task(t)
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
     planner = VLMPlanner(log=log, cache_path=cache_path) if planner_name == "vlm" else None
     writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"))

@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import pytest
 
@@ -129,3 +130,56 @@ def test_instruction_fallback_not_cached_and_train_nonempty(tmp_path, monkeypatc
     monkeypatch.setattr(tf, "complete", lambda **k: "no list here")
     res = generate_instructions("counter_to_sink", "mug", n=3, cache_path=tmp_path / "d.json")
     assert res["source"] == "template_fallback" and len(res["train"]) + len(res["eval"]) == 3 and res["train"]
+
+
+def _planner_with_reply(monkeypatch, tmp_path, reply):
+    monkeypatch.setattr("arrival.models.token_factory.complete", lambda *a, **k: reply)
+    return VLMPlanner(log=lambda *_: None, cache_path=tmp_path / "c.json")
+
+
+def test_planner_rejects_unknown_family_and_does_not_cache(monkeypatch, tmp_path):
+    planner = _planner_with_reply(monkeypatch, tmp_path, 'Sure {"family": "open_oven", "object": null, "target": null}')
+    plan = planner.plan("Open the cabinet door", ["mug_1"], ["counter_a"])
+    assert planner.source == "rule_based" and plan["family"] == "open_door"
+    assert not (tmp_path / "c.json").exists()
+
+
+def test_planner_rejects_unknown_object_and_non_dict(monkeypatch, tmp_path):
+    planner = _planner_with_reply(monkeypatch, tmp_path, '{"family": "counter_to_sink", "object": "ghost", "target": null}')
+    planner.plan("Put the mug in the sink", ["mug_1"], ["sink_1"])
+    assert planner.source == "rule_based"
+    planner = _planner_with_reply(monkeypatch, tmp_path, "[1, 2]")
+    planner.plan("Put the mug in the sink", ["mug_1"], ["sink_1"])
+    assert planner.source == "rule_based"
+
+
+def test_planner_takes_first_json_object_of_a_chatty_reply(monkeypatch, tmp_path):
+    reply = 'Plan: {"family": "open_door", "object": null, "target": null} (note {not json})'
+    planner = _planner_with_reply(monkeypatch, tmp_path, reply)
+    assert planner.plan("Open the door", [], [])["family"] == "open_door"
+    assert planner.source == "token_factory"
+
+
+def test_planner_stops_calling_a_dead_endpoint(monkeypatch, tmp_path):
+    calls = []
+
+    def dead(*a, **k):
+        calls.append(1)
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr("arrival.models.token_factory.complete", dead)
+    planner = VLMPlanner(log=lambda *_: None, cache_path=tmp_path / "c.json")
+    planner.plan("Open the door", [], [])
+    plan = planner.plan("Close the drawer", [], [])
+    assert len(calls) == 1 and plan["family"] == "close_drawer" and planner.source == "rule_based"
+
+
+def test_research_cache_key_is_stable_across_processes():
+    import subprocess
+    import sys
+
+    code = ("from arrival.sim.policy import VLMPlanner;import tempfile;"
+            "print(VLMPlanner(cache_path=tempfile.mkdtemp()+'/c.json')._cache_key('a',[],[],'ctx'))")
+    keys = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
+                           env={**os.environ, "PYTHONHASHSEED": str(i)}).stdout for i in (1, 2)}
+    assert len(keys) == 1

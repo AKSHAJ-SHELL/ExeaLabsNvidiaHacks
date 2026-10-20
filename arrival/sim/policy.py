@@ -336,6 +336,7 @@ class VLMPlanner:
         self.source = None
         self.cache_path = Path(cache_path) if cache_path else Path(__file__).resolve().parents[1] / "models" / "nemotron_cache.json"
         self._cache = self._load_cache()
+        self._offline = False  # set by the first network failure so later tasks skip the 60 s timeout
 
     def _cache_key(self, instruction: str, objects: list[str], fixtures: list[str],
                    research_context: str | None = None) -> str:
@@ -362,6 +363,20 @@ class VLMPlanner:
         except Exception as e:
             self.log(f"[sim] VLMPlanner: warning, could not write cache to {self.cache_path}: {e}")
 
+    @staticmethod
+    def _parse_plan(txt: str, objects: list[str], fixtures: list[str]) -> dict:
+        """First JSON object in the reply, checked against the known families, objects and fixtures."""
+        from arrival.sim.tasks import SIM_FAMILIES
+
+        plan, _ = json.JSONDecoder().raw_decode(txt[txt.index("{"):])
+        if not isinstance(plan, dict) or plan.get("family") not in SIM_FAMILIES:
+            raise ValueError(f"plan has no known family: {plan!r}")
+        if plan.get("object") is not None and plan["object"] not in objects:
+            raise ValueError(f"plan object {plan['object']!r} is not in the scene")
+        if plan.get("target") is not None and plan["target"] not in fixtures:
+            raise ValueError(f"plan target {plan['target']!r} is not in the scene")
+        return {"family": plan["family"], "object": plan.get("object"), "target": plan.get("target")}
+
     def plan(self, instruction: str, objects: list[str], fixtures: list[str],
              research_context: str | None = None) -> dict:
         from arrival.models.token_factory import TokenFactoryNotConfigured, complete
@@ -370,6 +385,9 @@ class VLMPlanner:
         if key in self._cache:
             self.source = "cache"
             return dict(self._cache[key])
+        if self._offline:
+            self.source = "rule_based"
+            return rule_plan(instruction, objects, fixtures)
 
         try:
             user_payload = {"instruction": instruction, "objects": objects, "fixtures": fixtures}
@@ -378,7 +396,7 @@ class VLMPlanner:
             txt = complete([{"role": "system", "content": "Return only JSON: {\"family\": one of counter_to_sink|"
                              "counter_to_counter|open_drawer|open_door|close_drawer|close_door|put_in_drawer|wipe_counter|open_fridge, \"object\": id|null, \"target\": id|null}"},
                             {"role": "user", "content": json.dumps(user_payload)}], role="super")
-            plan = json.loads(re.search(r"\{.*\}", txt, re.S).group(0))
+            plan = self._parse_plan(txt, objects, fixtures)
             self.source = "token_factory"
             self._cache[key] = plan
             self._save_cache()
@@ -386,6 +404,9 @@ class VLMPlanner:
             self.log(f"[sim] VLMPlanner: Token Factory not configured ({e}); using rule-based parser")
             plan, self.source = rule_plan(instruction, objects, fixtures), "rule_based"
         except Exception as e:  # network / parse errors also fall back, loudly
+            if isinstance(e, OSError):  # URLError and timeouts: the endpoint is down, do not retry it per task
+                self._offline = True
+                self.log("[sim] VLMPlanner: endpoint unreachable; rule-based parser for the rest of this run")
             self.log(f"[sim] VLMPlanner: model call failed ({e!r}); using rule-based parser")
             plan, self.source = rule_plan(instruction, objects, fixtures), "rule_based"
         return plan
