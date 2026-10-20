@@ -1,4 +1,4 @@
-"""python -m arrival demo | validate | serve | sim | eval | work"""
+"""python -m arrival demo | validate | serve | sim | eval | work | gc"""
 
 from __future__ import annotations
 
@@ -261,6 +261,7 @@ def cmd_eval(a) -> int:
 
 def cmd_work(a) -> int:
     """Drain out/jobs: each queued upload -> twin -> sim dataset -> out/jobs/<id>/dataset.zip."""
+    from arrival.jobs.limits import LimitError, Limits
     from arrival.jobs.worker import work
     from arrival.sim.tasks import SIM_FAMILIES
 
@@ -270,9 +271,28 @@ def cmd_work(a) -> int:
         print(f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
               file=sys.stderr)
         return EXIT_USAGE
-    n = work(Path(a.out), once=a.once, poll=a.poll, episodes=a.episodes, families=fams, people=a.people,
-             res=a.res, seed=a.seed)
+    try:  # ARRIVAL_* variables first, then the flags
+        limits = Limits.from_env().replace(max_episodes=a.max_episodes, max_people=a.max_people,
+                                           max_job_seconds=a.max_job_seconds, retention_hours=a.retention_hours)
+        n = work(Path(a.out), once=a.once, poll=a.poll, limits=limits, episodes=a.episodes, families=fams,
+                 people=a.people, res=a.res, seed=a.seed)
+    except LimitError as e:
+        print(f"limit: {e}", file=sys.stderr)
+        return EXIT_USAGE
     print(f"processed {n} job(s)")
+    return EXIT_OK
+
+
+def cmd_gc(a) -> int:
+    """Delete finished jobs (upload, twin, dataset, zip) older than --max-age-hours."""
+    from arrival.jobs.retention import gc
+
+    if a.max_age_hours <= 0:
+        print("--max-age-hours must be > 0", file=sys.stderr)
+        return EXIT_USAGE
+    res = gc(Path(a.out), a.max_age_hours, dry_run=a.dry_run)
+    verb = "would remove" if a.dry_run else "removed"
+    print(f"{verb} {len(res['removed'])} job(s), {res['bytes']} bytes" + (": " + ", ".join(res["removed"]) if res["removed"] else ""))
     return EXIT_OK
 
 
@@ -348,7 +368,19 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--res", type=int, default=128)
     w.add_argument("--seed", type=int, default=0)
     w.add_argument("--out", default="out")
+    w.add_argument("--max-episodes", type=int, help="refuse --episodes above this (env ARRIVAL_MAX_EPISODES, default 100)")
+    w.add_argument("--max-people", type=int, help="refuse --people above this (env ARRIVAL_MAX_PEOPLE, default 4)")
+    w.add_argument("--max-job-seconds", type=float,
+                   help="kill a job after this many wall-clock seconds (env ARRIVAL_MAX_JOB_SECONDS, default 1800; "
+                        "0 = run in-process with no timeout)")
+    w.add_argument("--retention-hours", type=float,
+                   help="also delete finished jobs older than this while working (env ARRIVAL_RETENTION_HOURS; default keep)")
     w.set_defaults(fn=cmd_work)
+    g = sub.add_parser("gc", help="delete finished jobs older than --max-age-hours (upload, twin, dataset, zip)")
+    g.add_argument("--max-age-hours", type=float, required=True)
+    g.add_argument("--dry-run", action="store_true", help="list what would be deleted, delete nothing")
+    g.add_argument("--out", default="out")
+    g.set_defaults(fn=cmd_gc)
     return p
 
 

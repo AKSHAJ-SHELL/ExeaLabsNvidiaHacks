@@ -1,24 +1,54 @@
-"""Drain out/jobs: upload -> twin -> MuJoCo sim dataset -> dataset.zip, one job at a time.
+"""Drain out/jobs: upload -> twin -> MuJoCo sim dataset -> dataset.zip.
 
 ``python -m arrival work`` runs this loop. The web server never imports it. Every
 stage boundary rewrites ``status.json``; a failure is recorded there and the loop
 moves on, so one bad upload never stops the queue.
+
+Several workers may share one ``out/jobs``. A worker claims a job by creating ``claim.lock`` with
+``O_CREAT|O_EXCL`` (exactly one creator wins, across processes), keeps the lock's mtime fresh while the job runs
+(the heartbeat), and removes it when the job ends. A ``running`` job whose lock stopped being touched, or whose
+worker process is gone on the same host, is requeued by ``reap_stale``. The claim is local-filesystem only: on a
+network share without working ``O_EXCL`` it is not safe.
+
+Limits (``arrival.jobs.limits``): a wall-clock timeout per job (the job runs in a child process that is killed),
+episodes and people ceilings, and the upload size. Each finished job gets a ``usage`` block in ``status.json`` and
+one line in ``out/usage/jobs.jsonl``; ``arrival.eval.cost`` reads both.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import socket
+import subprocess
+import sys
+import threading
 import time
 import traceback
 import zipfile
+from dataclasses import asdict
 from pathlib import Path
 
+from arrival.jobs.limits import LimitError, Limits
 from arrival.jobs.queue import write_status
 
 DEFAULT_FAMILIES = ("counter_to_sink", "open_drawer")
 STAGES = ("normalize", "twin", "objects", "sim", "validate", "zip")
 ROOM_RE = re.compile(r"[^a-z0-9_]+")
+LOCK = "claim.lock"  # present while a worker owns the job; its mtime is the heartbeat
+CANCEL = "cancel.requested"  # marker written by cancel_job for a running job
+REAP_LOCK = "reap.lock"  # arbiter so two workers never requeue the same job
+MAX_REQUEUES = 2  # a job whose worker died this many times fails instead of looping forever
+USAGE_LEDGER = ("usage", "jobs.jsonl")  # under out/: one JSON line per finished job, survives gc
+
+
+class JobCancelled(Exception):
+    """Raised at a stage boundary when cancel_job asked for this running job to stop."""
+
+
+def worker_id() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}"
 
 
 class UnsupportedLayout(RuntimeError):
@@ -61,76 +91,326 @@ def _write_status(job_dir: Path, status: dict) -> dict:
     return write_status(job_dir, status)
 
 
-def _stage(job_dir: Path, status: dict, stage: str, log) -> None:
+def _read_status(job_dir: Path) -> dict | None:
+    try:
+        st = json.loads((Path(job_dir) / "status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return st if isinstance(st, dict) else None
+
+
+class Meter:
+    """Wall seconds per stage for one job, written into ``status["usage"]`` as the job goes."""
+
+    def __init__(self) -> None:
+        self.t0 = time.monotonic()
+        self.stage: str | None = None
+        self.t_stage = self.t0
+        self.seconds: dict[str, float] = {}
+
+    def enter(self, stage: str | None) -> None:
+        now = time.monotonic()
+        if self.stage is not None:
+            self.seconds[self.stage] = round(self.seconds.get(self.stage, 0.0) + now - self.t_stage, 3)
+        self.stage, self.t_stage = stage, now
+
+    def wall(self) -> float:
+        return round(time.monotonic() - self.t0, 3)
+
+
+def _dir_bytes(path) -> int | None:
+    try:
+        return sum(p.stat().st_size for p in Path(path).rglob("*") if p.is_file())
+    except OSError:
+        return None
+
+
+def build_usage(status: dict, wall_seconds: float, stage_seconds: dict | None = None) -> dict:
+    """Units one job consumed on this machine. Anything not measured is None, never zero: ``frames`` and the byte
+    counts exist only when the dataset or zip was written, and nothing here is priced (a local CPU run is $0 and
+    ``arrival.eval.cost`` attaches no rate to it)."""
+    def size(key):
+        try:
+            return Path(status[key]).stat().st_size if status.get(key) else None
+        except OSError:
+            return None
+
+    frames = None
+    ds = status.get("dataset_dir")
+    if ds:
+        try:
+            frames = int(json.loads((Path(ds) / "meta" / "info.json").read_text(encoding="utf-8"))["total_frames"])
+        except (OSError, ValueError, KeyError, TypeError):
+            frames = None
+    return {"wall_seconds": round(wall_seconds, 3), "stage_seconds": dict(stage_seconds or {}),
+            "episodes_attempted": status.get("attempts"), "episodes_succeeded": status.get("successes"),
+            "frames": frames, "upload_bytes": status.get("bytes"), "zip_bytes": size("zip"),
+            "dataset_bytes": _dir_bytes(ds) if ds else None, "measured_on": "local_cpu"}
+
+
+def record_usage(out_dir: Path, status: dict) -> None:
+    """Append one line for a finished job to ``out/usage/jobs.jsonl``. The ledger outlives ``arrival gc``."""
+    usage = status.get("usage")
+    if not isinstance(usage, dict):
+        return
+    line = {"id": status.get("id"), "room_id": status.get("room_id"), "status": status.get("status"),
+            "finished_at": status.get("finished_at"), "attempts": status.get("attempts"),
+            "successes": status.get("successes"), **usage}
+    path = Path(out_dir).joinpath(*USAGE_LEDGER)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:  # one write per line: O_APPEND keeps concurrent workers' lines whole
+        f.write(json.dumps(line) + "\n")
+
+
+def _stage(job_dir: Path, status: dict, stage: str, log, meter: Meter | None = None) -> None:
+    if (Path(job_dir) / CANCEL).exists():
+        raise JobCancelled("cancelled before stage " + stage)
     status["stage"] = stage
+    if meter is not None:
+        meter.enter(stage)
+        status["usage"] = build_usage(status, meter.wall(), meter.seconds)
     _write_status(job_dir, status)
     log(f"[work] {status['id']}: {stage}")
 
 
-def claim_next(jobs_root: Path) -> tuple[Path, dict] | None:
-    """Oldest queued job by ``created_unix`` (then id), marked running. None when the queue is empty."""
+# ---- claiming, heartbeat, stale reaping -------------------------------------------------------------------------
+
+def _create_lock(path: Path, owner: str) -> bool:
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"worker": owner, "host": socket.gethostname(), "pid": os.getpid(), "claimed_unix": time.time()}, f)
+    return True
+
+
+def _unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _pid_alive(pid) -> bool | None:
+    """True/False for a process on this host, None when it cannot be told (Windows: os.kill(pid, 0) would kill)."""
+    if sys.platform == "win32" or not isinstance(pid, int) or pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def lock_is_stale(job_dir: Path, stale_seconds: float, now: float | None = None) -> bool:
+    """True when the job's lock (or, with no lock, its status.json) has not been touched for ``stale_seconds``, or the
+    worker that wrote the lock is a dead process on this host."""
+    now = time.time() if now is None else now
+    lock = Path(job_dir) / LOCK
+    try:
+        mtime = lock.stat().st_mtime
+    except FileNotFoundError:
+        try:
+            mtime = (Path(job_dir) / "status.json").stat().st_mtime
+        except OSError:
+            return False
+        return now - mtime > stale_seconds
+    try:
+        info = json.loads(lock.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        info = {}
+    if isinstance(info, dict) and info.get("host") == socket.gethostname() and _pid_alive(info.get("pid")) is False:
+        return True
+    return now - mtime > stale_seconds
+
+
+class Heartbeat:
+    """Touch ``claim.lock`` every ``interval`` seconds from a daemon thread while a job runs."""
+
+    def __init__(self, job_dir: Path, interval: float = 10.0) -> None:
+        self.lock = Path(job_dir) / LOCK
+        self.interval = interval
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            try:
+                os.utime(self.lock)
+            except OSError:
+                pass
+
+    def __enter__(self):
+        self._t.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._t.join(timeout=5)
+
+
+def claim_next(jobs_root: Path, worker: str | None = None) -> tuple[Path, dict] | None:
+    """Claim the oldest queued job by ``created_unix`` (then id): create its ``claim.lock`` exclusively, then mark it
+    running. Safe with several workers; None when nothing is claimable. The caller must ``release`` the job when done."""
     jobs_root = Path(jobs_root)
+    worker = worker or worker_id()
     if not jobs_root.is_dir():
         return None
     queued = []
     for d in jobs_root.iterdir():
-        try:
-            st = json.loads((d / "status.json").read_text(encoding="utf-8"))
-            created = int(st.get("created_unix", 0))
-        except (OSError, ValueError, TypeError, AttributeError):
+        st = _read_status(d)
+        if st is None:
             continue  # not a job, or a status.json this worker cannot read; leave it alone
-        if isinstance(st, dict) and st.get("status") == "queued" and "id" in st:
-            queued.append((created, d.name, d, st))
-    if not queued:
-        return None
-    _, _, job_dir, st = min(queued)
-    st.update({"status": "running", "stage": None, "started_at": int(time.time()), "finished_at": None,
-               "error": None, "room_id": None, "twin_dir": None, "dataset_dir": None, "zip": None,
-               "attempts": None, "successes": None, "skipped": None, "error_kind": None, "error_reasons": None})
-    return job_dir, _write_status(job_dir, st)
+        try:
+            created = int(st.get("created_unix", 0))
+        except (TypeError, ValueError):
+            continue
+        if st.get("status") == "queued" and "id" in st:
+            queued.append((created, d.name, d))
+    for _, _, job_dir in sorted(queued):
+        if not _create_lock(job_dir / LOCK, worker):
+            continue  # another worker owns it
+        st = _read_status(job_dir)  # re-read under the lock: it may have finished or been cancelled since the scan
+        if st is None or st.get("status") != "queued":
+            _unlink(job_dir / LOCK)
+            continue
+        st.update({"status": "running", "stage": None, "started_at": int(time.time()), "finished_at": None,
+                   "error": None, "room_id": None, "twin_dir": None, "dataset_dir": None, "zip": None,
+                   "attempts": None, "successes": None, "skipped": None, "error_kind": None,
+                   "error_reasons": None, "usage": None, "worker": worker})
+        return job_dir, _write_status(job_dir, st)
+    return None
 
 
-def requeue_running(jobs_root: Path, log=print) -> int:
-    """Put jobs left ``running`` by a killed worker back in the queue. Call only when no other worker is running."""
+def release(job_dir: Path) -> None:
+    _unlink(Path(job_dir) / LOCK)
+
+
+def reap_stale(jobs_root: Path, stale_seconds: float = 120.0, log=print, now: float | None = None) -> int:
+    """Requeue ``running`` jobs whose worker died (stale heartbeat or dead local pid), and clear a stale lock left on a
+    ``queued`` job. Safe to call from every worker: ``reap.lock`` lets one worker act on a job at a time and the
+    staleness is re-checked under it. A job requeued ``MAX_REQUEUES`` times fails; a running job with a cancel marker
+    becomes ``cancelled``. Returns the number of jobs changed."""
     jobs_root = Path(jobs_root)
     n = 0
     for d in sorted(jobs_root.iterdir()) if jobs_root.is_dir() else []:
-        try:
-            st = json.loads((d / "status.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        st = _read_status(d)
+        if st is None or "id" not in st or st.get("status") not in ("running", "queued"):
             continue
-        if isinstance(st, dict) and st.get("status") == "running" and "id" in st:
-            st.update({"status": "queued", "stage": None, "started_at": None})
+        if st["status"] == "queued" and not (d / LOCK).exists():
+            continue
+        if not lock_is_stale(d, stale_seconds, now):
+            continue
+        if not _create_lock(d / REAP_LOCK, worker_id()):
+            try:  # a reaper that died holding the arbiter must not block this job forever
+                if (time.time() if now is None else now) - (d / REAP_LOCK).stat().st_mtime > stale_seconds:
+                    _unlink(d / REAP_LOCK)
+            except OSError:
+                pass
+            continue
+        try:
+            st = _read_status(d)  # re-check under the arbiter
+            if st is None or st.get("status") not in ("running", "queued") or not lock_is_stale(d, stale_seconds, now):
+                continue
+            _unlink(d / LOCK)
+            if st["status"] == "queued":
+                log(f"[work] {st['id']}: cleared a stale claim lock")
+                n += 1
+                continue
+            done = int(time.time())
+            if (d / CANCEL).exists():
+                st.update({"status": "cancelled", "finished_at": done, "error": None})
+                _unlink(d / CANCEL)
+                log(f"[work] {st['id']}: cancelled (its worker died)")
+            elif int(st.get("requeues") or 0) >= MAX_REQUEUES:
+                st.update({"status": "failed", "finished_at": done,
+                           "error": f"WorkerLost: the worker died {MAX_REQUEUES + 1} times while running this job"})
+                log(f"[work] {st['id']}: failed, worker lost too many times")
+            else:
+                st.update({"status": "queued", "stage": None, "started_at": None, "worker": None,
+                           "requeues": int(st.get("requeues") or 0) + 1})
+                log(f"[work] {st['id']}: worker is gone, requeued")
+            _write_status(d, st)
+            n += 1
+        finally:
+            _unlink(d / REAP_LOCK)
+    return n
+
+
+def requeue_running(jobs_root: Path, log=print) -> int:
+    """Put every ``running`` job back in the queue unconditionally, ignoring heartbeats. Only for an operator who knows
+    no worker is running; ``work`` uses ``reap_stale``, which is safe beside other workers."""
+    jobs_root = Path(jobs_root)
+    n = 0
+    for d in sorted(jobs_root.iterdir()) if jobs_root.is_dir() else []:
+        st = _read_status(d)
+        if st is not None and st.get("status") == "running" and "id" in st:
+            _unlink(d / LOCK)
+            st.update({"status": "queued", "stage": None, "started_at": None, "worker": None})
             _write_status(d, st)
             log(f"[work] {st['id']}: was running with no worker, requeued")
             n += 1
     return n
 
 
+def cancel_job(jobs_root: Path, job_id: str) -> str | None:
+    """Ask for a job to stop. Returns None for an unknown id, ``"cancelled"`` for a job that was still queued (done
+    now), ``"cancelling"`` for a running one (it stops at the next stage boundary, or at once when the worker runs
+    jobs in a child process), and the job's status for one that already finished."""
+    job_dir = Path(jobs_root) / job_id
+    st = _read_status(job_dir)
+    if st is None:
+        return None
+    if st.get("status") == "queued" and _create_lock(job_dir / LOCK, "cancel"):  # claim it so no worker takes it
+        try:
+            st = _read_status(job_dir) or st
+            if st.get("status") == "queued":
+                st.update({"status": "cancelled", "finished_at": int(time.time())})
+                _write_status(job_dir, st)
+                return "cancelled"
+        finally:
+            _unlink(job_dir / LOCK)
+    if st.get("status") in ("queued", "running"):
+        (job_dir / CANCEL).write_text(str(int(time.time())), encoding="utf-8")
+        return "cancelling"
+    return st.get("status")
+
+
+# ---- one job --------------------------------------------------------------------------------------------------
+
 def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, families=DEFAULT_FAMILIES,
-            people: int = 1, res: int = 128, seed: int = 0, log=print) -> dict:
-    """Run every stage for one claimed job. Returns the final status; never raises."""
+            people: int = 1, res: int = 128, seed: int = 0, log=print, limits: Limits | None = None) -> dict:
+    """Run every stage for one claimed job. Returns the final status; never raises (except Ctrl-C and SystemExit)."""
     out_dir, job_dir = Path(out_dir), Path(job_dir)
+    limits = limits or Limits()
+    meter = Meter()
     try:
+        limits.check_request(episodes, people)
         from arrival.export.validate import validate
         from arrival.twin.compile import compile_twin, place_default_objects, write_twin
 
         room = room_id_for(status.get("filename", ""), status["id"])
         status["room_id"] = room
-        _stage(job_dir, status, "normalize", log)
-        bundle = load_upload(job_dir / "upload.bin", room)
+        _stage(job_dir, status, "normalize", log, meter)
+        upload = job_dir / "upload.bin"
+        if limits.max_upload_bytes and upload.stat().st_size > limits.max_upload_bytes:
+            raise LimitError(f"upload is {upload.stat().st_size} bytes, over the limit of {limits.max_upload_bytes}")
+        bundle = load_upload(upload, room)
 
-        _stage(job_dir, status, "twin", log)
+        _stage(job_dir, status, "twin", log, meter)
         twin = compile_twin(bundle)
 
-        _stage(job_dir, status, "objects", log)
+        _stage(job_dir, status, "objects", log, meter)
         if not twin["objects"]:
             place_default_objects(twin, seed=seed)
         twin_dir = out_dir / "twins" / room
         write_twin(twin, twin_dir)
         status["twin_dir"] = str(twin_dir)
 
-        _stage(job_dir, status, "sim", log)
+        _stage(job_dir, status, "sim", log, meter)
         from arrival.sim.collect import collect
 
         res_ = collect(twin, list(families), episodes, out_dir, people=people, res=res, seed=seed, log=log)
@@ -146,12 +426,12 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
         if r["successes"] == 0:
             raise RuntimeError(f"no successful episodes in {r['attempts']} attempts")
 
-        _stage(job_dir, status, "validate", log)
+        _stage(job_dir, status, "validate", log, meter)
         errors = validate(res_["dataset"])
         if errors:
             raise RuntimeError("dataset invalid: " + "; ".join(errors[:5]))
 
-        _stage(job_dir, status, "zip", log)
+        _stage(job_dir, status, "zip", log, meter)
         zip_path = job_dir / "dataset.zip"
         ds = Path(res_["dataset"])
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -159,6 +439,10 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
                 if p.is_file():
                     zf.write(p, Path(ds.name) / p.relative_to(ds))
         status.update({"zip": str(zip_path), "status": "done"})
+    except JobCancelled:
+        status.update({"status": "cancelled", "error": None})
+        _unlink(job_dir / CANCEL)
+        log(f"[work] {status['id']}: cancelled at {status.get('stage')}")
     except BaseException as e:  # noqa: BLE001 - any stage failure is the job's failure, not the worker's
         status.update({"status": "failed", "error": f"{type(e).__name__}: {e}" if str(e) else type(e).__name__})
         if isinstance(e, UnsupportedLayout):  # a typed status, not a traceback: the room, not the worker, is the problem
@@ -168,34 +452,131 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
         elif not isinstance(e, Exception):  # Ctrl-C or SystemExit: record it so the job is not left running, then stop
             status["error"] = f"interrupted: {status['error']}"
             status["finished_at"] = int(time.time())
+            meter.enter(None)
+            status["usage"] = build_usage(status, meter.wall(), meter.seconds)
             _write_status(job_dir, status)
             raise
         else:
             (job_dir / "error.txt").write_text(traceback.format_exc(), encoding="utf-8")
             log(f"[work] {status['id']}: failed at {status.get('stage')}: {status['error']}")
     status["finished_at"] = int(time.time())
+    meter.enter(None)
+    status["usage"] = build_usage(status, meter.wall(), meter.seconds)
     _write_status(job_dir, status)
+    try:
+        record_usage(out_dir, status)
+    except OSError as e:  # metering must never turn a finished job into a failure
+        log(f"[work] {status['id']}: usage ledger not written: {e}")
     if status["status"] == "done":
         log(f"[work] {status['id']}: done, {status['successes']}/{status['attempts']} episodes -> {status['zip']}")
     return status
 
 
-def run_once(out_dir: Path, **kw) -> dict | None:
-    """Claim and process one queued job. None when nothing is queued."""
-    claimed = claim_next(Path(out_dir) / "jobs")
+def run_isolated(job_dir: Path, status: dict, out_dir: Path, limits: Limits, log=print, child_cmd=None,
+                 tick: float = 0.1, **kw) -> dict:
+    """Run ``process`` in a child process and enforce ``limits.max_job_seconds`` by killing it. The child writes its
+    own status; this function only steps in when the child timed out, was cancelled, or died without finishing
+    (killed by the OS, segfault), and then records the failure with the stage it reached."""
+    job_dir, out_dir = Path(job_dir), Path(out_dir)
+    payload = {k: (list(v) if k == "families" else v) for k, v in kw.items()
+               if k in ("episodes", "families", "people", "res", "seed")}
+    payload["limits"] = asdict(limits)
+    cmd = list(child_cmd or [sys.executable, "-m", "arrival.jobs.child"]) + [str(job_dir), str(out_dir), json.dumps(payload)]
+    t0 = time.monotonic()
+    deadline = t0 + limits.max_job_seconds if limits.max_job_seconds else None
+    proc = subprocess.Popen(cmd)
+    why = None
+    try:
+        while proc.poll() is None:
+            if deadline is not None and time.monotonic() > deadline:
+                why = "timeout"
+            elif (job_dir / CANCEL).exists():
+                why = "cancel"
+            if why:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                break
+            time.sleep(tick)
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+    final = _read_status(job_dir) or status
+    if final.get("status") != "running" and why is None:
+        return final  # the child finished the job itself, usage and ledger included
+    done = (final.get("usage") or {}).get("stage_seconds") or {}
+    stage = final.get("stage")
+    if why == "timeout":
+        final.update({"status": "failed", "error": f"TimeoutError: job exceeded the {limits.max_job_seconds:g} s "
+                                                    f"wall-clock limit during stage {stage!r}"})
+    elif why == "cancel":
+        final.update({"status": "cancelled", "error": None})
+        _unlink(job_dir / CANCEL)
+    elif final.get("status") == "running":
+        final.update({"status": "failed", "error": f"WorkerProcessError: the job's process exited with code "
+                                                    f"{proc.returncode} during stage {stage!r}"})
+    if final["status"] == "failed":
+        (job_dir / "error.txt").write_text(final["error"] + "\n", encoding="utf-8")
+    final["finished_at"] = int(time.time())
+    final["usage"] = build_usage(final, time.monotonic() - t0, done)  # the stage in flight is not split out
+    _write_status(job_dir, final)
+    try:
+        record_usage(out_dir, final)
+    except OSError as e:
+        log(f"[work] {final['id']}: usage ledger not written: {e}")
+    log(f"[work] {final['id']}: {final['status']}: {final.get('error') or 'stopped'}")
+    return final
+
+
+def run_once(out_dir: Path, limits: Limits | None = None, isolate: bool = False, worker: str | None = None,
+             child_cmd=None, **kw) -> dict | None:
+    """Claim and process one queued job. None when nothing is queued. With ``isolate`` the job runs in a child process
+    under ``limits.max_job_seconds``; otherwise in this process (no timeout)."""
+    limits = limits or Limits()
+    claimed = claim_next(Path(out_dir) / "jobs", worker)
     if claimed is None:
         return None
     job_dir, status = claimed
-    return process(job_dir, status, out_dir, **kw)
+    try:
+        with Heartbeat(job_dir, min(10.0, max(0.05, limits.stale_seconds / 4))):
+            if isolate:
+                return run_isolated(job_dir, status, out_dir, limits, child_cmd=child_cmd, **kw)
+            return process(job_dir, status, out_dir, limits=limits, **kw)
+    finally:
+        release(job_dir)
 
 
-def work(out_dir: Path, once: bool = False, poll: float = 2.0, log=print, **kw) -> int:
-    """Poll until Ctrl-C (or one job with ``once``). Returns the number of jobs processed."""
+def work(out_dir: Path, once: bool = False, poll: float = 2.0, log=print, limits: Limits | None = None,
+         isolate: bool | None = None, worker: str | None = None, **kw) -> int:
+    """Poll until Ctrl-C (or one job with ``once``). Returns the number of jobs processed.
+
+    ``limits`` default to ``Limits.from_env()``; sim options above them raise ``LimitError`` before any job is touched.
+    ``isolate`` defaults to on when ``limits.max_job_seconds`` is set. Other workers may run on the same ``out``."""
+    limits = limits or Limits.from_env()
+    limits.check_request(int(kw.get("episodes", 8)), int(kw.get("people", 1)))
+    if isolate is None:
+        isolate = bool(limits.max_job_seconds)
+    out_dir = Path(out_dir)
+    jobs = out_dir / "jobs"
     n = 0
-    requeue_running(Path(out_dir) / "jobs", log=log)
+    next_reap = next_gc = 0.0
     try:
         while True:
-            st = run_once(out_dir, log=log, **kw)
+            now = time.monotonic()
+            if now >= next_reap:
+                reap_stale(jobs, limits.stale_seconds, log=log)
+                next_reap = now + max(poll, limits.stale_seconds / 4)
+            if limits.retention_hours and now >= next_gc:
+                from arrival.jobs.retention import gc
+
+                for jid in gc(out_dir, limits.retention_hours, log=log)["removed"]:
+                    log(f"[work] retention: removed {jid}")
+                next_gc = now + 300
+            st = run_once(out_dir, limits=limits, isolate=isolate, worker=worker, log=log, **kw)
             if st is not None:
                 n += 1
             if once:

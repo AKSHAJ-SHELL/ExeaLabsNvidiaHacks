@@ -14,7 +14,8 @@ import uuid
 from pathlib import Path
 from typing import BinaryIO
 
-MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+from arrival.jobs.limits import MAX_UPLOAD_BYTES, QueueFull
+
 CHUNK = 1 << 20
 
 
@@ -27,11 +28,28 @@ def new_job_id() -> str:
     return "job_" + uuid.uuid4().hex[:8]
 
 
-def create_job(jobs_root: Path, filename: str, data: bytes | None = None,
-               src: BinaryIO | None = None, offset: int = 0, length: int = 0) -> dict:
-    """Write ``<jobs_root>/<id>/upload.bin`` (from ``data``, or ``length`` bytes of ``src`` at ``offset``,
-    copied in chunks) and ``status.json``; return the status."""
+def count_active(jobs_root: Path) -> int:
+    """Jobs that are ``queued`` or ``running`` (unreadable status files are not counted)."""
     jobs_root = Path(jobs_root)
+    n = 0
+    for d in jobs_root.iterdir() if jobs_root.is_dir() else []:
+        try:
+            st = json.loads((d / "status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        n += isinstance(st, dict) and st.get("status") in ("queued", "running")
+    return n
+
+
+def create_job(jobs_root: Path, filename: str, data: bytes | None = None,
+               src: BinaryIO | None = None, offset: int = 0, length: int = 0, max_queue: int = 0) -> dict:
+    """Write ``<jobs_root>/<id>/upload.bin`` (from ``data``, or ``length`` bytes of ``src`` at ``offset``,
+    copied in chunks) and ``status.json``; return the status. With ``max_queue`` > 0, raise ``QueueFull`` when that
+    many jobs are already queued or running. The count is not atomic with the write, so concurrent uploads can
+    overshoot the limit by a few; it bounds the queue, it is not an exact gate."""
+    jobs_root = Path(jobs_root)
+    if max_queue and count_active(jobs_root) >= max_queue:
+        raise QueueFull(f"queue is full: {max_queue} jobs are queued or running")
     job_id = new_job_id()
     job_dir = jobs_root / job_id
     job_dir.mkdir(parents=True, exist_ok=False)

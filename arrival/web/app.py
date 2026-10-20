@@ -18,7 +18,8 @@ from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from arrival.jobs.queue import check_upload_size, create_job, read_job
+from arrival.jobs.limits import LimitError, Limits, QueueFull
+from arrival.jobs.queue import check_upload_size, count_active, create_job, read_job
 
 ID_RE = re.compile(r"^[a-z0-9_]+$")
 BOUNDARY_RE = re.compile(r'boundary="?([^";]+)"?', re.I)
@@ -677,9 +678,16 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", ""))
         except ValueError:
             return self._json(411, {"error": "Content-Length required"})
-        if not check_upload_size(length):
+        try:
+            limits = Limits.from_env()
+        except LimitError as e:  # a bad ARRIVAL_* variable is the operator's mistake, not the client's
+            return self._json(500, {"error": f"server limits misconfigured: {e}"})
+        if not check_upload_size(length, limits.max_upload_bytes):
             self.close_connection = True
-            return self._json(413, {"error": "upload too large", "max_bytes": 200 * 1024 * 1024})
+            return self._json(413, {"error": "upload too large", "max_bytes": limits.max_upload_bytes})
+        if limits.max_queue and count_active(self.out_dir / "jobs") >= limits.max_queue:  # before reading the body
+            self.close_connection = True
+            return self._json(429, {"error": "queue is full, try again later", "max_queue": limits.max_queue})
         ctype = self.headers.get("Content-Type", "")
         if not ctype.lower().startswith("multipart/form-data"):
             return self._json(400, {"error": "expected multipart/form-data"})
@@ -709,7 +717,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "file field 'scan' has no filename"})
             if size <= 0:
                 return self._json(400, {"error": "uploaded file is empty"})
-            status = create_job(self.out_dir / "jobs", filename, src=tmp, offset=offset, length=size)
+            try:
+                status = create_job(self.out_dir / "jobs", filename, src=tmp, offset=offset, length=size,
+                                    max_queue=limits.max_queue)
+            except QueueFull as e:
+                return self._json(429, {"error": str(e), "max_queue": limits.max_queue})
         self._json(202, {"status": "queued", "id": status["id"],
                          "status_url": f"/jobs/{status['id']}"})
 
