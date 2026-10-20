@@ -39,7 +39,11 @@ def load_upload(path: Path, room_id: str) -> dict:
         bundle = scan_bundle.validate(data)
         bundle["room_id"] = room_id
         return bundle
-    if any(isinstance(x, dict) and "transform" in x for k in ("walls", "objects") for x in data.get(k, [])):
+    def posed(d: dict) -> bool:
+        return any(isinstance(x, dict) and "transform" in x for k in ("walls", "objects") for x in (d.get(k) or []))
+
+    rooms = data.get("rooms")  # a CapturedStructure export nests the room dicts
+    if posed(data) or (isinstance(rooms, list) and any(isinstance(r, dict) and posed(r) for r in rooms)):
         return roomplan.to_bundle(data, room_id)
     raise ValueError("upload is neither a RoomPlan export (walls/objects with transform) nor a scan.json (schema_version)")
 

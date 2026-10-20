@@ -161,3 +161,29 @@ def test_hero_objects_rest_on_a_counter_outside_appliances(hero_bundle):
                   and _footprint(c)[2] <= y0 and y1 <= _footprint(c)[3]]
         assert inside, (o["id"], "not fully on a counter top")
         assert not [a for a in appliances if _overlap(o, a)], (o["id"], "inside an appliance")
+
+
+def test_four_photo_rerun_clears_stale_and_rejects_bad_room_id(tmp_path):
+    scans = tmp_path / "scans"
+    (scans / "hero_kitchen").mkdir(parents=True)
+    (scans / "hero_kitchen" / "scan.json").write_text((SCANS / "hero_kitchen" / "scan.json").read_text())
+    pngs = [_tiny_png(tmp_path / f"p{i}.png") for i in range(4)]
+    jpgs = []
+    for i, p in enumerate(pngs):
+        j = tmp_path / f"q{i}.jpg"
+        j.write_bytes(p.read_bytes())
+        jpgs.append(j)
+    bundle_from_photos(jpgs, "r", scans_dir=scans)
+    bundle_from_photos(pngs, "r", scans_dir=scans)
+    assert sorted(f.suffix for f in (scans / "r" / "photos").iterdir()) == [".png"] * 4
+    with pytest.raises(ValueError):
+        bundle_from_photos(pngs, "../x", scans_dir=scans)
+
+
+def test_select_story_ignores_low_confidence_objects():
+    def obj(i, story, conf):
+        return {"identifier": i, "story": story, "confidence": conf, "category": {"table": {}},
+                "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], "dimensions": [1, 1, 1]}
+    rp = {"walls": [], "objects": [obj("a", 0, "high"), obj("b", 0, "high"),
+                                   obj("c", 1, "low"), obj("d", 1, "low"), obj("e", 1, "low")]}
+    assert roomplan._select_story(rp, None)[1] == 0

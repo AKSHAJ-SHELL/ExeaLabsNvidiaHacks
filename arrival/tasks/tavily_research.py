@@ -15,6 +15,7 @@ from arrival.models.tavily import TavilyNotConfigured, search as tavily_search
 
 DEFAULT_CACHE = Path(__file__).resolve().parents[1] / "models" / "tavily_cache.json"
 
+CANONICAL_APPLIANCES = ("dishwasher", "stove", "fridge", "microwave", "sink")
 APPLIANCE_QUERIES = {
     "dishwasher": "residential kitchen dishwasher door latch mechanism and safe loading clearance",
     "stove": "residential gas range cooktop burner safety and knob operation",
@@ -93,6 +94,7 @@ class TavilyResearchAgent:
         self.log = log
         self.cache_path = Path(cache_path) if cache_path else DEFAULT_CACHE
         self._cache = self._load_cache()
+        self._failed: set[str] = set()  # queries that failed this run; not persisted
         self.last_source: str = "uninitialized"
 
     def _load_cache(self) -> dict:
@@ -116,6 +118,9 @@ class TavilyResearchAgent:
     def search(self, query: str, search_depth: str = "basic") -> dict[str, Any]:
         """Search query with Tavily, checking cache first and falling back cleanly."""
         q_norm = query.strip().lower()
+        if q_norm in self._failed:
+            self.last_source = "fallback"
+            return {"source": "fallback", "answer": "", "results": []}
         if q_norm in self._cache:
             self.last_source = "cache"
             return dict(self._cache[q_norm])
@@ -134,16 +139,23 @@ class TavilyResearchAgent:
         except TavilyNotConfigured as e:
             self.log(f"[tavily] API unconfigured ({e}); using domain fallback")
             self.last_source = "fallback"
+            self._failed.add(q_norm)
             return {"source": "fallback", "answer": "", "results": []}
         except Exception as e:
             self.log(f"[tavily] search error ({e}); using domain fallback")
             self.last_source = "fallback"
+            self._failed.add(q_norm)
             return {"source": "fallback", "answer": "", "results": []}
+
+    @staticmethod
+    def _is_appliance(fixture_type: str) -> bool:
+        key = fixture_type.lower()
+        return key in APPLIANCE_QUERIES or any(k in key for k in CANONICAL_APPLIANCES)
 
     def research_appliance(self, fixture_type: str) -> dict[str, Any]:
         """Synthesize operating knowledge and safety guidelines for an appliance."""
         key = fixture_type.lower()
-        canonical = next((k for k in ("dishwasher", "stove", "fridge", "microwave", "sink") if k in key), "appliance")
+        canonical = next((k for k in CANONICAL_APPLIANCES if k in key), "appliance")
         query = APPLIANCE_QUERIES.get(key, APPLIANCE_QUERIES.get(canonical, f"residential {key} appliance safe robot operation"))
 
         search_res = self.search(query)
@@ -178,7 +190,7 @@ class TavilyResearchAgent:
 
         for fx in twin.get("fixtures", []):
             ftype = fx.get("type", "")
-            if ftype and ftype not in research:
+            if ftype and ftype not in research and self._is_appliance(ftype):
                 research[ftype] = self.research_appliance(ftype)
 
         enriched["tavily_research"] = research

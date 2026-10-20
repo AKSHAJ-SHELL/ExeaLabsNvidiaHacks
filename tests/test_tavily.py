@@ -106,3 +106,23 @@ def test_cli_research_command(tmp_path):
     assert report_file.is_file()
     data = json.loads(report_file.read_text())
     assert "sink" in data or "counter" in data or "stove" in data
+
+
+def test_enrich_twin_skips_non_appliances_and_negative_caches(tmp_path, monkeypatch):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    agent = TavilyResearchAgent(log=lambda *_: None, cache_path=tmp_path / "c.json")
+    twin = {"fixtures": [{"id": "b", "type": "box"}, {"id": "c", "type": "counter"},
+                         {"id": "h", "type": "hinge_cabinet"}, {"id": "s", "type": "sink"}]}
+    research = agent.enrich_twin(twin)["tavily_research"]
+    assert set(research) == {"sink"}
+
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(a)
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr("arrival.tasks.tavily_research.tavily_search", boom)
+    agent.research_appliance("fridge")
+    agent.research_appliance("fridge")
+    assert len(calls) == 1

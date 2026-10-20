@@ -165,3 +165,15 @@ def test_status_is_never_read_half_written(tmp_path):
     assert writes[0] > 0
     assert reads > 100
     assert [p.name for p in (tmp_path / status["id"]).iterdir() if p.name.endswith(".tmp")] == []
+
+
+def test_load_upload_accepts_captured_structure_and_null_lists(tmp_path):
+    import json
+
+    flat = json.loads((REPO / "scans" / "hero_kitchen" / "roomplan.json").read_text())
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"rooms": [flat]}))
+    assert load_upload(p, "st_job_00000000")["geometry_source"] == "roomplan"
+    p.write_text(json.dumps({"walls": None, "objects": None}))
+    with pytest.raises(ValueError):
+        load_upload(p, "x")

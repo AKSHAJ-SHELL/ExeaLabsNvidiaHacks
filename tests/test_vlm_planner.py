@@ -83,7 +83,8 @@ def test_generate_instructions_train_eval_split(tmp_path):
     assert set(res["train"]).isdisjoint(set(res["eval"]))
 
 
-def test_sim_collect_with_vlm_planner(tmp_path):
+def test_sim_collect_with_vlm_planner(tmp_path, monkeypatch):
+    monkeypatch.delenv("TOKEN_FACTORY_API_KEY", raising=False)  # no network; fallback is not cached
     mujoco = pytest.importorskip("mujoco")
     from arrival.scan.bundle import load_room
     from arrival.sim.collect import collect
@@ -106,3 +107,25 @@ def test_sim_collect_with_vlm_planner(tmp_path):
     report = res["report_data"]
     assert report["planner"] == "vlm"
     assert report["attempts"] == 1
+
+
+def test_instruction_fallback_not_cached_and_train_nonempty(tmp_path, monkeypatch):
+    import arrival.models.token_factory as tf
+
+    cache_file = tmp_path / "c.json"
+
+    def down(*a, **k):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(tf, "complete", down)
+    res = generate_instructions("counter_to_sink", "mug", cache_path=cache_file)
+    assert res["source"] == "template_fallback" and not cache_file.exists()
+
+    monkeypatch.setattr(tf, "complete", lambda **k: '["Put the mug in the sink."]')
+    res = generate_instructions("counter_to_sink", "mug", cache_path=cache_file)
+    assert res["source"] == "token_factory"
+    assert res["train"] == ["Put the mug in the sink."] and res["eval"] == []
+
+    monkeypatch.setattr(tf, "complete", lambda **k: "no list here")
+    res = generate_instructions("counter_to_sink", "mug", n=3, cache_path=tmp_path / "d.json")
+    assert res["source"] == "template_fallback" and len(res["train"]) + len(res["eval"]) == 3 and res["train"]

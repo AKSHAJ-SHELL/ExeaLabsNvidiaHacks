@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import shutil
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from arrival.scan.bundle import load_room, validate
 
 def bundle_from_photos(paths: list, room_id: str, scans_dir: str | Path = "scans",
                        template_room: str = "hero_kitchen") -> dict:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", room_id or "") or ".." in room_id:
+        raise ValueError(f"invalid room_id: {room_id!r}")
     paths = [Path(p) for p in paths]
     if len(paths) != 4:
         raise ValueError(f"bundle_from_photos needs exactly 4 photos, got {len(paths)}")
@@ -21,6 +24,8 @@ def bundle_from_photos(paths: list, room_id: str, scans_dir: str | Path = "scans
     template = load_room(template_room, scans_dir)
     photo_dir = scans_dir / room_id / "photos"
     photo_dir.mkdir(parents=True, exist_ok=True)
+    for old in photo_dir.glob("photo_*"):  # a re-run with other suffixes must not leave stale photos
+        old.unlink()
     for i, p in enumerate(paths):
         shutil.copy2(p, photo_dir / f"photo_{i}{p.suffix.lower()}")
     bundle = copy.deepcopy(template)
