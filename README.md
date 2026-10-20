@@ -222,6 +222,8 @@ python -m arrival sim --families all                           # include the not
 python -m arrival eval --episodes 4 --people 2                 # score a policy closed-loop, no dataset written
 ```
 
+Each evaluation writes a new `out/eval/<run_id>/` with `manifest.json`, `episodes.jsonl` and `report.json`. Replay the printed manifest with `--manifest PATH --policy vla --checkpoint-id LABEL` to compare checkpoints on the same twin and ordered trials. The checkpoint label is supplied by the caller; it is not verified against the server. See [the evaluation protocol](docs/07-eval.md).
+
 Full usage, output layout, credentials and cost tracking are in **[docs/REFERENCE.md](docs/REFERENCE.md)**.
 
 ## How it works

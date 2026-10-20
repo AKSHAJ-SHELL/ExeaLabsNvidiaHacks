@@ -601,7 +601,11 @@ The `sim` report (`out/reports/<room_id>_sim.json`) adds `human_contacts` (total
 
 ## Eval
 
-`out/eval/<room_id>_<policy>.json`, written by `python -m arrival eval`.
+`out/eval/<run_id>/report.json`, written by `python -m arrival eval`. Each invocation creates a new directory. The summary fields below are retained; the report also includes `run_id`, `checkpoint_id`, `checkpoint_id_source`, `manifest_id`, `twin_sha256`, `manifest_path`, `episodes_path`, `runtime`, `base` and `omitted_families`.
+
+`manifest.json` has `schema_version: 1`, the full `twin`, its `twin_sha256`, ordered `tasks`, `omitted_families` and `settings` (families, episodes_per_family, seed, people, holdout, resolution, base, fps, max_steps). `manifest_id` is the SHA-256 of sorted compact UTF-8 JSON with that ID omitted; nonfinite values are refused. The twin hash uses the same encoding. Replay validates and copies the manifest before any rollout.
+
+`episodes.jsonl` has one row per attempted trial: `run_id`, `checkpoint_id`, `manifest_id`, `trial_index`, `task_id`, `family`, `physics_success`, `success`, `seconds`, `wall_seconds`, `safety`, `ik_error`, `detail`, `error`. Physics success is null on an exception; scored success is false. Simulation time and safety fields are null on exceptions. Family and total `observed_episodes` counts identify attempts with measurements; safety aggregates and mean simulation time use only those attempts and are null when none were observed. Success rates still count all attempts, including errors. Completed reports aggregate these rows. A run interrupted before completion keeps its manifest and recorded attempts without a summary report.
 
 ```json
 {

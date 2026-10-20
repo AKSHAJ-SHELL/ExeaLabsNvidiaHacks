@@ -1,6 +1,6 @@
 """Time and cost report computed from local runs: python -m arrival.eval.cost [--out out].
 
-Reads out/reports/*.json (demo and sim reports), out/eval/*.json, out/jobs/*/status.json and the per-job usage ledger
+Reads out/reports/*.json (demo and sim reports), out/eval/*/report.json, legacy out/eval/*.json, out/jobs/*/status.json and the per-job usage ledger
 out/usage/jobs.jsonl (the worker's metering: wall seconds, episodes, frames, bytes; it outlives `arrival gc`, so a deleted
 job keeps its row). Metered units are measured on the local machine and carry no price. Throughput numbers are
 whatever those files hold. A dollar row is measured only when a usage file supplied the units AND the pricing line
@@ -136,9 +136,12 @@ def collect_rows(out_dir: str | Path) -> list[dict]:
         if isinstance(fams, dict):  # sim reports: per-family counts, no per-family seconds
             for fam, f in fams.items():
                 rows.append(_row("report", room, fam, f.get("attempts"), f.get("successes"), None, f.get("human_contacts")))
-    for p in sorted((out / "eval").glob("*.json")):
+    for p in sorted(list((out / "eval").glob("*.json")) + list((out / "eval").glob("*/report.json"))):
         r = _load(p, "report")
+        if not isinstance(r.get("totals"), dict) or not isinstance(r.get("families"), dict):
+            continue
         room = r.get("room_id", p.stem)
+        start = len(rows)
         for fam, f in (r.get("families") or {}).items():
             n = f.get("episodes")
             wall = f.get("mean_wall_seconds")
@@ -147,6 +150,8 @@ def collect_rows(out_dir: str | Path) -> list[dict]:
         t = r.get("totals") or {}
         rows.append(_row("eval", room, None, t.get("episodes"), t.get("successes"), t.get("wall_seconds"),
                          t.get("human_contacts")))
+        for row in rows[start:]:
+            row.update(run_id=r.get("run_id"), checkpoint_id=r.get("checkpoint_id"))
     metered = job_usage(out)
     for p in sorted((out / "jobs").glob("*/status.json")):
         s = _load(p, "job status")
@@ -253,7 +258,7 @@ def markdown(rep: dict) -> str:
     L = ["| source | room | family | attempts | successes | drop rate | seconds | demos/hour | s/demo | attempts/demo |",
          "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rep["rows"]:
-        L.append(f"| {r['source']} | {r['room']} | {r['family'] or 'all'} | {_f(r['attempts'])} | {_f(r['successes'])} | "
+        L.append(f"| {r['source']}{':' + r['run_id'] if r.get('run_id') else ''} | {r['room']} | {r['family'] or 'all'} | {_f(r['attempts'])} | {_f(r['successes'])} | "
                  f"{_f(r['drop_rate'])} | {_f(r['seconds'], '{:.1f}')} | {_f(r['demos_per_hour'])} | "
                  f"{_f(r['seconds_per_demo'])} | {_f(r['attempts_per_demo'])} |")
     if not rep["rows"]:
@@ -267,6 +272,10 @@ def markdown(rep: dict) -> str:
     m = rep["metering"]
     if m["jobs"]:
         L += ["", f"Worker metering over {m['jobs']} job(s): " + ", ".join(f"{k} {_f(m[k])}" for k in METER_KEYS) + "."]
+    runs = {r["run_id"]: r.get("checkpoint_id") for r in rep["rows"] if r.get("run_id")}
+    if runs:
+        L += ["", "Evaluation runs (checkpoint labels supplied by the caller):"]
+        L += [f"- {run_id}: {checkpoint}" for run_id, checkpoint in runs.items()]
     c = rep["comparison"]
     L.append("")
     if not c["measured"]:

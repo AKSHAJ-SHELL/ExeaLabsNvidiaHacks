@@ -34,7 +34,7 @@ def test_wilson_known_value():
 def test_scripted_eval_shape(twin, tmp_path):
     rep = evaluate(twin, ["counter_to_sink", "open_drawer"], 2, res=32, people=1, out_dir=tmp_path,
                    log=lambda *_: None)
-    saved = json.loads((tmp_path / "eval" / "hero_kitchen_scripted.json").read_text())
+    saved = json.loads(rep["path"].read_text(encoding="utf-8"))
     assert set(saved["families"]) == {"counter_to_sink", "open_drawer"}
     for f in saved["families"].values():
         assert f["episodes"] == 2 and 0.0 <= f["success_rate"] <= 1.0
@@ -45,13 +45,13 @@ def test_scripted_eval_shape(twin, tmp_path):
         assert math.isfinite(f["min_human_distance_m"]) and f["min_human_distance_m"] > 0
         assert f["ik_error_max"] is not None
     assert saved["totals"]["episodes"] == 4 and saved["policy"] == "scripted" and saved["holdout"] is False
-    assert rep["path"] == tmp_path / "eval" / "hero_kitchen_scripted.json"
+    assert rep["path"] == tmp_path / "eval" / rep["run_id"] / "report.json"
 
 
 def test_eval_reports_arm_contacts(twin, tmp_path):
     fams = ["counter_to_sink", "open_door"]
     rep = evaluate(twin, fams, 1, res=32, people=0, out_dir=tmp_path, log=lambda *_: None)
-    saved = json.loads((tmp_path / "eval" / "hero_kitchen_scripted.json").read_text())
+    saved = json.loads(rep["path"].read_text(encoding="utf-8"))
     for f in saved["families"].values():
         assert f["episodes"] == 1 and f["arm_contact_episodes"] in (0, 1) and f["arm_contact_max_depth_m"] >= 0
     assert saved["totals"]["arm_contact_episodes"] == sum(f["arm_contact_episodes"] for f in saved["families"].values())
@@ -123,14 +123,14 @@ def test_training_tasks_exclude_the_holdout(twin):
 def test_eval_vla_needs_server(twin, monkeypatch, tmp_path):
     monkeypatch.delenv("GR00T_POLICY_URL", raising=False)
     with pytest.raises(VLANotConfigured):
-        evaluate(twin, ["counter_to_sink"], 1, policy_name="vla", out_dir=tmp_path, log=lambda *_: None)
+        evaluate(twin, ["counter_to_sink"], 1, policy_name="vla", checkpoint_id="test-mock", out_dir=tmp_path, log=lambda *_: None)
 
 
 def test_cli_eval_vla_unreachable_exits_2(monkeypatch, capsys):
     from arrival.cli import main
 
     monkeypatch.setenv("GR00T_POLICY_URL", "http://127.0.0.1:9")  # discard port, nothing listens
-    assert main(["eval", "--policy", "vla", "--episodes", "1", "--families", "counter_to_sink", "--people", "0",
+    assert main(["eval", "--policy", "vla", "--checkpoint-id", "test-mock", "--episodes", "1", "--families", "counter_to_sink", "--people", "0",
                  "--res", "32"]) == 2
     err = capsys.readouterr().err
     assert err.startswith("policy vla: no answer from http://127.0.0.1:9:") and "Traceback" not in err
