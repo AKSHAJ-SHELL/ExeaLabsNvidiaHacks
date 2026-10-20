@@ -27,17 +27,17 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 | Scan → twin | ✅ Works on the sample kitchen (now tiled, no overlapping fixtures) and on 2 real public iPhone RoomPlan exports; a scan regression suite covers every room under `scans/`. The iPhone capture app (`ios/`, CAP-1) is merged but untested on a real kitchen here; field scanning protocol in `docs/SCANNING.md` |
 | Simulation: kitchen, drawers, doors, oven, fridge, dishwasher, microwave, wall cabinets, faucet, people | ✅ Works. MuJoCo, built from the twin; every moving part is a named joint with a handle site. Panda-style arm and kitchen visuals (recessed fronts, slim handles, sink, gas range) landed with SIM-1 and MAN-1 |
 | People: interactions + safety metric | ✅ Walkers stop at the counter and cross behind the robot. Every episode records the minimum robot-human distance; episodes with contact are dropped. A walker opens the fridge, stands in the doorway and closes it, and the held door counts for the safety metric |
-| Closed-loop eval harness | ✅ `python -m arrival eval` scores N episodes per family (success, time, human contacts, Wilson 95%). Counts arm-fixture contacts too. ⚠️ Only the scripted expert has been scored; the VLA cell needs a GR00T server (POL-3) |
+| Closed-loop eval harness | ✅ `python -m arrival eval` scores N episodes per family (success, time, human contacts, Wilson 95%). Counts arm-fixture contacts too; held-out seeds are offset from training and an episode that raises counts as a failure. ⚠️ Only the scripted expert has been scored; the VLA cell needs a GR00T server (POL-3) |
 | Robot: pick mug → sink | ✅ 100% success, friction grasp, physics-checked |
 | Robot: open drawer | ✅ 100% success |
-| Robot: open door | ✅ 100% on both cabinet doors (8/8, two seeds, with and without people). Opens to about 70°: the arm is mounted at 0.75 m, so the far end of the handle arc sits at its reach limit. A mobile base (MAN-3) is what lifts that |
+| Robot: open door | ✅ 100% on both cabinet doors (8/8, two seeds, with and without people). Opens to about 63-66°: the hand holds its heading while the bar turns between the pads, and joint 7 stays inside its limit. The arm is mounted at 0.75 m, so a mobile base (MAN-3, PR open) is what would open it wider |
 | Robot: counter → counter | ❌ Skipped. The pick point and the target counter are about 2 m apart and the base doesn't move |
 | Robot: close drawer, close door, put mug in drawer, wipe counter | ✅ 100% each (32/32 across all families, seed 5, two people walking). The part starts open for the close tasks; the sponge must travel 0.4 m pressed to the top |
 | Robot: bowl | ✅ Held by the rim (one finger inside the wall). 4/4 bowl → sink. The bowl is now hollow in physics |
 | GR00T-format dataset + validator | ✅ Passes our validator, and the layout matches GR00T's loader source. ⚠️ Not yet loaded by GR00T itself since the latest fixes |
-| Local web page: browse, download, upload | ✅ Works. Uploads are processed by `python -m arrival work` on the same machine (twin, sim dataset, zip). ⚠️ One local worker, no cloud fan-out yet |
+| Local web page: browse, download, upload | ✅ Works. Redesigned page: room cards with previews and stats, drag-and-drop upload, live job stages. Uploads are processed by `python -m arrival work` on the same machine (twin, sim dataset, zip); a killed worker's jobs are requeued. ⚠️ One local worker, no cloud fan-out yet; the page was checked with curl and tests, not in a browser |
 | VLM planner (Nemotron) / VLA client (GR00T server) | ✅ VLM planner (Nemotron) wired into sim collection with Token Factory and offline cache fixture (POL-1); dynamic instruction generation with held-out eval set (POL-2). ⚠️ VLA client tested offline |
-| GR00T fine-tune, MimicGen, splats, Cosmos, Nebius scale-out | ❌ Not built yet |
+| GR00T fine-tune, MimicGen, splats, Cosmos, Nebius scale-out | ❌ Not built yet. This is what remains for the hackathon: the GR00T fine-tune (DAT-2), the GR00T policy server (POL-3) and real scans (CAP-3) |
 
 There are two datasets. `python -m arrival sim` writes **physics-simulated** data with real joint states (`arrival_physically_valid: true`). `python -m arrival demo` writes a fast **scripted placeholder** with zero joint values (`arrival_physically_valid: false`). Never train on the placeholder.
 
@@ -162,33 +162,33 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 
 ### SIM: Scene & realism (4)
 
-- **SIM-1: Kitchen visuals.** A recessed sink basin with a faucet, cabinet fronts with gaps and slim handles, toe-kick, countertop overhang, backsplash, stove burners, and a proper fridge. Code is in `arrival/sim/scene.py`. **Done in #2** (recessed fronts, slim handles, backsplash, sink with faucet, gas range, fridge with freezer door). Left: SIM-2 lighting and materials.
-- **SIM-2: Lighting & materials.** Key and fill lights, wood/stone/tile textures, and lighting variation that still matches the `dim/neutral/bright` axis.
+- **SIM-1: Kitchen visuals.** A recessed sink basin with a faucet, cabinet fronts with gaps and slim handles, toe-kick, countertop overhang, backsplash, stove burners, and a proper fridge. Code is in `arrival/sim/scene.py`. **Done in #2** (recessed fronts, slim handles, backsplash, sink with faucet, gas range, fridge with freezer door). Lighting and materials landed with SIM-2.
+- **SIM-2: Lighting & materials.** *Done (#21).* Key and fill lights, wood/stone/tile textures, and lighting variation that still matches the `dim/neutral/bright` axis.
 - **SIM-3: More moving parts.** Dishwasher door, oven door, microwave, faucet handle, upper cabinets, and drawers in every base cabinet, all on joints with names the policy can target. **Done except the extra drawer row:** oven door, dishwasher and microwave doors, the faucet lever and wall-cabinet doors are named joints with handle sites; `part_names()` in `arrival/sim/scene.py` lists them. A drawer row above the door bay would sit inside the MAN-2 door panel, so it was left out.
 - **SIM-4: More objects.** Plates, cups, bottles, pans, fruit, utensils, with realistic mass, friction and size variation. **Done:** cup, plate, bottle, pan, apple and spatula join the mug, bowl and sponge (`arrival/catalog/objects.py`), with mass scaled by volume, per-material friction and seeded size variation; the expert picks the cup, apple and bottle 4/4. The 1 cm spatula sits under the grasp height, so it is scenery until the grasp rule changes.
-- **SIM-5: Non-kitchen rooms.** Twin and sim support for at least one office and one living room from CAP-3 scans.
+- **SIM-5: Non-kitchen rooms.** *Open here; PR #57 needs a rebase.* Twin and sim support for at least one office and one living room from CAP-3 scans.
 - **SIM-6: Splat appearance** *(stretch).* Gaussian splat of the scanned room composited with the sim. The design is in `docs/03-architecture.md`.
 
 ### MAN: Robot & manipulation (5)
 
 - **MAN-1: Make the arm look and move like a Panda.** Real link shapes and proportions, a Franka-style hand, a low mount, IK biased to the Panda "ready" posture so the elbow doesn't flip, smooth min-jerk motion, and no clipping. Code is in `arrival/sim/robot.py` and `ik.py`. **Done in #2:** Panda-shaped visuals over the unchanged collision capsules, a nullspace pull toward the Panda home posture in IK, and min-jerk motion with via-point drawer pulls.
 - **MAN-2: Open doors.** Done (see `docs/BUILD-LOG.md`). Both cabinet doors open at 100%; the fridge door is not a task yet (MAN-5). Check with `python -m arrival sim --families open_door --episodes 4 --save-preview`.
-- **MAN-3: Mobile base.** Add an actuated base so `counter_to_counter` (about 2 m between pick point and target) is reachable, and add base joints to the state/action spec.
+- **MAN-3: Mobile base.** *Open here; PRs #33 and #36 need a rebase, pick one.* Add an actuated base so `counter_to_counter` (about 2 m between pick point and target) is reachable, and add base joints to the state/action spec.
 - **MAN-4: Grasp everything.** Bowl done: a hollow bowl and a rim grasp (see `docs/BUILD-LOG.md`). Cups, apples and bottles are picked by the body. Left: plates and pans are wider than the gripper opening.
-- **MAN-5: New tasks.** Done: close drawer, close door, put the mug away in a drawer, wipe the counter with the sponge (`python -m arrival sim --families close_drawer,close_door,put_in_drawer,wipe_counter`). Left: dishwasher load/unload and the faucet. The joints exist (SIM-3); no task drives them yet.
-- **MAN-6: Real Franka model** *(optional).* Swap in the MuJoCo Menagerie Panda (Apache-2.0) behind a flag, keeping tests offline.
+- **MAN-5: New tasks.** Done: close drawer, close door, put the mug away in a drawer, wipe the counter with the sponge (`python -m arrival sim --families close_drawer,close_door,put_in_drawer,wipe_counter`). Open fridge landed (#78). Left: dishwasher load/unload and the faucet (PR #27 needs a rebase). The joints exist (SIM-3); no task drives them yet.
+- **MAN-6: Real Franka model** *(optional; PR #25 needs a rebase).* Swap in the MuJoCo Menagerie Panda (Apache-2.0) behind a flag, keeping tests offline.
 
 ### PPL: People & safety (2)
 
 - **PPL-1: Better humans.** Proportioned bodies with walking leg and arm swing, varied clothing colours and heights, and no clipping through counters.
-- **PPL-2: Interactions.** People who stop at the counter, open the fridge, and cross the robot's path. Add a safety metric (minimum robot–human distance) to the episode data, and drop episodes with contact. *Done except the fridge: walkers pause at the counter and cross behind the base, `arrival/sim/safety.py` records the distance, contact episodes are dropped. Opening the fridge needs the door hinge driven by a person, which is still open.*
+- **PPL-2: Interactions.** People who stop at the counter, open the fridge, and cross the robot's path. Add a safety metric (minimum robot–human distance) to the episode data, and drop episodes with contact. *Done: walkers pause at the counter, cross behind the base and open the fridge (#73); `arrival/sim/safety.py` records the distance, contact episodes are dropped, and the held fridge door is not counted as an arm contact.*
 
 ### POL: Policy, VLA & VLM (4)
 
 - **POL-1: VLM planner in the loop.** Done: `python -m arrival sim --planner vlm` runs `VLMPlanner` (Nemotron via Token Factory) inside `collect()`. Without a key it falls back to the rule parser. Responses cache in `arrival/models/nemotron_cache.json`.
 - **POL-2: Instruction generation.** Done: `--instructions nemotron --split train|eval` draws varied wordings with a disjoint held-out set (`arrival/tasks/instructions.py`). The template path still keeps the wording and start-offset holdout from POL-4.
 - **POL-3: GR00T policy server.** Run GR00T N1.7 inference (H100 or L40S), connect `VLAClient` via `GR00T_POLICY_URL`, and run closed-loop episodes in the sim.
-- **POL-4: Closed-loop eval harness.** Score N episodes per task for any policy (success rate, time, collisions) in the scanned room. *Built: `python -m arrival eval` (`arrival/eval/harness.py`), see docs/07-eval.md. Still open: run it against a live GR00T server once POL-3 lands, and count arm-fixture collisions, not only human contact.*
+- **POL-4: Closed-loop eval harness.** Score N episodes per task for any policy (success rate, time, collisions) in the scanned room. *Built: `python -m arrival eval` (`arrival/eval/harness.py`), see docs/07-eval.md. Arm-fixture contacts are counted. Still open: run it against a live GR00T server once POL-3 lands.*
 
 ### DAT: Data & training (3)
 
@@ -199,7 +199,7 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 
 ### OPS: Nebius scale & backend (2)
 
-- **OPS-1: Upload worker.** Done locally: `python -m arrival work` turns a queued scan (RoomPlan export or `scan.json`) into a twin, a sim dataset and `out/jobs/<id>/dataset.zip`, with stage updates in `status.json` and `GET /jobs/<id>/download`. Left: one worker process, no retries, no multi-worker locking; running it on Nebius is OPS-2.
+- **OPS-1: Upload worker.** Done locally: `python -m arrival work` turns a queued scan (RoomPlan export or `scan.json`) into a twin, a sim dataset and `out/jobs/<id>/dataset.zip`, with stage updates in `status.json` and `GET /jobs/<id>/download`. Interrupted jobs are requeued when the worker restarts. Left: one worker process, no automatic retry, no multi-worker locking; running it on Nebius is OPS-2.
 - **OPS-2: Nebius fan-out.** Serverless Jobs (one shard of episodes per job) and Object Storage for datasets, with checkpoint and resume.
 - **OPS-3: Cost tracking.** Fill the `dollars` fields in the report from real Nebius usage per product.
 
@@ -210,6 +210,8 @@ LiDAR iPhones/iPads: iPhone 12 Pro or newer Pro models, or iPad Pro 2020+.
 - **DEM-3: Release QA.** Before each demo, run a fresh-clone install, the full test suite, `sim` + `validate`, and check every README claim. Update the status table.
 
 ### Pull requests
+
+Status of this branch (`integrate`), Oct 19 2026. **Done:** CAP-1, CAP-4, TWN-2, TWN-3, TWN-6, SIM-1, SIM-2, SIM-3, SIM-4, MAN-1, MAN-2, MAN-4 (bowl, cup, apple, bottle, plates and pans), MAN-5 (close drawer/door, put in drawer, wipe, open fridge), PPL-1, PPL-2, POL-1, POL-2, POL-4 (harness; not yet run on a live GR00T), DAT-1 (config; not yet loaded by GR00T), OPS-1 (local). **Partial:** CAP-2 (format open), CAP-5 (licenses unchecked), TWN-4, DEM-1 (local page only), DEM-2, DEM-3, MAN-5 (dishwasher and faucet tasks left). **Open:** CAP-3, TWN-1, TWN-5, SIM-5, SIM-6, MAN-3, MAN-6, POL-3, DAT-2, DAT-3, DAT-4, OPS-2, OPS-3. **Still needed for the hackathon:** GR00T fine-tune, the POL-3 policy server, and real scans (CAP-3).
 
 **Merged into `main`:** #1 MVP handoff · #2 SIM-1, MAN-1 · #3 POL-1, POL-2 · #4 MAN-2 · #5 TWN-6 · #9 DEM-3 PyAV fix · #10 TWN-2, TWN-3 · #11 MAN-5, MAN-4 · #12 OPS-1 · #13 POL-4, PPL-2 · #19 SIM-3, SIM-4 · #21 SIM-2 · #23 PPL-1 · #29 DEM-3 release QA · #31 MAN-4 plates and pans · #35 TAV-1 · #38 DAT-1 · #43 CAP-1 · #44 CAP-4 · #47 MAN-2 collision boxes · #50 DEM-2 · #51 OPS-1 atomic status · #52 validator · #55 POL-4 arm contacts · #71 MAN-1 wrist camera · #73 PPL-2 fridge walker · #76 PPL-1 walker stops · #78 MAN-5 open fridge.
 
