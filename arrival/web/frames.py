@@ -1,7 +1,7 @@
 """L14: accept a CAP-2a RGB-D frames bundle (``frames_manifest.json`` plus the files it names, zipped) through the
 upload path. The zip is unpacked into a scratch folder with zip-slip, symlink, size and count guards, then checked with
-``arrival.scan.rgbd.load_manifest`` and a per-frame look at every image and depth array. Nothing is consumed: the
-frames are only stored next to the job (``out/jobs/<id>/frames/``) for later stages, and the status says so.
+``arrival.scan.rgbd.load_manifest`` and a per-frame look at every image and depth array. Frames are stored next to
+the job (``out/jobs/<id>/frames/``); the worker's realism stage records whether they were consumed.
 """
 
 from __future__ import annotations
@@ -91,7 +91,7 @@ def extract(src, offset: int, length: int, dest: Path) -> int:
         for zi in infos:
             if zi.is_dir():
                 continue
-            name = zi.filename
+            name = zi.orig_filename  # ZipInfo normalizes backslashes on Windows.
             _check_name(name)
             if (zi.external_attr >> 16) & 0o170000 == 0o120000:
                 raise FramesError("bad_path", f"{name!r} is a symlink")
@@ -160,9 +160,10 @@ def validate(root: Path) -> dict:
                 head = np.load(f.depth, mmap_mode="r", allow_pickle=False)
             except Exception as e:  # noqa: BLE001
                 raise FramesError("bad_depth", f"depth {f.depth.name} is not a plain .npy array: {type(e).__name__}") from None
-            if head.shape != depth_hw or head.dtype.kind != "f":
-                raise FramesError("depth_shape", f"depth {f.depth.name} must be float {depth_hw}, got {head.dtype} {head.shape}")
+            shape, dtype = head.shape, head.dtype
             del head
+            if shape != depth_hw or dtype.kind != "f":
+                raise FramesError("depth_shape", f"depth {f.depth.name} must be float {depth_hw}, got {dtype} {shape}")
         else:
             mode = open_image(f.depth, m.depth_size, "depth")
             if mode not in ("I;16", "I"):
@@ -180,5 +181,5 @@ def validate(root: Path) -> dict:
         "rgb_size": list(m.rgb_size),
         "depth_size": list(m.depth_size),
         "stored": True,
-        "consumed": False,  # nothing in the pipeline reads frames yet (G8, C4); the worker ignores them
+        "consumed": False,  # the worker updates this after the optional realism stage
     }

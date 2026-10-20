@@ -561,7 +561,8 @@ def test_unsupported_methods_are_405_with_allow(server):
         assert status == 405 and "POST" in resp.getheader("Allow"), method
 
 
-@pytest.mark.parametrize("raw,code", [(b"GET / HTTP/9.9\r\n\r\n", b" 505 "), (b"GET /" + b"a" * 70000 + b" HTTP/1.1\r\n\r\n", b" 414 ")])
+@pytest.mark.parametrize("raw,code", [(b"GET / HTTP/9.9\r\n\r\n", b" 505 "), (b"GET /" + b"a" * 70000 + b" HTTP/1.1\r\n\r\n", b" 414 ")],
+                         ids=["unsupported_version", "long_request"])
 def test_protocol_errors_get_our_error_page_not_a_traceback(server, raw, code):
     srv, _ = server
     s = socket.create_connection(("127.0.0.1", srv.server_address[1]), timeout=10)
@@ -624,7 +625,7 @@ def test_frames_upload_is_validated_stored_and_scan_still_reaches_the_worker(mak
     assert claimed["frames"]["count"] == 2
     assert load_upload(job_dir / "upload.bin", "r")["geometry_source"] == "authored_sample"
     _, page, _ = _fetch(srv, "/")
-    assert b"RGB-D 2 frames, stored, not used yet" in page
+    assert b"RGB-D 2 frames, comparison pending" in page
 
 
 def _edit_manifest(fn):
@@ -683,7 +684,9 @@ def _zip_of(entries, symlink=None) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, payload in entries.items():
-            zf.writestr(name, payload)
+            zi = zipfile.ZipInfo(name)
+            zi.filename = name  # ZipInfo replaces backslashes on Windows; keep the hostile input.
+            zf.writestr(zi, payload)
         if symlink:
             zi = zipfile.ZipInfo(symlink)
             zi.external_attr = 0o120777 << 16

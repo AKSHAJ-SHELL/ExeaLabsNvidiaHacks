@@ -156,11 +156,11 @@ def _snap(yaw: float) -> float:
     return 0.0 if abs(yaw) < 1e-9 else round(yaw, 9)
 
 
-def _align(walls: list[dict], posed: list[dict], polygons: list[list[list[float]]]) -> None:
+def _align(walls: list[dict], posed: list[dict], polygons: list[list[list[float]]]) -> tuple[float, float, float, float]:
     """Rotate about z so the longest wall runs along +X, then translate the walls' min corner to (0, 0).
     `posed` entries carry position and yaw; `polygons` are bare [x, y] lists."""
     if not walls:
-        return
+        return 1.0, 0.0, 0.0, 0.0
     w = max(walls, key=lambda w: math.dist(w["start"], w["end"]))
     theta = math.atan2(w["end"][1] - w["start"][1], w["end"][0] - w["start"][0])
     theta = (theta + math.pi / 2) % math.pi - math.pi / 2  # direction mod pi, in [-pi/2, pi/2)
@@ -185,6 +185,7 @@ def _align(walls: list[dict], posed: list[dict], polygons: list[list[list[float]
         f["position"] = [round(f["position"][0] - mx, 9), round(f["position"][1] - my, 9), f["position"][2]]
     for poly in polygons:
         poly[:] = [[round(p[0] - mx, 9), round(p[1] - my, 9)] for p in poly]
+    return c, s, mx, my
 
 
 def _kept(o: dict) -> bool:
@@ -205,13 +206,15 @@ def to_bundle(roomplan: dict, room_id: str, story: int | None = None) -> dict:
     posed = fixtures + [p for ps in portals.values() for p in ps]
     for p in posed:
         p["position"][2] = round(p["position"][2] - z0, 9)
-    _align(walls, posed, [f["corners"] for f in floors])
+    c, s, mx, my = _align(walls, posed, [f["corners"] for f in floors])
     bundle = {
         "schema_version": "1",
         "room_id": room_id,
         "units": "meters",
         "frame": "z_up",
         "geometry_source": "roomplan",
+        "arkit_world_to_room": [[c, 0.0, s, -mx], [s, 0.0, -c, -my],
+                                [0.0, 1.0, 0.0, -z0], [0.0, 0.0, 0.0, 1.0]],
         "blocks_claims": [],
         "walls": walls,
         "fixtures": fixtures,

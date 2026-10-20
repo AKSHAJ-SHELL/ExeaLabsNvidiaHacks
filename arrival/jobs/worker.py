@@ -17,7 +17,7 @@ from pathlib import Path
 from arrival.jobs.queue import write_status
 
 DEFAULT_FAMILIES = ("counter_to_sink", "open_drawer")
-STAGES = ("normalize", "twin", "objects", "sim", "validate", "zip")
+STAGES = ("normalize", "twin", "realism", "objects", "sim", "validate", "zip")
 ROOM_RE = re.compile(r"[^a-z0-9_]+")
 
 
@@ -37,6 +37,7 @@ def load_upload(path: Path, room_id: str) -> dict:
         raise ValueError("upload is not a JSON object")
     if "schema_version" in data:
         bundle = scan_bundle.validate(data)
+        bundle["source_room_id"] = bundle["room_id"]
         bundle["room_id"] = room_id
         return bundle
     def posed(d: dict) -> bool:
@@ -77,7 +78,9 @@ def claim_next(jobs_root: Path) -> tuple[Path, dict] | None:
     _, _, job_dir, st = min(queued)
     st.update({"status": "running", "stage": None, "started_at": int(time.time()), "finished_at": None,
                "error": None, "room_id": None, "twin_dir": None, "dataset_dir": None, "zip": None,
-               "attempts": None, "successes": None})
+               "attempts": None, "successes": None, "realism": None})
+    if st.get("frames"):
+        st["frames"].update(consumed=False, used_for=None)
     return job_dir, _write_status(job_dir, st)
 
 
@@ -102,6 +105,9 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
             people: int = 1, res: int = 128, seed: int = 0, log=print) -> dict:
     """Run every stage for one claimed job. Returns the final status; never raises."""
     out_dir, job_dir = Path(out_dir), Path(job_dir)
+    status["realism"] = None
+    if status.get("frames"):
+        status["frames"].update(consumed=False, used_for=None)
     try:
         from arrival.export.validate import validate
         from arrival.twin.compile import compile_twin, place_default_objects, write_twin
@@ -113,6 +119,14 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
 
         _stage(job_dir, status, "twin", log)
         twin = compile_twin(bundle)
+
+        _stage(job_dir, status, "realism", log)
+        from arrival.jobs.realism import measure
+
+        status["realism"] = measure(job_dir, bundle, twin, log=log)
+        if status.get("frames"):
+            consumed = status["realism"]["consumed"]
+            status["frames"].update(consumed=consumed, used_for="realism" if consumed else None)
 
         _stage(job_dir, status, "objects", log)
         if not twin["objects"]:
