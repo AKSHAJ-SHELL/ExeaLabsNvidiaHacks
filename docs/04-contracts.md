@@ -152,6 +152,30 @@ Checked-in `roomplan.json` does not have to rebuild every fixture. The authored 
 - Set `blocks_claims` to `["geometry", "realism"]`.
 - Do not call the network.
 
+## RGB-D scan frames
+
+`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. Only the format, the loader and a synthetic fixture exist; the iOS recorder that would write it is not built (needs a device). Nothing in the pipeline consumes it yet.
+
+Layout: `frames_manifest.json` plus the files it names, all relative paths inside the bundle folder (no absolute paths, no `..`).
+
+```json
+{"schema_version": 1, "room_id": "kitchen_01",
+ "axes": {"camera": "arkit_x_right_y_up_z_backward", "room": "z_up_metres"},
+ "arkit_world_to_room": [16 numbers, 4x4 row-major],
+ "rgb_size": [w, h], "depth_size": [w, h], "depth_unit": "m",
+ "frames": [{"id": "f000", "timestamp": 1.0, "rgb": "rgb/f000.png", "depth": "depth/f000.npy",
+             "confidence": "conf/f000.png",
+             "intrinsics": {"fx": 0, "fy": 0, "cx": 0, "cy": 0},
+             "camera_to_room": [16 numbers, 4x4 row-major], "split": "train"}]}
+```
+
+- Axes: an ARKit camera is x right, y up, z backward (it looks down -z). The room frame is Z-up metres, the twin's frame. `arkit_world_to_room` records the transform from ARKit's Y-up world to the room frame; `camera_to_room` is already composed with it and maps camera points straight to the room.
+- Pixel (u, v) is column, row, v down. A pixel at depth d is the camera point `((u-cx)/fx*d, -(v-cy)/fy*d, -d)`. Intrinsics are for the RGB image; depth intrinsics are scaled by `depth_size / rgb_size`.
+- `depth_unit` is `m` (float32 `.npy`, metres) or `mm` (16-bit PNG, millimetres). 0 or non-finite is no reading. `confidence` is optional.
+- `split` is `train` or `heldout` per frame, so an evaluation can use views the model never saw. An optional top-level `splits: {"train": [ids], "heldout": [ids]}` must agree with it; a frame in both is rejected.
+- `load_manifest` rejects, each with its own `ManifestError.code`: `schema_version`, `axis_convention`, `depth_unit` (also a file extension that does not match), `non_monotonic_timestamps`, `duplicate_frame_id`, `nonfinite_transform`, `non_orthonormal_rotation` (tolerance 1e-3, or a reflection), `bad_matrix`, `bad_size`, `intrinsics`, `split`, `bad_path`, `missing_file`, `frame_in_both_splits`, plus structural codes `missing_manifest`, `bad_json`, `room_id`, `frames`, `frame_id`, `timestamp`; `load_depth` rejects `depth_shape`.
+- Consent and sanitising: capture only rooms whose occupant agreed in writing that frames may be stored and shared. Before a bundle leaves the capturer's device, look through every RGB frame for people, screens, documents, photos and mail, and drop or blur those frames. Never commit real imagery; tests use `write_synthetic_bundle` (a flat floor and a wall, flat-colour images).
+
 ## Fixture map
 
 | RoomPlan or scan category | Layout `type` |
