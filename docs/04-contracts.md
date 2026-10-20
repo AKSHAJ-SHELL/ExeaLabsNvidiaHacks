@@ -154,7 +154,7 @@ Checked-in `roomplan.json` does not have to rebuild every fixture. The authored 
 
 ## RGB-D scan frames
 
-`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. Only the format, the loader and a synthetic fixture exist; the iOS recorder that would write it is not built (needs a device). Nothing in the pipeline consumes it yet; `POST /jobs` can accept a bundle as a zip in the `frames` field, validate it with this loader and store it next to the job (docs/REFERENCE.md, RGB-D frames in an upload).
+`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. Only the format, the loader and a synthetic fixture exist; the iOS recorder that would write it is not built (needs a device). `POST /jobs` accepts a bundle as a zip in the `frames` field, validates it and stores it next to the job. The worker compares held-out frames with the compiled twin before adding synthetic objects (docs/REFERENCE.md, Uploaded-frame comparison).
 
 Layout: `frames_manifest.json` plus the files it names, all relative paths inside the bundle folder (no absolute paths, no `..`).
 
@@ -566,7 +566,9 @@ The worker (`python -m arrival work`) keeps those fields and adds these when it 
 }
 ```
 
-`status` is one of `queued`, `running`, `done`, `failed`. `stage` is the last stage entered: `normalize`, `twin`, `objects`, `sim`, `validate`, `zip`. `started_at` and `finished_at` are unix seconds like `created_unix`. `error` is null unless `status` is `failed`, then `"<ExceptionType>: <message>"`. `room_id` is the upload filename stem reduced to `[a-z0-9_]` plus `_<id>`. Paths are as the worker saw them (relative to its cwd when `--out` is relative). Fields not reached yet are null.
+`status` is one of `queued`, `running`, `done`, `failed`. `stage` is the last stage entered: `normalize`, `twin`, `realism`, `objects`, `sim`, `validate`, `zip`. `started_at` and `finished_at` are unix seconds like `created_unix`. `error` is null unless `status` is `failed`, then `"<ExceptionType>: <message>"`. `room_id` is the upload filename stem reduced to `[a-z0-9_]` plus `_<id>`. Paths are as the worker saw them (relative to its cwd when `--out` is relative). Fields not reached yet are null.
+
+The job status also has `realism`, initially null, then `{state, metrics, consumed, preview, reason}`. Scored results add `frame_count` and `association`. `metrics` is null unless the camera-offset control passes; otherwise it contains `depth_l1_m`, `rgb_mae`, `rgb_one_minus_ssim`, `n_depth`, `n_rgb` and `frames`. These fields describe the uploaded-frame comparison only, not the generated dataset. Raw reports, the comparison PNG, a pre-placement twin and the applied camera transform stay under the job's `realism/` directory. The public report route returns only the status projection. Normalized RoomPlan bundles carry `arkit_world_to_room` as a row-major 4x4 matrix, used as `bundle_world_to_room @ inverse(manifest_world_to_room)` before scoring.
 
 ## Report
 

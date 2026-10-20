@@ -34,7 +34,7 @@ from arrival.jobs.limits import LimitError, Limits
 from arrival.jobs.queue import write_status
 
 DEFAULT_FAMILIES = ("counter_to_sink", "open_drawer", "move_on_table")  # move_on_table runs only in rooms with a table
-STAGES = ("normalize", "twin", "objects", "sim", "validate", "zip")
+STAGES = ("normalize", "twin", "realism", "objects", "sim", "validate", "zip")
 ROOM_RE = re.compile(r"[^a-z0-9_]+")
 LOCK = "claim.lock"  # present while a worker owns the job; its mtime is the heartbeat
 CANCEL = "cancel.requested"  # marker written by cancel_job for a running job
@@ -76,6 +76,7 @@ def load_upload(path: Path, room_id: str) -> dict:
         raise ValueError("upload is not a JSON object")
     if "schema_version" in data:
         bundle = scan_bundle.validate(data)
+        bundle["source_room_id"] = bundle["room_id"]
         bundle["room_id"] = room_id
         return bundle
     def posed(d: dict) -> bool:
@@ -280,7 +281,9 @@ def claim_next(jobs_root: Path, worker: str | None = None) -> tuple[Path, dict] 
         st.update({"status": "running", "stage": None, "started_at": int(time.time()), "finished_at": None,
                    "error": None, "room_id": None, "twin_dir": None, "dataset_dir": None, "zip": None,
                    "attempts": None, "successes": None, "skipped": None, "error_kind": None,
-                   "error_reasons": None, "usage": None, "worker": worker})
+                   "error_reasons": None, "realism": None, "usage": None, "worker": worker})
+        if st.get("frames"):
+            st["frames"].update(consumed=False, used_for=None)
         return job_dir, _write_status(job_dir, st)
     return None
 
@@ -387,6 +390,9 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
     out_dir, job_dir = Path(out_dir), Path(job_dir)
     limits = limits or Limits()
     meter = Meter()
+    status["realism"] = None
+    if status.get("frames"):
+        status["frames"].update(consumed=False, used_for=None)
     try:
         limits.check_request(episodes, people)
         from arrival.export.provenance import sha256_file
@@ -404,6 +410,14 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
 
         _stage(job_dir, status, "twin", log, meter)
         twin = compile_twin(bundle)
+
+        _stage(job_dir, status, "realism", log, meter)
+        from arrival.jobs.realism import measure
+
+        status["realism"] = measure(job_dir, bundle, twin, log=log)
+        if status.get("frames"):
+            consumed = status["realism"]["consumed"]
+            status["frames"].update(consumed=consumed, used_for="realism" if consumed else None)
 
         _stage(job_dir, status, "objects", log, meter)
         if not twin["objects"]:

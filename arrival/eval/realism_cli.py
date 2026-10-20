@@ -36,7 +36,7 @@ MAX_FRAMES = 8
 PNG_FRAMES = 3
 MIN_CONFIDENCE = 2  # ARKit ARConfidenceLevel: 0 low, 1 medium, 2 high
 ARKIT_TO_CV = np.diag([1.0, -1.0, -1.0, 1.0])  # ARKit camera axes (y up, z back) -> OpenCV (y down, z forward)
-SCOPE = ("Schematic MuJoCo box render against real frames: depth_l1_m measures geometry; rgb_mae, "
+SCOPE = ("Schematic MuJoCo box render against reference frames: depth_l1_m measures geometry; rgb_mae, "
          "rgb_one_minus_ssim and rgb_psnr_db mostly measure missing texture and lighting, not layout.")
 
 
@@ -146,7 +146,8 @@ def _stack_png(path: Path, rows: list[Path]) -> None:
 
 def run_realism(scan: str | Path, out_dir: str | Path = "out", scans_dir: str | Path = "scans",
                 twin_path: str | Path | None = None, max_side: int = MAX_SIDE, max_frames: int = MAX_FRAMES,
-                png_frames: int = PNG_FRAMES, min_confidence: int = MIN_CONFIDENCE, log=print) -> dict:
+                png_frames: int = PNG_FRAMES, min_confidence: int = MIN_CONFIDENCE, log=print,
+                camera_transform=None) -> dict:
     """Score the held-out frames of a scan against the twin and write out/eval/<room>_realism.json and .png.
     Raises RealismError when no honest measurement can be made. Returns the report dict (with `path`, `png`)."""
     from arrival.eval.realism import evaluate_frames, perturb_pose, render_twin, side_by_side_png
@@ -167,6 +168,10 @@ def run_realism(scan: str | Path, out_dir: str | Path = "out", scans_dir: str | 
                            f"training frames cannot be used as evidence")
     used = _pick(heldout, max_frames)
     frames = [load_frame(manifest, f, max_side, min_confidence) for f in used]
+    if camera_transform is not None:
+        transform = np.asarray(camera_transform, dtype=float)
+        for frame in frames:
+            frame["cam_to_room"] = transform @ frame["cam_to_room"]
     ids = [f.id for f in used]
     size = frames[0]["rgb"].shape[:2]
     try:
@@ -217,10 +222,10 @@ def run_realism(scan: str | Path, out_dir: str | Path = "out", scans_dir: str | 
     if real["realism"] is not None:
         rows = []
         pose_by_id = {f["id"]: f for f in frames}
-        for fid in ids[:png_frames]:
+        for index, fid in enumerate(ids[:png_frames]):
             f = pose_by_id[fid]
             rgb_sim, depth_sim = render_twin(twin, f["K"], f["cam_to_room"], f["rgb"].shape[:2])
-            row = eval_dir / f"{stem}_{fid}.png"
+            row = eval_dir / f"{stem}_{index:03d}.png"
             side_by_side_png(row, f["rgb"], rgb_sim, f["depth"] * f["valid_depth_mask"], depth_sim)
             rows.append(row)
         if rows:

@@ -159,7 +159,7 @@ progress { flex:1; min-width:140px; height:10px; accent-color:var(--accent); }
 @media (max-width:560px) { h1 { font-size:22px; } .stats { grid-template-columns:repeat(3, 1fr); } }
 """
 
-STAGES = ("normalize", "twin", "objects", "sim", "validate", "zip")  # arrival.jobs.worker stage order
+STAGES = ("normalize", "twin", "realism", "objects", "sim", "validate", "zip")  # arrival.jobs.worker stage order
 PREVIEW_TYPES = {".png": "image/png", ".mp4": "video/mp4", ".gif": "image/gif"}
 PREVIEW_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -431,6 +431,11 @@ class Handler(BaseHTTPRequestHandler):
         parts = path.strip("/").split("/")
         if len(parts) == 2 and parts[0] == "previews":
             return self._preview_file(parts[1])
+        if len(parts) in (3, 4) and parts[0] == "jobs" and parts[2] == "realism":
+            artifact = parts[3] if len(parts) == 4 else ""
+            if not JOB_ID_RE.match(parts[1]) or artifact not in ("", "report", "preview"):
+                return self._not_found()
+            return self._job_realism(parts[1], artifact)
         if len(parts) == 3 and parts[0] == "jobs" and parts[2] == "download":
             if not JOB_ID_RE.match(parts[1]):
                 return self._not_found("Invalid id")
@@ -536,8 +541,7 @@ class Handler(BaseHTTPRequestHandler):
             f"<div class='muted'>RoomPlan JSON or scan.json, up to {mb:g} MB in total</div>"
             "<input type='file' name='scan' accept='.json,application/json' required></label>"
             "<label class='drop sub'><b>Optional RGB-D frames</b>"
-            "<div class='muted'>a .zip with <code>frames_manifest.json</code> at its root (CAP-2a). Checked and stored, "
-            "not used yet</div><input type='file' name='frames' accept='.zip,application/zip'></label>"
+            "<div class='muted'>a .zip with <code>frames_manifest.json</code> at its root (CAP-2a). Held-out frames are compared with the room twin.</div><input type='file' name='frames' accept='.zip,application/zip'></label>"
             "<div class='upl'><button class='primary' type='submit'>Queue scan</button>"
             "<progress max='1' value='0' hidden></progress></div><div id='msg' role='status'></div></form>"
             "<p class='muted'>The file is stored under <code>out/jobs/&lt;id&gt;/</code> and queued. Nothing is "
@@ -570,7 +574,12 @@ class Handler(BaseHTTPRequestHandler):
         fr = s.get("frames")
         if not isinstance(fr, dict):
             return ""
-        return f"<div class='chips mt'>{_chip('RGB-D ' + str(fr.get('count', '?')) + ' frames, stored, not used yet')}</div>"
+        measurement = s.get("realism") or {}
+        state = measurement.get("state", "pending")
+        label = {"pending": "comparison pending", "measured": "comparison ready", "invalid": "control failed",
+                 "not_measured": "not measured", "error": "comparison unavailable"}.get(state, "not measured")
+        link = (f" <a href='/jobs/{esc(s['id'])}/realism'>View comparison</a>" if measurement else "")
+        return f"<div class='chips mt'>{_chip('RGB-D ' + str(fr.get('count', '?')) + ' frames, ' + label)}{link}</div>"
 
     def _jobs_table(self) -> str:
         rows = []
@@ -806,6 +815,41 @@ class Handler(BaseHTTPRequestHandler):
         if status is None:
             return self._json(404, {"error": "job not found"})
         self._json(200, self._public_status(status))
+
+    def _job_realism(self, job_id: str, artifact: str):
+        status = read_job(self.out_dir / "jobs", job_id)
+        if status is None or (self.server.public and (self._owner() is None or self._owner() != status.get("owner"))):
+            return self._not_found()
+        measurement = status.get("realism") or {"state": "pending", "metrics": None, "preview": False,
+                                               "reason": "The worker has not compared these frames yet."}
+        if artifact == "report":
+            return self._json(200, measurement)
+        if artifact == "preview":
+            path = self.out_dir / "jobs" / job_id / "realism" / "comparison.png"
+            if not measurement.get("preview") or not path.is_file():
+                return self._not_found()
+            with path.open("rb") as stream:
+                return self._send_file(stream, path.stat().st_size, "image/png", {"Cache-Control": "no-store"})
+        metrics = measurement.get("metrics")
+        body = ("<h1>Room comparison</h1><p><a href='/'>Back to jobs</a></p>"
+                f"<div class='card'><h2>{esc(measurement['state'].replace('_', ' '))}</h2>")
+        if measurement.get("reason"):
+            body += f"<p>{esc(measurement['reason'])}</p>"
+        if metrics:
+            body += ("<dl>"
+                     f"<dt>Depth error (geometry)</dt><dd>{metrics['depth_l1_m']:.4f} m</dd>"
+                     f"<dt>RGB error (appearance)</dt><dd>{metrics['rgb_mae']:.4f}</dd>"
+                     f"<dt>Held-out frames</dt><dd>{metrics['frames']}</dd></dl>")
+        body += ("<p class='muted'>Depth compares room geometry. RGB also reflects differences in lighting and "
+                 "surface appearance. The camera-offset control checks sensitivity; it does not verify calibration "
+                 "or that the captures belong to this room.</p>")
+        if measurement.get("preview"):
+            body += ("<div class='media'><figure>"
+                     f"<img src='/jobs/{esc(job_id)}/realism/preview' "
+                     "alt='Uploaded held-out views beside the simulated room and depth maps'>"
+                     "<figcaption>Reference RGB, twin RGB, reference depth, twin depth.</figcaption></figure></div>")
+        body += f"<p><a href='/jobs/{esc(job_id)}/realism/report'>Comparison JSON</a></p></div>"
+        self._html(200, "Room comparison", body)
 
     def _job_download(self, job_id: str):
         status = read_job(self.out_dir / "jobs", job_id)
