@@ -93,7 +93,7 @@ def collect_rows(out_dir: str | Path) -> list[dict]:
     out = Path(out_dir)
     rows = []
     for p in sorted((out / "reports").glob("*.json")):
-        r = json.loads(p.read_text())
+        r = _load(p, "report")
         room = r.get("room_id", p.stem)
         rows.append(_row("report", room, None, r.get("attempts"), r.get("successes"), r.get("seconds"),
                          r.get("human_contacts")))
@@ -102,7 +102,7 @@ def collect_rows(out_dir: str | Path) -> list[dict]:
             for fam, f in fams.items():
                 rows.append(_row("report", room, fam, f.get("attempts"), f.get("successes"), None, f.get("human_contacts")))
     for p in sorted((out / "eval").glob("*.json")):
-        r = json.loads(p.read_text())
+        r = _load(p, "report")
         room = r.get("room_id", p.stem)
         for fam, f in (r.get("families") or {}).items():
             n = f.get("episodes")
@@ -113,7 +113,7 @@ def collect_rows(out_dir: str | Path) -> list[dict]:
         rows.append(_row("eval", room, None, t.get("episodes"), t.get("successes"), t.get("wall_seconds"),
                          t.get("human_contacts")))
     for p in sorted((out / "jobs").glob("*/status.json")):
-        s = json.loads(p.read_text())
+        s = _load(p, "job status")
         a, f_ = s.get("started_at"), s.get("finished_at")
         if s.get("attempts") is None or not _num(a) or not _num(f_):
             continue  # a job that has not finished has no time to report

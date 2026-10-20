@@ -148,3 +148,10 @@ def test_unknown_usage_product_raises(tmp_path):
 def test_empty_out_dir(tmp_path):
     text = cost.markdown(cost.build(tmp_path / "nothing"))
     assert "no reports" in text and "comparison not measured" in text
+
+
+def test_unreadable_report_is_a_cost_error_not_a_traceback(tmp_path):
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "bad.json").write_text("{not json")
+    with pytest.raises(cost.CostError):
+        cost.collect_rows(tmp_path)
