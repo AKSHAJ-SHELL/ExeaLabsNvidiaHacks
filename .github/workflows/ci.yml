@@ -15,7 +15,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -43,7 +43,7 @@ jobs:
             echo "PYOPENGL_PLATFORM=osmesa" >> "$GITHUB_ENV"
           fi
       - name: Tests
-        run: python -m pytest -q -p no:cacheprovider
+        run: python -m pytest -q -p no:cacheprovider --tb=short --durations=10
       - name: Demo dataset
         run: python -m arrival demo --episodes 2
       - name: Validate

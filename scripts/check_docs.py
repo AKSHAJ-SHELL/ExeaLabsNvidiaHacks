@@ -83,21 +83,43 @@ def check_command(parser, cmd: str) -> str | None:
 def test_defs(root: Path) -> dict[str, set[str]]:
     defs = {}
     for f in (root / "tests").glob("test_*.py"):
-        defs[f"tests/{f.name}"] = set(re.findall(r"^\s*(?:async\s+)?def\s+(test\w*)", f.read_text(), re.M))
+        defs[f"tests/{f.name}"] = set(re.findall(r"^\s*(?:async\s+)?def\s+(test\w*)", f.read_text(encoding="utf-8"), re.M))
     return defs
 
 
+PLANNED_SECTION = re.compile(r"\bto-?do\b", re.I)
+SECTION_HEADING = re.compile(r"^ {0,3}(#{1,2})(?:[ \t]+|$)(.*)$")
+BLOCK_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
 def check_paths(root: Path, doc: Path, text: str, tests: dict[str, set[str]]) -> list[str]:
-    rel = doc.relative_to(root)
+    """Links must resolve everywhere. Code paths must exist too, except under a `## ... to-do` heading,
+    where they name files that are planned and do not exist yet."""
+    rel = doc.relative_to(root).as_posix()
     probs = []
+    planned = False
+    fence = None
     for n, line in enumerate(text.splitlines(), 1):
+        block = BLOCK_FENCE.match(line)
+        if block:
+            marker, info = block.groups()
+            if fence is None:
+                if marker[0] != "`" or "`" not in info:
+                    fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence) and not info.strip():
+                fence = None
+        elif fence is None:
+            heading = SECTION_HEADING.match(line)
+            if heading:
+                level, title = heading.groups()
+                planned = len(level) == 2 and bool(PLANNED_SECTION.search(title))
         for target in LINK.findall(line):
             if re.match(r"^(\w+:|#|//)", target):
                 continue
             p = target.split("#")[0]
             if p and not (doc.parent / p).exists():
                 probs.append(f"{rel}:{n}: broken link {target}")
-        for tok in TICKS.findall(line):
+        for tok in [] if planned else TICKS.findall(line):
             m = PATH.match(tok.strip())
             if not m or re.search(r"[*<>{}]", tok):
                 continue
@@ -122,7 +144,7 @@ def check_status_lists(doc: Path, root: Path, text: str) -> list[str]:
             lists[label.strip().lower()] = set(TASK_ID.findall(body))
         both = lists.get("done", set()) & lists.get("open", set())
         for tid in sorted(both):
-            probs.append(f"{doc.relative_to(root)}:{n}: {tid} is listed as both Done and Open")
+            probs.append(f"{doc.relative_to(root).as_posix()}:{n}: {tid} is listed as both Done and Open")
     return probs
 
 
@@ -133,7 +155,7 @@ def writer_constants(root: Path) -> dict[tuple[str, str], str]:
     for who, f in srcs.items():
         if not f.exists():
             continue
-        t = f.read_text()
+        t = f.read_text(encoding="utf-8")
         for label in ("arrival_physically_valid", "joints_are_placeholder"):
             m = re.search(r"[\"']%s[\"']:\s*(True|False)" % label, t)
             if m:
@@ -153,7 +175,7 @@ def check_labels(doc: Path, root: Path, text: str, consts: dict[tuple[str, str],
             for label, val in LABEL_SENTENCE.findall(sentence):
                 want = consts.get((w, label))
                 if want and want != val.lower():
-                    probs.append(f"{doc.relative_to(root)}:{n}: says {w} writes {label}={val.lower()}, "
+                    probs.append(f"{doc.relative_to(root).as_posix()}:{n}: says {w} writes {label}={val.lower()}, "
                                  f"but the writer sets {want}")
     return probs
 
@@ -168,7 +190,7 @@ def check(root: Path = REPO) -> list[str]:
         if not doc.exists():
             probs.append(f"{name}: file missing")
             continue
-        text = doc.read_text()
+        text = doc.read_text(encoding="utf-8")
         for n, cmd in fenced_commands(text):
             why = check_command(parser, cmd)
             if why:
