@@ -202,6 +202,8 @@ Export them in your shell, or put them in an untracked `.env` (gitignored) in th
 
 ## Cost
 
+`python -m arrival.eval.cost [--out out] [--usage usage.json] [--pricing configs/pricing.example.yaml] [--baseline teleop_baseline.json] [--json]` turns `out/reports`, `out/eval` and finished job statuses into demos per hour, seconds per successful demo and drop rate, with dollar rows that stay null unless a usage file gives units, and a generated-vs-teleop comparison only when a valid teleop baseline exists (`docs/ref/OPS-3a.md`). The pricing rates in `configs/pricing.example.yaml` are assumed, not invoiced.
+
 None of the Nebius products below were called. Token Factory calls from `--planner vlm` and `--instructions nemotron` are not metered here either. The only measured number is the local generation run, which cost $0 on a laptop CPU. That says nothing yet about how generated data compares with teleoperation, because the comparison has not been measured.
 
 | Step | Nebius product | Measured USD |
