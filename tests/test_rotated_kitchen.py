@@ -11,7 +11,7 @@ from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim.collect import SimEnv, _front, run_episode  # noqa: E402
 from arrival.sim.people import person_spec  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
-from arrival.sim.tasks import SIM_FAMILIES, make_tasks  # noqa: E402
+from arrival.sim.tasks import SIM_FAMILIES, finish_task, make_tasks  # noqa: E402
 from arrival.twin.compile import _rect_distance, compile_twin  # noqa: E402
 
 SCANS = "tests/fixtures/scans"
@@ -25,12 +25,7 @@ def twin():
 
 def _tasks(twin, families, n, people=0):
     tasks = make_tasks(twin, list(families), n, seed=5, people=people, log=lambda *_: None)
-    for t in tasks:  # collect() fills these before an episode runs
-        if t["family"] in ("open_drawer", "close_drawer", "put_in_drawer"):
-            t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
-        elif t["family"] in ("open_door", "close_door"):
-            t["joint"] = f'{t["fixture"]}_door'
-    return tasks
+    return [finish_task(t) for t in tasks]  # collect() fills the joint and handle names before an episode runs
 
 
 def _footprint_clearance(twin, xy):
@@ -56,7 +51,8 @@ def test_base_parks_in_front_of_fixtures_on_every_wall(twin):
         assert 0.4 < xy[0] < 4.1 and 0.4 < xy[1] < 3.1, (t["task_id"], xy)
         heading = base.xmat.reshape(3, 3)[:, 0][:2]
         assert np.dot(heading, _front(anchor)[:2]) < -0.99, t["task_id"]  # faces the fixture's front
-        assert _rect_distance(list(xy), anchor) < 0.8, t["task_id"]  # and stands at it, not across the room
+        near = 1.0 if t["family"] in ("open_oven", "open_dishwasher") else 0.8  # the flap door's length is in between
+        assert _rect_distance(list(xy), anchor) < near, t["task_id"]  # and stands at it, not across the room
 
 
 def test_sink_tasks_only_from_the_sink_run(twin):

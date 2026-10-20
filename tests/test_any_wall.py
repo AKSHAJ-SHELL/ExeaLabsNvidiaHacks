@@ -46,9 +46,11 @@ def ushape():
 def test_preflight_keeps_every_hero_variation(hero_twin):
     pre = {}
     tasks = make_tasks(hero_twin, list(SIM_FAMILIES), 40, seed=1, log=QUIET, preflight=pre)
-    # counter_to_counter has no second run to carry to; move_on_table needs a scanned table, a kitchen has none
-    assert pre["rejected"] == 0 and pre["families"] == ["counter_to_counter", "move_on_table"]
-    assert {t["family"] for t in tasks} == set(SIM_FAMILIES) - {"counter_to_counter", "move_on_table"}
+    # counter_to_counter has no second run to carry to; move_on_table needs a scanned table, a kitchen has none; and
+    # the hero scan has no dishwasher, so its three families have nothing to work on
+    skipped = {"counter_to_counter", "move_on_table", "open_dishwasher", "load_dishwasher", "unload_dishwasher"}
+    assert pre["rejected"] == 0 and set(pre["families"]) == skipped
+    assert {t["family"] for t in tasks} == set(SIM_FAMILIES) - skipped
     assert all(check_task(hero_twin, t) is None for t in tasks)
 
 

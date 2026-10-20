@@ -1,15 +1,16 @@
 """Sim task families: counter_to_sink, counter_to_counter (when reachable), open_drawer, open_door, the close and
-put-away families, wipe_counter, open_fridge and move_on_table (objects on a scanned table)."""
+put-away families, wipe_counter, open_fridge, move_on_table (objects on a scanned table) and the appliance
+families: open_oven, open_dishwasher, turn_on_faucet, load_dishwasher and unload_dishwasher."""
 
 from __future__ import annotations
 
 import math
 import random
 
-from arrival.catalog.objects import GRASPABLE, TABLE_MOVABLE
+from arrival.catalog.objects import GRASPABLE, PICKABLE, TABLE_MOVABLE
 from arrival.sim.scene import is_table
 from arrival.tasks.propose import LIGHTING, POSE_OFFSETS, WORDINGS, top_z
-from arrival.sim.preflight import check_task
+from arrival.sim.preflight import DISHWASHER_SIDE, check_task
 from arrival.twin.compile import is_counter_host, to_local, to_world
 
 TABLE_MOVE = 0.35  # how far along the table edge move_on_table carries the object (m)
@@ -19,7 +20,8 @@ TARGET_GAP = 0.04  # clear space between the object at its target and any other 
 BASE_CLEAR = 0.25  # the base column (r 0.12 + plate) must stay this far from furniture and walls
 REACH = 0.78  # max horizontal eef reach from the arm base used when placing the base
 SIM_FAMILIES = ("counter_to_sink", "counter_to_counter", "open_drawer", "open_door", "close_drawer", "close_door",
-                "put_in_drawer", "wipe_counter", "open_fridge", "move_on_table")
+                "put_in_drawer", "wipe_counter", "open_fridge", "move_on_table", "open_oven", "open_dishwasher",
+                "turn_on_faucet", "load_dishwasher", "unload_dishwasher")
 HOLDOUT_WORDING = 3  # docs/07-eval.md: template 4 and the (0, +0.08) offset are for evaluation only
 HOLDOUT_OFFSET = [0.0, 0.08]
 SIM_WORDINGS = {
@@ -36,6 +38,13 @@ SIM_WORDINGS = {
     "open_fridge": ["Open the fridge.", "Pull the {name} door open.", "Swing the fridge door open."],
     "move_on_table": ["Move the {name} further along the table.", "Pick up the {name} and set it down along the table.",
                       "Shift the {name} to another spot on the table."],
+    "open_oven": ["Open the oven.", "Pull the oven door down.", "Open the oven door of the {name}."],
+    "open_dishwasher": ["Open the dishwasher.", "Pull the dishwasher door open.", "Open the {name} door."],
+    "turn_on_faucet": ["Turn on the faucet.", "Lift the faucet lever to start the water.", "Turn the tap on."],
+    "load_dishwasher": ["Put the {name} in the dishwasher.", "Load the {name} into the dishwasher rack.",
+                        "Move the {name} from the counter into the dishwasher."],
+    "unload_dishwasher": ["Take the {name} out of the dishwasher.", "Unload the {name} onto the counter.",
+                          "Move the {name} from the dishwasher rack to the counter."],
 }
 
 
@@ -45,6 +54,12 @@ def finish_task(t: dict) -> dict:
         t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
     elif t["family"] in ("open_door", "close_door", "open_fridge"):
         t["joint"] = f'{t["fixture"]}_door'
+    elif t["family"] == "open_oven":
+        t["joint"], t["handle"] = f'{t["fixture"]}_oven_door', f'{t["fixture"]}_oven_door_handle'
+    elif t["family"] in ("open_dishwasher", "load_dishwasher", "unload_dishwasher"):
+        t["joint"], t["handle"] = f'{t["fixture"]}_door', f'{t["fixture"]}_door_handle'
+    elif t["family"] == "turn_on_faucet":
+        t["joint"], t["handle"] = f'{t["fixture"]}_faucet', f'{t["fixture"]}_faucet_handle'
     return t
 
 
@@ -187,6 +202,29 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
                     if m:
                         pool.append({"object_id": o["id"], "object_label": o["label"], "source": c["id"],
                                      "target": c["id"], "start": list(o["position"]), **m})
+        elif fam == "open_oven":
+            pool = [{"fixture": f["id"], "name": f["id"].replace("_", " ")} for f in twin["fixtures"] if f["type"] == "stove"]
+        elif fam == "open_dishwasher":
+            pool = [{"fixture": f["id"], "name": f["id"].replace("_", " ")} for f in twin["fixtures"]
+                    if f["type"] == "dishwasher"]
+        elif fam == "turn_on_faucet":  # the sink sits in a counter run; the lever is pushed from in front of that counter
+            pool = [{"fixture": s["id"], "name": "faucet"} for s in sinks if _holder(s, counters) is not None]
+        elif fam in ("load_dishwasher", "unload_dishwasher"):
+            # the base parks beside the dishwasher in front of the counter, so the object (or its spot on the
+            # counter for unloading) has to be within reach of that parking spot
+            for d in (f for f in twin["fixtures"] if f["type"] == "dishwasher"):
+                for o in twin["objects"]:
+                    if o["catalog_id"] not in PICKABLE:
+                        continue
+                    src = _holder(o, counters)
+                    if src is None:
+                        continue
+                    ox = to_local(o["position"], d)[0]  # along the dishwasher's run, from its centre
+                    park = math.copysign(DISHWASHER_SIDE, ox)
+                    if abs(ox - park) > 0.45 or abs(ox) < d["size"][0] / 2 + 0.1:
+                        continue
+                    pool.append({"object_id": o["id"], "object_label": o["label"], "source": src["id"],
+                                 "fixture": d["id"], "start": list(o["position"])})
         elif fam == "open_fridge":
             pool = [{"fixture": f["id"], "name": "fridge"} for f in twin["fixtures"]
                     if f["type"].startswith("fridge")]

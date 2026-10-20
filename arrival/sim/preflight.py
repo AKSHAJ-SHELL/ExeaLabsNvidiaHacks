@@ -26,6 +26,12 @@ DRAWER_OPEN_PUT = 0.14  # start state for put_in_drawer: wide enough for a mug o
 FRIDGE_BASE_ALONG = 0.1  # base centre past the door's free edge, along the front
 FRIDGE_BASE_OUT = 0.75  # base centre out from the fridge front: nearer, the handle's arc folds the elbow onto its stop
 FRIDGE_BASE_YAW = 0.0  # degrees the base turns toward the hinge from facing the front
+FLAP_MARGIN = 0.06  # open_oven / open_dishwasher: base column edge to where the open door's top edge lands
+FAUCET_STANDOFF = 0.34  # base column to counter front for turn_on_faucet (0.28 elsewhere): the lever is at the back
+# of the counter above shoulder height, and a horizontal hand reaches it with less joint strain from further out
+DISHWASHER_SIDE = 0.55  # load/unload_dishwasher: the base parks this far beside the dishwasher centre, clear of its door
+RACK_FRONT = 0.15  # the rack spot an object is set into (or taken from) lies this far out from the dishwasher front
+FLAP_DOOR_BELOW = {"open_oven": 0.24, "open_dishwasher": 0.18}  # fixture height minus the door's height, per family
 PICK_PLACE = ("counter_to_sink", "counter_to_counter")
 MOBILE_STEP = 0.3  # a mobile base parks this far along the source run toward the target, as counter_to_sink parks
 # between the object and the sink; it then drives to `drive_spot` once the object is held
@@ -78,6 +84,23 @@ def drive_spot(twin: dict, task: dict) -> tuple[float, float, float]:
     return park(tgt, to_local(place_point(twin, task)[:2], tgt)[0], 0.28)
 
 
+def faucet_counter(twin: dict, sink: dict) -> dict:
+    """The counter run the sink is set into (its frame holds the sink's centre); the lever is pushed from in front of it."""
+    for c in twin["fixtures"]:
+        if is_counter_host(c):
+            lx, ly = to_local(sink["position"][:2], c)
+            if abs(lx) < c["size"][0] / 2 and abs(ly) < c["size"][1] / 2:
+                return c
+    raise StopIteration(f"no counter run holds {sink['id']}")
+
+
+def rack_spot(d: dict) -> tuple[float, float]:
+    """World xy in the middle of the part of a dishwasher's upper rack that is out past its front."""
+    n = front(d)
+    out = d["size"][1] / 2 + RACK_FRONT
+    return float(d["position"][0] + n[0] * out), float(d["position"][1] + n[1] * out)
+
+
 def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False
               ) -> tuple[tuple[float, float, float], float, dict]:
     """(base position, base yaw in degrees, anchor fixture): in front of the fixture the task works at, facing it,
@@ -113,6 +136,23 @@ def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False
         src = fx[task["fixture"]]
         along = (drawer_x(src, fixtures) + to_local(obj_xy[:2], src)[0]) / 2
         base = park(src, along, DRAWER_OPEN_PUT + 0.07 + 0.14)  # front + handle bar + base column + margin
+    elif fam in FLAP_DOOR_BELOW:
+        # straight in front of the bar, just far enough out that the door swings all the way down to flat without
+        # its top edge reaching the base column; parking beside the swing instead puts the wrist under the arm for a
+        # horizontal grasp
+        src = fx[task["fixture"]]
+        base = park(src, 0.0, src["size"][2] - FLAP_DOOR_BELOW[fam] + 0.12 + FLAP_MARGIN)
+    elif fam == "turn_on_faucet":
+        # in front of the counter run at the sink, closer than for counter_to_sink: the lever is at the back of the
+        # counter, at the edge of what a horizontal hand reaches from the usual parking spot
+        sink = fx[task["fixture"]]
+        src = faucet_counter(twin, sink)
+        base = park(src, to_local(sink["position"][:2], src)[0], FAUCET_STANDOFF)
+    elif fam in ("load_dishwasher", "unload_dishwasher"):
+        # beside the dishwasher, in front of the counter, so the flat door and the rolled-out rack stay clear of the
+        # base column and both the rack and the counter spot are within reach
+        src = fx[task["fixture"]]
+        base = park(src, math.copysign(DISHWASHER_SIDE, to_local(obj_xy[:2], src)[0]), 0.28)
     elif fam == "open_fridge":
         # beside the door's free edge and out of its swing (the hinge is on the fixture's left edge), facing the
         # front like the cabinet door tasks
@@ -153,6 +193,9 @@ def reach_points(twin: dict, task: dict, obj_xy=None, mobile: bool = False) -> l
         src = next(f for f in twin["fixtures"] if f["id"] == task["fixture"])
         tray = np.array(to_world((drawer_x(src, twin["fixtures"]), src["size"][1] / 2 + DRAWER_OPEN_PUT / 2), src))
         return [("the object", np.array(obj_xy[:2])), ("the drawer tray", tray)]
+    if fam in ("load_dishwasher", "unload_dishwasher"):
+        d = next(f for f in twin["fixtures"] if f["id"] == task["fixture"])
+        return [("the object", np.array(obj_xy[:2])), ("the rack", np.array(rack_spot(d)))]
     if fam == "wipe_counter":
         src = next(f for f in twin["fixtures"] if f["id"] == task["source"])
         u = np.array([math.cos(src.get("yaw", 0.0)), math.sin(src.get("yaw", 0.0))])
