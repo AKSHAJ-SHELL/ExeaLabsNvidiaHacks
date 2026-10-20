@@ -47,6 +47,8 @@ tests/test_web.py
 
 `.gitignore` includes `out/`, `.venv/`, `__pycache__/`, `*.pyc`, `.env`.
 
+Since the MVP the repo also has `Makefile`, `Dockerfile`, `CONTRIBUTING.md`, `.github/` (CI workflow and Dependabot) and `scripts/` (demo, docs and packaging checks, scan intake); `.gitignore` grew to cover build output and editor files. See [REFERENCE.md](REFERENCE.md).
+
 Each package directory needs `__init__.py`. Keep them empty.
 
 ## CLI

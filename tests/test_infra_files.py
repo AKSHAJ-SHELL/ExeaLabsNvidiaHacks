@@ -27,15 +27,17 @@ def test_ci_runs_pytest_demo_and_validate():
     assert "pytest -q -p no:cacheprovider" in runs
     assert "python -m arrival demo --episodes 2" in runs
     assert "python -m arrival validate" in runs
+    assert "scripts/demo_all.py" in runs
 
 
 def test_ci_is_offline_and_headless():
     text = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
     assert "secrets." not in text
     ci = _ci()
-    job = next(iter(ci["jobs"].values()))
-    assert job["env"]["MUJOCO_GL"] == "egl"
-    assert "osmesa" in text and "libosmesa6" in text and "libegl1" in text and "libgl1" in text
+    job = ci["jobs"]["test"]
+    # Linux picks egl, falling back to osmesa; macOS and Windows keep the MuJoCo default.
+    assert "MUJOCO_GL=egl" in text and "MUJOCO_GL=osmesa" in text and "PYOPENGL_PLATFORM=osmesa" in text
+    assert "libosmesa6" in text and "libegl1" in text and "libgl1" in text
     assert job["timeout-minutes"] == 20
     assert job["strategy"]["matrix"]["python-version"] == ["3.11", "3.12"]
     assert ci["concurrency"]["cancel-in-progress"] is True

@@ -5,15 +5,26 @@
     python scripts/demo_all.py --quick --room hero_kitchen --out out/demo
 
 Runs the existing functions in-process, prints PASS/FAIL and wall time per stage, and writes
-<out>/demo_summary.md and <out>/demo_summary.json. Exits 1 if any stage fails.
+<out>/demo_summary.md, <out>/demo_summary.json and a self-contained <out>/index.html. Exits 1 if a stage
+fails or the whole run exceeds --timeout, and 2 if the environment cannot run it (mujoco missing, no
+working OpenGL backend).
+It is fully offline: API keys are ignored and every non-loopback network connection is refused.
 The dataset is a scripted expert in simulation; no policy was trained and no cost was measured.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import contextlib
+import html
+import importlib.util
 import json
+import os
+import socket
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -29,8 +40,120 @@ UNMEASURED = ["nebius_token_factory_usd", "nebius_gpu_job_usd", "cosmos_restyle_
               "teleop_comparison_usd_per_demo"]
 
 
+# Keys that would make some other script reach for the network. The demo ignores them.
+NETWORK_ENV = ["TOKEN_FACTORY_API_KEY", "TOKEN_FACTORY_BASE_URL", "TAVILY_API_KEY", "TAVILY_BASE_URL",
+               "GR00T_POLICY_URL", "COSMOS_URL"]
+EXIT_ENV = 2  # the machine cannot run the demo (not a stage failure)
+DEFAULT_TIMEOUT_S = 900
+GL_PROBE = ("import mujoco;"
+            "m=mujoco.MjModel.from_xml_string('<mujoco><worldbody><geom size=\"1\"/></worldbody></mujoco>');"
+            "r=mujoco.Renderer(m,16,16);d=mujoco.MjData(m);mujoco.mj_forward(m,d);r.update_scene(d);r.render()")
+
+
 class StageFailed(Exception):
     pass
+
+
+def gl_candidates(platform: str = sys.platform, forced: str | None = None) -> list[str | None]:
+    """MuJoCo GL backends to try in order; None means leave MUJOCO_GL unset (the platform default)."""
+    if forced:
+        return [forced]
+    if platform.startswith("linux"):
+        return [None, "egl", "osmesa", "glfw"]
+    if platform == "darwin":
+        return [None, "glfw"]
+    return [None, "glfw", "egl"]
+
+
+def pick_gl_backend(candidates: list[str | None], probe=None) -> tuple[bool, str | None, list[str]]:
+    """First backend whose 16 px offscreen render works: (found, backend or None for the default, tried).
+
+    Each probe is a fresh process because MuJoCo reads MUJOCO_GL once, at import time, and a bad
+    backend can abort the interpreter instead of raising.
+    """
+    def run(backend):
+        env = dict(os.environ)
+        env.pop("MUJOCO_GL", None)
+        env.pop("PYOPENGL_PLATFORM", None)
+        if backend:
+            env["MUJOCO_GL"] = backend
+            if backend == "osmesa":
+                env["PYOPENGL_PLATFORM"] = "osmesa"
+        try:
+            return subprocess.run([sys.executable, "-c", GL_PROBE], env=env, capture_output=True,
+                                  timeout=60).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    probe, tried = probe or run, []
+    for b in candidates:
+        tried.append(b or "default")
+        if probe(b):
+            return True, b, tried
+    return False, None, tried
+
+
+def preflight(log=print, probe=None) -> str | None:
+    """None when the demo can run (MUJOCO_GL is then set for this process), else a one-line reason."""
+    if importlib.util.find_spec("mujoco") is None:
+        return "mujoco is not installed. The demo needs the sim extra: pip install -e '.[sim]'"
+    forced = os.environ.get("MUJOCO_GL") or None
+    found, backend, tried = pick_gl_backend(gl_candidates(forced=forced), probe)
+    if not found:
+        return ("no working OpenGL backend for MuJoCo (tried " + ", ".join(tried) + "). On Linux install "
+                "libegl1 and libosmesa6 (or set MUJOCO_GL=osmesa); on Windows and macOS a desktop session "
+                "with a GPU driver is needed for glfw")
+    if backend:
+        os.environ["MUJOCO_GL"] = backend
+        if backend == "osmesa":
+            os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+    log(f"[demo_all] MuJoCo GL backend: {backend or 'platform default'}")
+    return None
+
+
+def _is_loopback(address) -> bool:
+    host = address[0] if isinstance(address, tuple) and address else address
+    return isinstance(host, str) and (host in ("localhost", "::1", "") or host.startswith("127."))
+
+
+@contextlib.contextmanager
+def offline_guard():
+    """Refuse every non-loopback socket connection and hide API keys for the length of the block."""
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+    hidden = {k: os.environ.pop(k) for k in NETWORK_ENV if k in os.environ}
+
+    def guarded(real):
+        def inner(self, address, *args):
+            if self.family in (socket.AF_INET, socket.AF_INET6) and not _is_loopback(address):
+                raise OSError(f"demo_all is offline: refused connection to {address!r}")
+            return real(self, address, *args)
+        return inner
+
+    socket.socket.connect, socket.socket.connect_ex = guarded(real_connect), guarded(real_connect_ex)
+    try:
+        yield
+    finally:
+        socket.socket.connect, socket.socket.connect_ex = real_connect, real_connect_ex
+        os.environ.update(hidden)
+
+
+def start_watchdog(seconds: float, out: Path, exit_fn=os._exit) -> threading.Timer | None:
+    """After `seconds`, write a FAIL summary, print one line and exit 1. Cancel the returned timer when done."""
+    if not seconds or seconds <= 0:
+        return None
+
+    def fire():
+        msg = f"timed out after {seconds:g} s"
+        with contextlib.suppress(OSError):
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "demo_summary.json").write_text(json.dumps({"overall": "FAIL", "error": msg}, indent=2))
+        print(f"demo_all: FAIL {msg}", file=sys.stderr, flush=True)
+        exit_fn(1)
+
+    t = threading.Timer(seconds, fire)
+    t.daemon = True
+    t.start()
+    return t
 
 
 def _stage(stages: list[dict], name: str, fn, log=print):
@@ -84,6 +207,37 @@ def _markdown(s: dict) -> str:
     if s["error"]:
         lines += ["", "## Error", "", s["error"]]
     return "\n".join(lines) + "\n"
+
+
+def _index_html(s: dict) -> str:
+    """One self-contained page: summary, stage table and the contact sheet inlined as a data URI."""
+    e = html.escape
+    ds = s["dataset"]
+    rows = "".join(f"<tr><td>{e(r['stage'])}</td><td>{r['status']}</td><td>{r['seconds']}</td></tr>"
+                   for r in s["stages"])
+    img = ""
+    sheet = s["artifacts"].get("contact_sheet")
+    if sheet and Path(sheet).is_file():
+        b64 = base64.b64encode(Path(sheet).read_bytes()).decode()
+        img = f'<h2>Contact sheet</h2><img alt="contact sheet" src="data:image/png;base64,{b64}">'
+    facts = ""
+    if ds:
+        facts = (f"<ul><li>Dataset: <code>{e(str(ds['path']))}</code></li>"
+                 f"<li>Episodes: {ds['episodes']}, frames: {ds['frames']}</li>"
+                 f"<li>arrival_physically_valid: {str(ds['physically_valid']).lower()}</li>"
+                 f"<li>joints_are_placeholder: {str(ds['joints_are_placeholder']).lower()}</li></ul>")
+    err = f"<p><b>Error:</b> {e(s['error'])}</p>" if s["error"] else ""
+    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            f"<title>Arrival demo: {e(s['room'])}</title>"
+            "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem}"
+            "table{border-collapse:collapse}td,th{border:1px solid #8885;padding:.25rem .6rem;text-align:left}"
+            "img{max-width:100%}</style></head><body>"
+            f"<h1>Arrival demo: {e(s['room'])}</h1><p><b>{e(HONEST_LABEL)}</b></p>"
+            f"<p>Mode {e(s['mode'])}. Overall <b>{s['overall']}</b>. Wall time {s['seconds']} s. "
+            f"Run offline: no network, no API keys.</p>{err}"
+            f"<table><tr><th>Stage</th><th>Status</th><th>Seconds</th></tr>{rows}</table>{facts}{img}"
+            "</body></html>\n")
 
 
 def run(room: str, mode: str, out: Path, scans: str = "scans", log=print) -> tuple[dict, int]:
@@ -156,6 +310,7 @@ def run(room: str, mode: str, out: Path, scans: str = "scans", log=print) -> tup
     out.mkdir(parents=True, exist_ok=True)
     (out / "demo_summary.json").write_text(json.dumps(s, indent=2))
     (out / "demo_summary.md").write_text(_markdown(s))
+    (out / "index.html").write_text(_index_html(s), encoding="utf-8")
     return s, 1 if s["error"] else 0
 
 
@@ -169,14 +324,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--scans", default="scans")
     ap.add_argument("--serve", action="store_true", help="start the local page when every stage passed")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S,
+                    help=f"abort with exit 1 after this many seconds, 0 for none (default {DEFAULT_TIMEOUT_S})")
     a = ap.parse_args(argv)
     out = Path(a.out)
-    s, code = run(a.room, "full" if a.full else "quick", out, a.scans)
+    why = preflight()
+    if why:
+        print(f"demo_all: {why}", file=sys.stderr)
+        return EXIT_ENV
+    watchdog = start_watchdog(a.timeout, out)
+    try:
+        with offline_guard():
+            s, code = run(a.room, "full" if a.full else "quick", out, a.scans)
+    finally:
+        if watchdog:
+            watchdog.cancel()
     if code:
         print(f"demo_all: FAIL {s['error']}", file=sys.stderr)
         return code
     print((out / "demo_summary.md").read_text())
-    print(f"summary: {out / 'demo_summary.md'}")
+    print(f"summary: {out / 'demo_summary.md'}\npage: {out / 'index.html'}")
     if a.serve:
         from arrival.cli import resolve_scans
         from arrival.web.app import serve
