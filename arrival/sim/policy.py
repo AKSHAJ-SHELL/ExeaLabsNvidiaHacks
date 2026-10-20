@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from arrival.sim import ik
-from arrival.sim.robot import BASE_SPEED, BASE_TURN, FINGER_OPEN, HOME
+from arrival.sim.robot import BASE_SPEED, BASE_TURN, FINGER_OPEN, HAND, HOME
 
 MINJERK_PEAK = 1.875  # peak over mean speed of a min-jerk move: sizes a base drive so it never exceeds BASE_SPEED
 STOP_CLEAR = 0.7  # the base waits while a person is this close ahead of it (0.12 pedestal + 0.17 torso + margin)
@@ -47,6 +47,7 @@ FRIDGE_PUSH_END = np.radians(80)  # door angle the push is planned to
 FRIDGE_PUSH_ROLL = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])  # fingers stacked vertically
 # for the push, so the hand is narrow along the panel and its far finger stays off the edge
 FRIDGE_PULL_STEPS = 10  # control steps per quarter of the hooked pull and per sixth of the push
+FLAP_OUT = 0.12  # m: how far out along the door normal the hand backs off after letting a flap door go
 FAUCET_UNDER, FAUCET_PUSH = 0.045, 0.05  # m: closed fingers start this far below the lever tip, then travel up this far
 FLAP_TILTS = (0.0, 0.35, 0.7)  # rad below the door's horizontal for the hand on a flap-door bar; chosen per task
 FLAP_RELEASE = 0.5  # rad; a bottom-hinged door is let go here and falls to its flat stop (its handle swings
@@ -70,7 +71,7 @@ class ScriptedExpert(Policy):
     def _waypoints(self, env, task: dict) -> list[tuple]:
         """(pos, R, gripper, steps[, via[, base]]) list. base is a room-frame (x, y, yaw) the base stands at for
         that waypoint (None: where it already is); pos None keeps the arm's joints while the base drives."""
-        fam, o, c = task["family"], FINGER_OPEN, 0.0
+        fam, o, c = task["family"], getattr(env, "finger_open", FINGER_OPEN), 0.0
         if fam == "counter_to_counter" and env.drive_to is not None:
             return self._drive_and_place(env, task, o, c)
         if fam in ("counter_to_sink", "counter_to_counter", "move_on_table"):
@@ -266,6 +267,7 @@ class ScriptedExpert(Policy):
             # the bar vertically, and that frame turns with the door; at FLAP_RELEASE the gripper opens and gravity
             # takes the door to its flat stop.
             pivot, h, _ = env.flap_geometry(task)
+            hand = getattr(env, "hand", HAND)  # pad and wrist geometry of the arm that is loaded
             n = env.pull_axis(task)  # outward normal of the closed panel
             s, up = self.seg_steps, np.array([0, 0, 1.0])
             a = np.cross(up, n)  # hinge axis direction
@@ -293,14 +295,14 @@ class ScriptedExpert(Policy):
                 a = -a
 
             def chain(tilt):
-                out = [(pt(0) + 0.18 * n + 0.05 * up, ori(0, tilt), o, s), (pt(0) + 0.015 * n, ori(0, tilt), o, s),
-                       (pt(0) + 0.015 * n, ori(0, tilt), c, self.hold_steps)]
+                out = [(pt(0) + 0.18 * n + 0.05 * up, ori(0, tilt), o, s), (pt(0) + hand["flap_bar"] * n, ori(0, tilt), o, s),
+                       (pt(0) + hand["flap_bar"] * n, ori(0, tilt), c, self.hold_steps)]
                 for k in range(1, 9):
                     q = FLAP_RELEASE * k / 8
-                    out.append((pt(q) + 0.015 * nrm(q), ori(q, tilt), c, s // 2, k < 8))
+                    out.append((pt(q) + hand["flap_bar"] * nrm(q), ori(q, tilt), c, s // 2, k < 8))
                 q = FLAP_RELEASE
-                out.append((pt(q) + 0.015 * nrm(q), ori(q, tilt), o, self.hold_steps))
-                out.append((pt(q) + 0.12 * nrm(q) + 0.15 * up, ori(q, tilt), o, s))
+                out.append((pt(q) + hand["flap_bar"] * nrm(q), ori(q, tilt), o, self.hold_steps))
+                out.append((pt(q) + FLAP_OUT * nrm(q) + hand["flap_up"] * up, ori(q, tilt), o, s))
                 return out
 
             # which tilt reaches depends on the bar's height and distance (oven bars sit higher than dishwasher
@@ -409,7 +411,7 @@ class ScriptedExpert(Policy):
         q = np.array(HOME)
         plan: list[np.ndarray] = []
         base = env.base_pose()
-        prev = np.concatenate([q, [FINGER_OPEN], base])
+        prev = np.concatenate([q, [getattr(env, "finger_open", FINGER_OPEN)], base])
         ik_error, q7 = 0.0, abs(q[6])
         chain: list[tuple[np.ndarray, int]] = []
         for pos, R, g, steps, *rest in waypoints:

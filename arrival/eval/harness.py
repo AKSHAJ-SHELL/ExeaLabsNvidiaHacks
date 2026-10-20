@@ -32,7 +32,7 @@ def wilson(k: int, n: int, z: float = 1.96) -> list[float]:
 
 def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = "scripted", seed: int = 0,
              people: int = 2, holdout: bool = False, res: int = 128, out_dir: str | Path = "out",
-             base: str = "fixed", log=print) -> dict:
+             base: str = "fixed", arm: str = "procedural", log=print) -> dict:
     from arrival.sim.policy import ScriptedExpert, VLAClient
 
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
@@ -48,7 +48,7 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
         for task in tasks:
             t0 = time.perf_counter()
             try:
-                with SimEnv(twin, task, res=res, base=base) as env:
+                with SimEnv(twin, task, res=res, base=base, arm=arm) as env:
                     ep = run_episode(env, policy, task)
             except Exception as e:
                 if isinstance(e, OSError) and not any(per.values()) and not rows:
@@ -63,9 +63,9 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
             rows.append((ok, len(ep["states"]) / FPS, wall, s["human_contact"], s["min_human_distance_m"],
                          ep["ik_error"], s["arm_contact_steps"], s["arm_contact_max_depth_m"], None))
             tag = "DROP human_contact" if s["human_contact"] else ("OK " if ok else "MISS")
-            arm = f" arm_contact={s['arm_contact_steps']} steps {s['arm_contact_worst']}" if s["arm_contact_steps"] else ""
+            arm_note = f" arm_contact={s['arm_contact_steps']} steps {s['arm_contact_worst']}" if s["arm_contact_steps"] else ""
             log(f"[eval] {task['task_id']}: {tag} {ep['detail']} sim={len(ep['states']) / FPS:.2f}s "
-                f"wall={wall:.1f}s min_human_d={s['min_human_distance_m']}{arm}")
+                f"wall={wall:.1f}s min_human_d={s['min_human_distance_m']}{arm_note}")
         n, k = len(rows), sum(r[0] for r in rows)
         dists = [r[4] for r in rows if r[4] is not None]
         iks = [r[5] for r in rows if r[5] is not None]
@@ -81,7 +81,7 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
     n = sum(f["episodes"] for f in per.values())
     k = sum(f["successes"] for f in per.values())
     report = {"room_id": room, "policy": policy_name, "episodes_per_family": episodes, "seed": seed,
-              "people": people, "holdout": holdout, "resolution": res, "base": base, "families": per,
+              "people": people, "holdout": holdout, "resolution": res, "base": base, "arm": arm, "families": per,
               "totals": {"episodes": n, "successes": k, "success_rate": round(k / n, 4) if n else None,
                          "wilson_95": wilson(k, n), "human_contacts": sum(f["human_contacts"] for f in per.values()),
                          "errors": sum(len(f["errors"]) for f in per.values()),

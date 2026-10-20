@@ -633,15 +633,29 @@ def lights_xml(lighting: str, cx: float, cy: float, y_front: float, seed: int | 
             f'dir="{-side * 0.8:.1f} 0 -0.45" diffuse="{window}" specular="0 0 0" castshadow="false"/>'), li
 
 
+def arm_parts(arm: str, base_pos, base_yaw_deg: float, mobile: bool = False) -> dict[str, str]:
+    """MJCF fragments for the chosen arm: `procedural` (robot.py) or `menagerie` (the Franka asset, menagerie.py)."""
+    if arm == "procedural":
+        return {"meshdir": "", "defaults": "", "assets": "", "body": robot.arm_xml(tuple(base_pos), base_yaw_deg, mobile=mobile),
+                "actuators": robot.actuators_xml(mobile=mobile), "contact": ""}
+    if arm == "menagerie":
+        from arrival.sim import menagerie
+
+        return menagerie.arm_fragments(tuple(base_pos), base_yaw_deg, mobile)
+    raise ValueError(f"unknown arm {arm!r} (procedural or menagerie)")
+
+
 def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: dict | None = None,
                lighting: str = "neutral", n_people: int = 0, seed: int | None = None, people_seed: int = 0,
-               base: str = "fixed") -> str:
+               base: str = "fixed", arm: str = "procedural") -> str:
     """Returns an MJCF string. object_pos overrides {object_id: [x, y, z]} start positions.
     seed jitters the lights within the lighting label (None gives the nominal lights); people_seed picks the walkers' bodies.
-    base="mobile" gives the pedestal planar joints and actuators (MAN-3); "fixed" is the string main always built."""
+    base="mobile" gives the pedestal planar joints and actuators (MAN-3); "fixed" is the string main always built.
+    arm="menagerie" swaps in the Franka asset from MuJoCo Menagerie (needs `python scripts/fetch_menagerie.py`)."""
     object_pos = object_pos or {}
     if not twin["walls"]:
         raise ScanBundleError("the twin has no walls, so there is no room to simulate; rescan with the walls captured")
+    a = arm_parts(arm, base_pos, base_yaw_deg, mobile=base == "mobile")
     fx = twin["fixtures"]
     sinks = [f for f in fx if f["type"] == "sink"]
     world = []
@@ -672,7 +686,7 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
     for o in twin["objects"]:
         world.append(object_xml(o, object_pos.get(o["id"], o["position"])))
     world += [people.person_xml(i, people_seed) for i in range(n_people)]
-    world.append(robot.arm_xml(tuple(base_pos), base_yaw_deg, mobile=base == "mobile"))
+    world.append(a["body"])
     xs = [p for w in twin["walls"] for p in (w["start"][0], w["end"][0])]
     ys = [p for w in twin["walls"] for p in (w["start"][1], w["end"][1])]
     cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
@@ -680,17 +694,19 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
     body = "".join(world)
     for rgba, mat in MATERIALS.items():
         body = body.replace(f'rgba="{rgba}"', f'rgba="{rgba}" material="{mat}"')
+    meshdir = f' meshdir="{a["meshdir"]}"' if a["meshdir"] else ""
+    assets = assets_xml().replace("</asset>", a["assets"] + "</asset>")
     return f"""<mujoco model="{twin['room_id']}_sim">
-<compiler angle="radian" autolimits="true"/>
+<compiler angle="radian" autolimits="true"{meshdir}/>
 <option timestep="0.002" cone="elliptic" impratio="10" integrator="implicitfast"/>
 <visual><global offwidth="640" offheight="480"/><headlight ambient="{0.15 * li:.3f} {0.15 * li:.3f} {0.15 * li:.3f}" diffuse="{0.1 * li:.3f} {0.1 * li:.3f} {0.1 * li:.3f}" specular="0 0 0"/><quality shadowsize="2048"/></visual>
-{assets_xml()}
-<default><geom friction="1.0 0.01 0.001"/></default>
+{assets}
+<default><geom friction="1.0 0.01 0.001"/>{a['defaults']}</default>
 <worldbody>
 {lights}
 <geom name="floor" type="plane" pos="{cx} {cy} 0" size="{max(xs)} {max(ys)} 0.1" material="floor"/>
 <camera name="overview" pos="{cx} {max(ys) - 0.1} 2.2" xyaxes="-1 0 0 0 -0.6 0.8" fovy="80"/>
 {body}
-</worldbody>
-<actuator>{robot.actuators_xml(mobile=base == "mobile")}</actuator>
+</worldbody>{a['contact']}
+<actuator>{a['actuators']}</actuator>
 </mujoco>"""
