@@ -112,3 +112,6 @@ Deviations from the contract, one paragraph each.
 **DEM-3: hosted portable fixture ordering.** The first hosted run exposed a gap in `--no-render`: module-scoped dataset fixtures opened the renderer before the function-scoped guard ran. Windows and macOS reported graphics-context errors, and Linux aborted. The guard now patches the public renderer before test collection and marks rendering tests to skip before their fixtures start. Subprocess regressions record renderer calls from session, module and function fixtures, an imported constructor, a plugin's session fixture and a marked test's child-process fixture. Portable mode must make no renderer calls; the normal suite must execute them.
 
 **DEM-3: software-rendering CI budget.** Hosted Linux runs of the companion branches hit the 20-minute job limit before their full suites finished. The rendering gate now allows 75 minutes for the complete suite and offline demo. The portable gate keeps its 20-minute limit. Both gates remain required.
+
+
+**W3: documentation section boundaries.** Planned code paths remain exempt only within actual level-two to-do sections. A level-one or level-two heading ends that scope; heading examples inside fenced code do not change it. Regression cases cover space and tab separators and both Markdown fence styles, while broken links still fail inside planned sections.

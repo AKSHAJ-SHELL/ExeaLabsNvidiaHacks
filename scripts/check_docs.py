@@ -87,7 +87,9 @@ def test_defs(root: Path) -> dict[str, set[str]]:
     return defs
 
 
-PLANNED_SECTION = re.compile(r"^##\s+.*\bto-?do\b", re.I)
+PLANNED_SECTION = re.compile(r"\bto-?do\b", re.I)
+SECTION_HEADING = re.compile(r"^ {0,3}(#{1,2})(?:[ \t]+|$)(.*)$")
+BLOCK_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
 def check_paths(root: Path, doc: Path, text: str, tests: dict[str, set[str]]) -> list[str]:
@@ -96,9 +98,21 @@ def check_paths(root: Path, doc: Path, text: str, tests: dict[str, set[str]]) ->
     rel = doc.relative_to(root).as_posix()
     probs = []
     planned = False
+    fence = None
     for n, line in enumerate(text.splitlines(), 1):
-        if line.startswith("## "):
-            planned = bool(PLANNED_SECTION.match(line))
+        block = BLOCK_FENCE.match(line)
+        if block:
+            marker, info = block.groups()
+            if fence is None:
+                if marker[0] != "`" or "`" not in info:
+                    fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence) and not info.strip():
+                fence = None
+        elif fence is None:
+            heading = SECTION_HEADING.match(line)
+            if heading:
+                level, title = heading.groups()
+                planned = len(level) == 2 and bool(PLANNED_SECTION.search(title))
         for target in LINK.findall(line):
             if re.match(r"^(\w+:|#|//)", target):
                 continue

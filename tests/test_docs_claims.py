@@ -72,3 +72,24 @@ def test_label_sentence_must_match_writer_constants(tmp_path):
     good = "`python -m arrival demo` writes data (`arrival_physically_valid: false`)."
     assert len(check_docs.check_labels(doc, tmp_path, bad, consts)) == 1
     assert check_docs.check_labels(doc, tmp_path, good, consts) == []
+
+
+@pytest.mark.parametrize("heading", ["## Status", "# Status", "##\tStatus"])
+def test_planned_paths_are_allowed_but_links_still_resolve(tmp_path, heading):
+    text = ("## Code to-do before submission\n\nAdd `arrival/jobs/shards.py` later.\n"
+            f"[guide](missing.md)\n{heading}\n\nSee `arrival/jobs/shards.py` now.\n")
+    assert check_docs.check_paths(tmp_path, tmp_path / "README.md", text, {}) == [
+        "README.md:4: broken link missing.md",
+        "README.md:7: path does not exist `arrival/jobs/shards.py`",
+    ]
+
+
+@pytest.mark.parametrize("fence", ["```", "~~~~"])
+def test_fenced_headings_do_not_change_planned_sections(tmp_path, fence):
+    for heading, example_heading, planned in [
+        ("## Status", "## Code to-do", False),
+        ("## Code to-do", "# Status", True),
+    ]:
+        text = f"{heading}\n\n{fence}markdown\n{example_heading}\n{fence}\n\n`arrival/jobs/shards.py`\n"
+        problems = check_docs.check_paths(tmp_path, tmp_path / "README.md", text, {})
+        assert problems == ([] if planned else ["README.md:7: path does not exist `arrival/jobs/shards.py`"])
