@@ -46,19 +46,55 @@ Open the page:
 ```bash
 python -m arrival serve        # http://127.0.0.1:8000
 python -m arrival serve --host 0.0.0.0   # reachable from the iOS capture app on the same Wi-Fi; prints the LAN URL
+python -m arrival serve --host 0.0.0.0 --public --behind-proxy --max-upload-mb 100 --rate-limit 5 --max-queued 20   # hosted, behind a TLS proxy
 ```
+
+Check the machine before a first run (offline, exit 1 only when something required is missing):
+
+```bash
+python -m arrival doctor            # python, core packages, mujoco, ffmpeg, optional keys, disk
+python -m arrival doctor --json     # the same checks as JSON
+```
+
+`doctor` reports Python (3.11 or newer), numpy, pyarrow, pyyaml, pillow, imageio and imageio-ffmpeg (a missing one fails), MuJoCo (a warning when absent: `sim`, `eval` and `work` need it, `demo` and `serve` do not), an ffmpeg binary that runs (the one imageio-ffmpeg ships, else `PATH`), free disk where `--out` will be written (warning under 2 GiB, failure under 0.25 GiB or when not writable), and whether `TOKEN_FACTORY_API_KEY`, `TAVILY_API_KEY`, `GR00T_POLICY_URL` and `COSMOS_URL` are set, in the environment or in a `.env` in the cwd or repo root. A key shows only as `set in the environment`, `set in .env` or `not set`; its value is never printed, logged or sent anywhere, and a missing optional key is never a failure.
 
 | Route | What it does |
 |---|---|
 | `GET /` | Lists rooms under `scans/` with `geometry_source`, task counts per family, dataset path, and download link. Has an upload form |
 | `GET /rooms/<id>` | Fixtures, the two task families, `arrival_physically_valid`, and the run report |
 | `GET /download/<id>` | Zip of `out/datasets/<id>` |
-| `POST /jobs` | Multipart upload with file field `scan` (max 200 MB, larger gets 413). Writes `out/jobs/<id>/` and returns `202 {"status":"queued",...}`. Nothing is compiled or generated in the request; `python -m arrival work` drains the queue |
-| `GET /jobs/<id>` | The job's `status.json` |
+| `POST /jobs` | Multipart upload: file field `scan` (a `.json` RoomPlan export or `scan.json`) and an optional `frames` (a `.zip` RGB-D bundle, see below). Body max `--max-upload-mb` (default 200; larger gets 413). Writes `out/jobs/<id>/` and returns `202 {"status":"queued",...}`. Nothing is compiled or generated in the request; `python -m arrival work` drains the queue |
+| `GET /jobs/<id>` | The job's `status.json` (without the owner hash; in `--public` mode also without server paths) |
 | `GET /jobs/<id>/download` | `out/jobs/<id>/dataset.zip` once the job is `done`, else 404 with the current status |
 | `GET /previews/<file>` | A png, mp4 or gif from `out/previews/` (what `sim --save-preview` writes), with `Range` support so browsers can seek video |
 
 The index page shows a card per room (stats and the latest preview), a drag-and-drop upload with a progress bar, and every job under `out/jobs/` with its status, stage bar, room id, episode count and a download link; running jobs refresh live. The server binds `127.0.0.1` by default and has no authentication. `--host 0.0.0.0` opens it to the local network for the capture app (`ios/README.md`); do that only on a network you trust. Uploads are streamed to a temp file and downloads are streamed too; a body shorter than `Content-Length`, a missing closing boundary, an empty file, or a part with no filename gets 400. If `out/datasets/<room>_sim` exists, the room page links it and shows its `arrival_generator`, `arrival_physically_valid`, episode count and families.
+
+### Web hardening (L4)
+
+Job ids are `job_` plus 32 random hex characters (128 bits), so an id is a capability and cannot be enumerated; every route that takes an id checks it against a strict pattern and answers 404 otherwise (no path is built from anything else). What an upload must pass, in order, each with its own status:
+
+| Check | Answer |
+|---|---|
+| more than `--rate-limit` uploads in a minute from one client (default 10, `0` = off) | 429 with `Retry-After` |
+| `Content-Length` above `--max-upload-mb` (default 200) | 413 |
+| not `multipart/form-data`, or no or an overlong boundary | 400 |
+| `--max-queued` jobs (default 50, `0` = no cap) already queued or running | 503 with `Retry-After` |
+| free disk under twice the body plus 100 MB | 507 |
+| 4 uploads or dataset zips already in flight | 503 with `Retry-After` |
+| body not finished within 10 minutes, or shorter than `Content-Length` | 408 / 400 |
+| `scan` missing, empty, not named `*.json`, or not starting with `{` | 400 / 415 |
+| `frames` not a `*.zip` starting with the zip magic, or failing the bundle checks below | 415 / 400 / 413 / 422 |
+
+The stored name is a sanitised copy of the client's filename (basename only, `A-Za-z0-9._() -`, at most 80 characters); the bytes are always written to `upload.bin`, so a client name never becomes a path. The scan is sniffed, not parsed: a `.json` file that starts with `{` but is not a valid scan is accepted here and fails at the worker's `normalize` stage.
+
+Every response carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy`, `Cache-Control: no-store` (previews: 30 s private), and a `Content-Security-Policy` that allows the page's one inline script and one inline stylesheet by sha256 hash, no `unsafe-inline`, no external origins. Errors (404, 405, 413, 429, 500, a malformed request line) are short generic pages or `{"error": ...}` JSON, never a traceback or a Python version; the `Server` header is just `Arrival`. The server writes no access log; protocol errors and crashes go to stderr with environment secrets, bearer tokens and `api_key=` pairs masked (`arrival.web.hardening.redact`).
+
+`--public` is for a hosted page: `GET /` lists only the jobs the visitor's own browser uploaded (an `arrival_client` cookie holds a random token, only its hash is stored in the job), and `GET /jobs/<id>` drops `twin_dir`, `dataset_dir` and `zip`. Without it (the default on localhost) the page lists every job, as before. `--behind-proxy` trusts `X-Forwarded-Proto` (adds `Strict-Transport-Security` and marks the cookie `Secure` when it says `https`) and the last entry of `X-Forwarded-For` (the rate-limit key); never set it when clients can reach the port directly, because they could then forge both. Unchanged limits: there is still no login and no TLS in this server, a job id (or a room id, for `/download/<room>`) is the only secret, `/rooms/*` and `/previews/*` are readable by anyone who can reach the port, and one process serves everything. Put TLS and authentication in front before exposing it to the internet.
+
+### RGB-D frames in an upload (L14)
+
+Send the CAP-2a bundle (docs/04-contracts.md) as a second multipart field `frames`: a `.zip` with `frames_manifest.json` at its root and the files it names (`.png`, `.jpg`, `.npy`; no other types). The server unpacks it into a scratch folder (rejecting `..`, absolute or backslash paths, symlinks, encrypted or duplicate entries, more than 4000 entries, a member over 64 MiB or a bundle over 1 GiB unpacked, measured while streaming rather than from the zip header), runs `arrival.scan.rgbd.load_manifest`, and opens every RGB image, depth array (`.npy` without pickles, or 16-bit PNG) and confidence image to check that it is readable and matches `rgb_size` / `depth_size`. A bundle that fails returns 422 with the loader's `code` (for example `non_monotonic_timestamps`, `missing_file`, `depth_shape`, `bad_size`, `bad_image`) and nothing is queued; a bad archive returns 400. A good one is moved to `out/jobs/<id>/frames/` and the status gains `"frames": {"count", "train", "heldout", "depth_unit", "rgb_size", "depth_size", "stored": true, "consumed": false}`. The frames are stored only: nothing reads them yet (appearance and object detection, G8 and C4, are not built), the worker ignores them, and the `scan` still has to carry the geometry. Frames under `out/` are gitignored; never commit private frames.
 
 From a RoomPlan export instead of the authored scan (`scans/<room>/roomplan.json`):
 
@@ -192,7 +228,7 @@ out/
   research/                 `research` output (<room>_research.json, query_research.json)
   reports/hero_kitchen.json attempts, successes, dropped, seconds, demos/hour, dollars
   eval/hero_kitchen_scripted.json   closed-loop eval: per-family success, Wilson 95%, time, human contacts
-  jobs/<job_id>/            upload.bin, status.json; after `work`: dataset.zip (done) or error.txt (failed)
+  jobs/<job_id>/            upload.bin, status.json, frames/ (optional RGB-D upload); after `work`: dataset.zip (done) or error.txt (failed)
   twins/<stem>_<job_id>/, datasets/<stem>_<job_id>_sim/   what `work` compiled and simulated for an upload
 ```
 
@@ -210,7 +246,7 @@ The demo uses no credentials and makes no network calls, and neither do the test
 | `TAVILY_API_KEY`, `TAVILY_BASE_URL` | Optional, for `research` and `sim --tavily`; read only in `arrival.models.tavily`. Base URL defaults to `https://api.tavily.com/search` |
 | `GR00T_POLICY_URL` | Address of a GR00T policy server, for `--policy vla` |
 
-Export them in your shell, or put them in an untracked `.env` (gitignored) in the repo root or cwd: `arrival.models.token_factory` and `arrival.models.tavily` each read it themselves (cwd first, then the repo root), only when their own key is unset, and never override variables already set. No other module loads `.env`. Never commit keys. Account links and what to request are in [docs/08-access.md](08-access.md).
+`python -m arrival doctor` shows which of these are set (never their values). Export them in your shell, or put them in an untracked `.env` (gitignored) in the repo root or cwd: `arrival.models.token_factory` and `arrival.models.tavily` each read it themselves (cwd first, then the repo root), only when their own key is unset, and never override variables already set. No other module loads `.env`. Never commit keys. Account links and what to request are in [docs/08-access.md](08-access.md).
 
 ## Cost
 

@@ -1,8 +1,13 @@
 """Local pre-scanned room page and queued upload.
 
-Standard library only. Single process, no authentication, binds 127.0.0.1.
+Standard library only. Single process, no authentication, binds 127.0.0.1 by default.
 ``POST /jobs`` stores the upload and returns 202. It never compiles or
 generates inside the request, and this module does not import the pipeline.
+
+Hardening (L4): unguessable job ids, upload size/type/content checks, safe filenames, a per-client rate limit,
+a queue cap and a concurrent-upload cap, security headers with a hash-based CSP, generic error pages, redacted
+error logs, and a ``public`` mode that lists only the caller's own jobs. There is still no authentication: put a
+real front end (TLS, auth) in front before exposing it beyond a network you trust.
 """
 
 from __future__ import annotations
@@ -11,29 +16,42 @@ import html
 import json
 import mmap
 import re
+import secrets
 import shutil
+import sys
 import tempfile
+import threading
+import time
 import zipfile
 from collections import Counter
+from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from arrival.jobs.queue import check_upload_size, create_job, read_job
+from arrival.jobs.queue import MAX_UPLOAD_BYTES, check_upload_size, create_job, read_job
+from arrival.web import frames as frames_mod
+from arrival.web import hardening as hd
+from arrival.web.hardening import JOB_ID_RE
 
 ID_RE = re.compile(r"^[a-z0-9_]+$")
 BOUNDARY_RE = re.compile(r'boundary="?([^";]+)"?', re.I)
 NAME_RE = re.compile(rb'name="([^"]*)"', re.I)
 FILENAME_RE = re.compile(rb'filename="([^"]*)"', re.I)
 READ_CHUNK = 1 << 20
+UPLOAD_DEADLINE = 600.0  # seconds for the whole body, on top of the per-read socket timeout
+MAX_BOUNDARY = 200
+DISK_MARGIN = 100 * 1024 * 1024
+DRAIN_MAX = 2 * 1024 * 1024
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
 
 
 class UploadError(ValueError):
     pass
 
 
-def find_part(buf, boundary: bytes, field: str) -> tuple[int, int, str]:
+def find_part(buf, boundary: bytes, field: str, optional: bool = False):
     """Scan a multipart body for form field ``field``; return (data offset, data length, filename).
-    Raises UploadError on a missing closing boundary or a missing field."""
+    Raises UploadError on a missing closing boundary or a missing field (None for a missing ``optional`` one)."""
     delim = b"--" + boundary
     if buf.find(delim + b"--") < 0:
         raise UploadError("multipart body has no closing boundary (truncated?)")
@@ -54,6 +72,8 @@ def find_part(buf, boundary: bytes, field: str) -> tuple[int, int, str]:
             fn = FILENAME_RE.search(headers)
             return head_end + 4, nxt - (head_end + 4), fn.group(1).decode("utf-8", "replace") if fn else ""
         pos = nxt + 2
+    if optional:
+        return None
     raise UploadError(f"missing file field {field!r}")
 
 CSS = """
@@ -133,6 +153,8 @@ progress { flex:1; min-width:140px; height:10px; accent-color:var(--accent); }
 .media figure { margin:0; } .media figcaption { font-size:12px; color:var(--muted); margin-top:4px; }
 .media img, .media video { width:100%; border-radius:10px; border:1px solid var(--line); background:var(--card2); }
 .crumb { margin:0 0 6px; font-size:14px; }
+.mt { margin-top:8px; }
+.drop.sub { padding:12px; margin-top:10px; font-size:14px; }
 @media (max-width:560px) { h1 { font-size:22px; } .stats { grid-template-columns:repeat(3, 1fr); } }
 """
 
@@ -250,11 +272,35 @@ class ArrivalServer(ThreadingHTTPServer):
     daemon_threads = True
     out_dir: Path
     scans_dir: Path
+    max_upload_bytes: int = MAX_UPLOAD_BYTES
+    max_queued: int = 50  # queued + running jobs; 0 = unlimited
+    public: bool = False  # list only the caller's own jobs
+    behind_proxy: bool = False  # trust X-Forwarded-Proto / X-Forwarded-For from a reverse proxy
+    limiter: hd.RateLimiter
+    post_lock: threading.Lock
+    heavy_slots: threading.BoundedSemaphore
+
+
+def _csp(inline: bool) -> str:
+    """Pages inline one stylesheet and one script, allowed by hash (no 'unsafe-inline'); JSON gets the empty policy."""
+    if not inline:
+        return "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    return ("default-src 'none'; " f"style-src {hd.csp_hash(CSS)}; script-src {hd.csp_hash(JS)}; "
+            "img-src 'self' data:; media-src 'self'; connect-src 'self'; form-action 'self'; "
+            "base-uri 'none'; frame-ancestors 'none'")
+
+
+def _status_phrase(code: int) -> str:
+    try:
+        return HTTPStatus(code).phrase
+    except ValueError:
+        return "Error"
 
 
 class Handler(BaseHTTPRequestHandler):
     server: ArrivalServer
-    server_version = "Arrival/0.1"
+    server_version = "Arrival"
+    sys_version = ""  # no Python version in the Server header
     timeout = 30  # seconds per socket read; a stalled upload is dropped instead of pinning a thread
 
     # ---- helpers -------------------------------------------------------
@@ -266,38 +312,102 @@ class Handler(BaseHTTPRequestHandler):
     def scans_dir(self) -> Path:
         return Path(self.server.scans_dir)
 
-    def log_message(self, format, *args):  # quieter default logging
+    def log_message(self, format, *args):  # quieter default logging: no access log, so no URLs or headers on disk
         pass
 
-    def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None):
+    def log_error(self, format, *args):  # only protocol errors and crashes, redacted
+        try:
+            sys.stderr.write("[arrival.web] " + hd.redact(format % args if args else format) + "\n")
+        except Exception:  # noqa: BLE001 - logging must never break a request
+            pass
+
+    def version_string(self) -> str:
+        return self.server_version
+
+    @property
+    def https(self) -> bool:
+        headers = getattr(self, "headers", None)  # absent when the request line itself was malformed
+        return bool(self.server.behind_proxy and headers is not None
+                    and headers.get("X-Forwarded-Proto", "").lower() == "https")
+
+    def _start(self, code: int, ctype: str, length: int, extra: dict | None = None, inline: bool = False,
+               cache: str = "no-store"):
+        """Status line plus the headers every response carries; the caller ends the headers."""
         self.send_response(code)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Length", str(length))
+        self.send_header("Cache-Control", cache)
+        for k, v in hd.security_headers(_csp(inline), self.https).items():
+            self.send_header(k, v)
         for k, v in (extra or {}).items():
             self.send_header(k, v)
+
+    def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None):
+        self._start(code, ctype, len(body), extra, inline=ctype.startswith("text/html"))
         self.end_headers()
-        if self.command != "HEAD":
+        if getattr(self, "command", None) != "HEAD":
             self.wfile.write(body)
 
     def _send_file(self, f, size: int, ctype: str, extra: dict | None = None):
         """Stream an open file in READ_CHUNK pieces so a download never sits in memory whole."""
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(size))
-        for k, v in (extra or {}).items():
-            self.send_header(k, v)
+        self._start(200, ctype, size, extra)
         self.end_headers()
         if self.command != "HEAD":
             shutil.copyfileobj(f, self.wfile, READ_CHUNK)
 
-    def _html(self, code: int, title: str, body: str):
-        self._send(code, _page(title, body), "text/html; charset=utf-8")
+    def _html(self, code: int, title: str, body: str, extra: dict | None = None):
+        self._send(code, _page(title, body), "text/html; charset=utf-8", extra)
 
-    def _json(self, code: int, obj):
-        self._send(code, (json.dumps(obj, indent=2) + "\n").encode(), "application/json")
+    def _json(self, code: int, obj, extra: dict | None = None):
+        self._send(code, (json.dumps(obj, indent=2) + "\n").encode(), "application/json", extra)
+
+    def _wants_json(self) -> bool:
+        path = (getattr(self, "path", None) or "").split("?", 1)[0]
+        headers = getattr(self, "headers", None)
+        accept = headers.get("Accept", "") if headers is not None else ""
+        return (getattr(self, "command", None) == "POST" or path.startswith("/jobs")
+                or ("application/json" in accept and "text/html" not in accept))
+
+    def _error(self, code: int, msg: str | None = None, extra: dict | None = None):
+        """A generic error page (HTML for browsers, JSON for the API and the capture app). Never a traceback."""
+        msg = msg or _status_phrase(code)
+        if self._wants_json():
+            return self._json(code, {"error": msg}, extra)
+        self._html(code, _status_phrase(code),
+                   f"<div class='card empty'><b>{code}</b>{esc(msg)}<p><a class='btn' href='/'>Back to rooms</a></p></div>",
+                   extra)
+
+    def send_error(self, code, message=None, explain=None):  # protocol-level errors from http.server
+        self.close_connection = True
+        if getattr(self, "request_version", "HTTP/0.9") == "HTTP/0.9":
+            self.request_version = "HTTP/1.0"  # http.server would send no status line or headers at all
+        try:
+            self._error(int(code))
+        except Exception:  # noqa: BLE001 - the socket may already be gone
+            pass
+
+    def _guard(self, fn):
+        """Run a route; a crash becomes a generic 500 and a redacted stderr line, a dropped socket is ignored."""
+        try:
+            fn()
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            self.close_connection = True
+        except Exception as e:  # noqa: BLE001
+            self.log_error("unhandled %s in %s %s", type(e).__name__, self.command, (self.path or "").split("?", 1)[0][:80])
+            self.close_connection = True
+            try:
+                self._error(500, "Internal server error")
+            except Exception:  # noqa: BLE001
+                pass
 
     def _not_found(self, msg: str = "Not found"):
-        self._html(404, "Not found", f"<div class='card empty'><b>404</b>{esc(msg)}<p><a class='btn' href='/'>Back to rooms</a></p></div>")
+        self._error(404, msg)
+
+    def _client(self) -> str:
+        return hd.client_ip(self.client_address[0], self.headers.get("X-Forwarded-For"), self.server.behind_proxy)
+
+    def _owner(self) -> str | None:
+        return hd.owner_of(hd.cookie_value(self.headers.get("Cookie")))
 
     def _rooms(self) -> list[str]:
         if not self.scans_dir.is_dir():
@@ -309,6 +419,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- routing -------------------------------------------------------
     def do_GET(self):
+        self._guard(self._route_get)
+
+    do_HEAD = do_GET
+
+    def _route_get(self):
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         if path == "/":
             return self._index()
@@ -316,12 +431,12 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[0] == "previews":
             return self._preview_file(parts[1])
         if len(parts) == 3 and parts[0] == "jobs" and parts[2] == "download":
-            if not ID_RE.match(parts[1]):
+            if not JOB_ID_RE.match(parts[1]):
                 return self._not_found("Invalid id")
             return self._job_download(parts[1])
         if len(parts) == 2 and parts[0] in ("rooms", "download", "jobs"):
             ident = parts[1]
-            if not ID_RE.match(ident):
+            if not (JOB_ID_RE if parts[0] == "jobs" else ID_RE).match(ident):
                 return self._not_found("Invalid id")
             if parts[0] == "rooms":
                 return self._room(ident)
@@ -330,13 +445,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._job(ident)
         return self._not_found()
 
-    do_HEAD = do_GET
-
     def do_POST(self):
-        path = self.path.split("?", 1)[0].rstrip("/")
-        if path != "/jobs":
-            return self._not_found()
-        return self._post_job()
+        def route():
+            path = self.path.split("?", 1)[0].rstrip("/")
+            if path != "/jobs":
+                return self._not_found()
+            return self._post_job()
+        self._guard(route)
+
+    def _method_not_allowed(self):
+        self._error(405, extra={"Allow": "GET, HEAD, POST"})
+
+    do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _method_not_allowed
 
     # ---- pages ---------------------------------------------------------
     def _task_counts(self, room: str):
@@ -408,11 +528,15 @@ class Handler(BaseHTTPRequestHandler):
         cards = ("<div class='grid'>" + "".join(self._room_card(r) for r in rooms) + "</div>") if rooms else (
             "<div class='card empty'><b>No rooms yet</b>Put a scan under <code>scans/&lt;room&gt;/scan.json</code> "
             "or upload one below.</div>")
+        mb = self.server.max_upload_bytes / (1024 * 1024)
         upload = (
             "<form id='upload' method='post' action='/jobs' enctype='multipart/form-data'>"
             "<label class='drop'><b id='fname'>Choose or drop a scan file</b>"
-            "<div class='muted'>RoomPlan JSON or scan.json, up to 200 MB</div>"
-            "<input type='file' name='scan' required></label>"
+            f"<div class='muted'>RoomPlan JSON or scan.json, up to {mb:g} MB in total</div>"
+            "<input type='file' name='scan' accept='.json,application/json' required></label>"
+            "<label class='drop sub'><b>Optional RGB-D frames</b>"
+            "<div class='muted'>a .zip with <code>frames_manifest.json</code> at its root (CAP-2a). Checked and stored, "
+            "not used yet</div><input type='file' name='frames' accept='.zip,application/zip'></label>"
             "<div class='upl'><button class='primary' type='submit'>Queue scan</button>"
             "<progress max='1' value='0' hidden></progress></div><div id='msg' role='status'></div></form>"
             "<p class='muted'>The file is stored under <code>out/jobs/&lt;id&gt;/</code> and queued. Nothing is "
@@ -434,8 +558,18 @@ class Handler(BaseHTTPRequestHandler):
         root = self.out_dir / "jobs"
         if not root.is_dir():
             return []
-        jobs = [s for d in root.iterdir() if ID_RE.match(d.name) and isinstance(s := _read_json(d / "status.json"), dict) and s]
+        jobs = [s for d in root.iterdir() if JOB_ID_RE.match(d.name) and isinstance(s := _read_json(d / "status.json"), dict) and s]
+        if self.server.public:  # a public page never lists other visitors' uploads
+            owner = self._owner()
+            jobs = [s for s in jobs if owner is not None and s.get("owner") == owner]
         return sorted(jobs, key=lambda s: (-s.get("created_unix", 0), s.get("id", "")))
+
+    @staticmethod
+    def _frames_chip(s: dict) -> str:
+        fr = s.get("frames")
+        if not isinstance(fr, dict):
+            return ""
+        return f"<div class='chips mt'>{_chip('RGB-D ' + str(fr.get('count', '?')) + ' frames, stored, not used yet')}</div>"
 
     def _jobs_table(self) -> str:
         rows = []
@@ -453,7 +587,7 @@ class Handler(BaseHTTPRequestHandler):
             active = " data-active" if st in ("queued", "running") else ""
             rows.append(
                 f"<tr{active}><td><a href='/jobs/{esc(jid)}'><code>{esc(jid)}</code></a></td>"
-                f"<td>{esc(s.get('filename'))}</td><td>{_chip(st, kind)}</td><td>{_stage_bar(s)}</td>"
+                f"<td>{esc(s.get('filename'))}{self._frames_chip(s)}</td><td>{_chip(st, kind)}</td><td>{_stage_bar(s)}</td>"
                 f"<td><code>{esc(s.get('room_id') or '')}</code></td><td>{eps}</td><td>{result}</td></tr>"
             )
         if not rows:
@@ -590,7 +724,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"<div class='stat'><b>{esc('n/a' if stats['episodes'] is None else stats['episodes'])}</b><span>episodes</span></div>"
                 f"<div class='stat'><b>{esc(stats['rate'])}</b><span>success rate</span></div>"
                 f"<div class='stat'><b>{esc('n/a' if stats['contacts'] is None else stats['contacts'])}</b><span>human contacts</span></div></div>"
-                f"<div class='chips' style='margin-top:8px'>{_chip('physically valid: ' + str(ok_).lower(), 'ok' if ok_ else 'bad')}</div>")
+                f"<div class='chips mt'>{_chip('physically valid: ' + str(ok_).lower(), 'ok' if ok_ else 'bad')}</div>")
         else:
             headline = ""
 
@@ -626,12 +760,10 @@ class Handler(BaseHTTPRequestHandler):
             if start > end or start >= size:
                 return self._send(416, b"", ctype, {"Content-Range": f"bytes */{size}"})
             code = 206
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(end - start + 1))
-        self.send_header("Accept-Ranges", "bytes")
+        extra = {"Accept-Ranges": "bytes"}
         if code == 206:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            extra["Content-Range"] = f"bytes {start}-{end}/{size}"
+        self._start(code, ctype, end - start + 1, extra, cache="private, max-age=30")
         self.end_headers()
         if self.command != "HEAD":
             with open(f, "rb") as fh:
@@ -645,80 +777,211 @@ class Handler(BaseHTTPRequestHandler):
         ds = self.out_dir / "datasets" / room
         if not ds.is_dir():
             return self._not_found(f"No dataset for {room}")
-        with tempfile.TemporaryFile() as tmp:  # spooled to disk, then streamed
-            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
-                for p in sorted(ds.rglob("*")):
-                    if p.is_file():
-                        zf.write(p, Path(room) / p.relative_to(ds))
-            size = tmp.tell()
-            tmp.seek(0)
-            self._send_file(tmp, size, "application/zip", {"Content-Disposition": f"attachment; filename={room}.zip"})
+        if not self.server.heavy_slots.acquire(blocking=False):  # zipping a dataset is the other costly request
+            return self._error(503, "server is busy, retry shortly", {"Retry-After": "5"})
+        try:
+            with tempfile.TemporaryFile() as tmp:  # spooled to disk, then streamed
+                with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for p in sorted(ds.rglob("*")):
+                        if p.is_file():
+                            zf.write(p, Path(room) / p.relative_to(ds))
+                size = tmp.tell()
+                tmp.seek(0)
+                self._send_file(tmp, size, "application/zip",
+                                {"Content-Disposition": f"attachment; filename={hd.safe_filename(room)}.zip"})
+        finally:
+            self.server.heavy_slots.release()
+
+    def _public_status(self, status: dict) -> dict:
+        """The status as the API returns it: no owner hash, and in public mode no server paths."""
+        out = {k: v for k, v in status.items() if k != "owner"}
+        if self.server.public:
+            for k in ("twin_dir", "dataset_dir", "zip"):
+                out.pop(k, None)
+        return out
 
     def _job(self, job_id: str):
         status = read_job(self.out_dir / "jobs", job_id)
         if status is None:
-            return self._json(404, {"error": "job not found", "id": job_id})
-        self._json(200, status)
+            return self._json(404, {"error": "job not found"})
+        self._json(200, self._public_status(status))
 
     def _job_download(self, job_id: str):
         status = read_job(self.out_dir / "jobs", job_id)
         if status is None:
-            return self._json(404, {"error": "job not found", "id": job_id})
+            return self._json(404, {"error": "job not found"})
         zip_path = self.out_dir / "jobs" / job_id / "dataset.zip"
         if status.get("status") != "done" or not zip_path.is_file():
-            return self._json(404, {"error": "dataset not ready", "id": job_id, "status": status.get("status")})
+            return self._json(404, {"error": "dataset not ready", "status": status.get("status")})
         room = status.get("room_id") or job_id
         with open(zip_path, "rb") as f:
             self._send_file(f, zip_path.stat().st_size, "application/zip",
-                            {"Content-Disposition": f"attachment; filename={room}_sim.zip"})
+                            {"Content-Disposition": f"attachment; filename={hd.safe_filename(room, job_id)}_sim.zip"})
+
+    def _drain(self, left: int):
+        """Read and discard a small unread request body, so closing the socket does not reset the connection
+        before the client has read our answer. A large one is not read: the connection is just closed."""
+        self.close_connection = True
+        if 0 < left <= DRAIN_MAX:
+            try:
+                while left > 0 and (chunk := self.rfile.read(min(left, READ_CHUNK))):
+                    left -= len(chunk)
+            except OSError:
+                pass
+
+    def _active_jobs(self) -> int:
+        root = self.out_dir / "jobs"
+        if not root.is_dir():
+            return 0
+        n = 0
+        for d in root.iterdir():
+            if JOB_ID_RE.match(d.name):
+                st = _read_json(d / "status.json")
+                n += isinstance(st, dict) and st.get("status") in ("queued", "running")
+        return n
+
+    def _queue_full(self) -> bool:
+        return self.server.max_queued > 0 and self._active_jobs() >= self.server.max_queued
+
+    def _free_disk(self) -> int:
+        p = self.out_dir
+        while not p.exists() and p != p.parent:
+            p = p.parent
+        return shutil.disk_usage(p).free
 
     def _post_job(self):
+        srv = self.server
         try:
             length = int(self.headers.get("Content-Length", ""))
+            if length < 0:
+                raise ValueError
         except ValueError:
-            return self._json(411, {"error": "Content-Length required"})
-        if not check_upload_size(length):
             self.close_connection = True
-            return self._json(413, {"error": "upload too large", "max_bytes": 200 * 1024 * 1024})
+            return self._json(411, {"error": "Content-Length required"})
+
+        def refuse(code: int, error: str, extra: dict | None = None, **more):
+            self._drain(length)  # the body is still unread
+            self._json(code, {"error": error, **more}, extra)
+
+        allowed, wait = srv.limiter.check(self._client())
+        if not allowed:
+            return refuse(429, "too many uploads, retry later", {"Retry-After": str(wait)})
+        if not check_upload_size(length, srv.max_upload_bytes):
+            self.close_connection = True
+            return self._json(413, {"error": "upload too large", "max_bytes": srv.max_upload_bytes})
         ctype = self.headers.get("Content-Type", "")
         if not ctype.lower().startswith("multipart/form-data"):
-            return self._json(400, {"error": "expected multipart/form-data"})
+            return refuse(400, "expected multipart/form-data")
         m = BOUNDARY_RE.search(ctype)
-        if not m:
-            return self._json(400, {"error": "multipart boundary missing"})
-        with tempfile.TemporaryFile() as tmp:
-            left = length
-            while left > 0:  # stream to disk; never hold the whole body in memory
-                chunk = self.rfile.read(min(left, READ_CHUNK))
-                if not chunk:
-                    break
-                tmp.write(chunk)
-                left -= len(chunk)
-            if left:
-                self.close_connection = True
-                return self._json(400, {"error": "truncated body", "expected": length, "got": length - left})
-            if length == 0:
-                return self._json(400, {"error": "empty body"})
-            tmp.flush()
-            with mmap.mmap(tmp.fileno(), 0, access=mmap.ACCESS_READ) as buf:
-                try:
-                    offset, size, filename = find_part(buf, m.group(1).encode("latin-1"), "scan")
-                except UploadError as e:
-                    return self._json(400, {"error": str(e)})
-            if not filename:
-                return self._json(400, {"error": "file field 'scan' has no filename"})
-            if size <= 0:
-                return self._json(400, {"error": "uploaded file is empty"})
-            status = create_job(self.out_dir / "jobs", filename, src=tmp, offset=offset, length=size)
-        self._json(202, {"status": "queued", "id": status["id"],
-                         "status_url": f"/jobs/{status['id']}"})
+        if not m or len(m.group(1)) > MAX_BOUNDARY:
+            return refuse(400, "multipart boundary missing or too long")
+        if self._queue_full():
+            return refuse(503, "queue is full, try again when queued jobs finish", {"Retry-After": "60"})
+        if length and self._free_disk() < 2 * length + DISK_MARGIN:
+            return refuse(507, "not enough free disk space for this upload")
+        if not srv.heavy_slots.acquire(blocking=False):
+            return refuse(503, "server is busy with other uploads, retry shortly", {"Retry-After": "5"})
+        jobs_root = self.out_dir / "jobs"
+        incoming = None
+        try:
+            with tempfile.TemporaryFile() as tmp:
+                left, deadline = length, time.monotonic() + UPLOAD_DEADLINE
+                while left > 0:  # stream to disk; never hold the whole body in memory
+                    if time.monotonic() > deadline:
+                        self.close_connection = True
+                        return self._json(408, {"error": "upload took too long"})
+                    chunk = self.rfile.read(min(left, READ_CHUNK))
+                    if not chunk:
+                        break
+                    tmp.write(chunk)
+                    left -= len(chunk)
+                if left:
+                    self.close_connection = True
+                    return self._json(400, {"error": "truncated body", "expected": length, "got": length - left})
+                if length == 0:
+                    return self._json(400, {"error": "empty body"})
+                tmp.flush()
+                with mmap.mmap(tmp.fileno(), 0, access=mmap.ACCESS_READ) as buf:
+                    boundary = m.group(1).encode("latin-1")
+                    try:
+                        offset, size, filename = find_part(buf, boundary, "scan")
+                        frames_part = find_part(buf, boundary, "frames", optional=True)
+                    except UploadError as e:
+                        return self._json(400, {"error": str(e)})
+                    head = bytes(buf[offset:offset + min(size, 64)])
+                    fhead = bytes(buf[frames_part[0]:frames_part[0] + min(frames_part[1], 4)]) if frames_part else b""
+                if not filename:
+                    return self._json(400, {"error": "file field 'scan' has no filename"})
+                if size <= 0:
+                    return self._json(400, {"error": "uploaded file is empty"})
+                name = hd.safe_filename(filename)
+                if not hd.has_extension(name, hd.SCAN_EXTENSIONS):
+                    return self._json(415, {"error": "the scan must be a .json file (RoomPlan export or scan.json)"})
+                if not hd.looks_like_json_object(head):
+                    return self._json(415, {"error": "the scan file is not a JSON object"})
+                frames_summary, adopt = None, None
+                if frames_part:
+                    f_off, f_size, f_name = frames_part
+                    if f_size <= 0:
+                        return self._json(400, {"error": "frames file is empty", "field": "frames"})
+                    if not hd.has_extension(hd.safe_filename(f_name), hd.FRAMES_EXTENSIONS) or not hd.looks_like_zip(fhead):
+                        return self._json(415, {"error": "frames must be a .zip of a CAP-2a bundle", "field": "frames"})
+                    jobs_root.mkdir(parents=True, exist_ok=True)
+                    incoming = jobs_root / f".incoming_{secrets.token_hex(8)}"
+                    try:
+                        frames_mod.extract(tmp, f_off, f_size, incoming)
+                        frames_summary = frames_mod.validate(incoming)
+                    except frames_mod.FramesError as e:
+                        shutil.rmtree(incoming, ignore_errors=True)  # before answering, so no scratch outlives the reply
+                        code = (413 if e.code == "too_large" else 422 if e.code not in frames_mod.ARCHIVE_CODES else 400)
+                        return self._json(code, {"error": str(e), "code": e.code, "field": "frames"})
+                    adopt = {"frames": incoming}
+                token = hd.cookie_value(self.headers.get("Cookie"))
+                new_cookie = token is None
+                token = token or secrets.token_hex(16)
+                extra_status = {"owner": hd.owner_of(token)}
+                if frames_summary:
+                    extra_status["frames"] = frames_summary
+                with srv.post_lock:  # the cap is checked again under the lock, so a burst cannot overshoot it
+                    if self._queue_full():
+                        if incoming is not None:
+                            shutil.rmtree(incoming, ignore_errors=True)
+                        return self._json(503, {"error": "queue is full, try again when queued jobs finish"},
+                                          {"Retry-After": "60"})
+                    status = create_job(jobs_root, name, src=tmp, offset=offset, length=size,
+                                        extra_status=extra_status, adopt=adopt)
+        finally:
+            srv.heavy_slots.release()
+            if incoming is not None and incoming.exists():
+                shutil.rmtree(incoming, ignore_errors=True)
+        extra = {}
+        if new_cookie:
+            extra["Set-Cookie"] = (f"{hd.CLIENT_COOKIE}={token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax"
+                                   + ("; Secure" if self.https else ""))
+        body = {"status": "queued", "id": status["id"], "status_url": f"/jobs/{status['id']}"}
+        if frames_summary:
+            body["frames"] = frames_summary
+        self._json(202, body, extra)
 
 
 def make_server(host: str = "127.0.0.1", port: int = 8000,
-                out_dir: Path = Path("out"), scans_dir: Path = Path("scans")) -> ThreadingHTTPServer:
+                out_dir: Path = Path("out"), scans_dir: Path = Path("scans"), *,
+                max_upload_mb: float = MAX_UPLOAD_BYTES / (1024 * 1024), rate_limit: int = 10,
+                max_queued: int = 50, public: bool = False, behind_proxy: bool = False,
+                max_concurrent_uploads: int = 4) -> ThreadingHTTPServer:
+    """``rate_limit`` is uploads per minute per client (0 = off); ``max_queued`` caps queued + running jobs
+    (0 = unlimited); ``public`` lists only the caller's own jobs; ``behind_proxy`` trusts X-Forwarded-Proto and
+    X-Forwarded-For from a reverse proxy in front (never set it when clients can reach the port directly)."""
     server = ArrivalServer((host, port), Handler)
     server.out_dir = Path(out_dir)
     server.scans_dir = Path(scans_dir)
+    server.max_upload_bytes = int(max_upload_mb * 1024 * 1024)
+    server.limiter = hd.RateLimiter(rate_limit)
+    server.max_queued = int(max_queued)
+    server.public = bool(public)
+    server.behind_proxy = bool(behind_proxy)
+    server.post_lock = threading.Lock()
+    server.heavy_slots = threading.BoundedSemaphore(max(1, int(max_concurrent_uploads)))
     return server
 
 
@@ -735,12 +998,15 @@ def lan_ip() -> str | None:
 
 
 def serve(port: int = 8000, out_dir: Path = Path("out"), scans_dir: Path = Path("scans"),
-          host: str = "127.0.0.1") -> None:
-    server = make_server(host, port, out_dir, scans_dir)
+          host: str = "127.0.0.1", **limits) -> None:
+    server = make_server(host, port, out_dir, scans_dir, **limits)
     bound, real_port = server.server_address[:2]
     print(f"Arrival serving on http://{bound}:{real_port}/  (Ctrl+C to stop)", flush=True)
     if bound == "0.0.0.0" and (ip := lan_ip()):
         print(f"Capture app server URL: http://{ip}:{real_port}", flush=True)
+    if bound not in LOOPBACK:
+        print("No authentication: only expose this beyond a network you trust behind a TLS and auth proxy "
+              "(see docs/REFERENCE.md, Web hardening).", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

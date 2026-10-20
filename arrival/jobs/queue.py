@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
+import shutil
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import BinaryIO
 
@@ -24,13 +25,17 @@ def check_upload_size(content_length: int, limit: int = MAX_UPLOAD_BYTES) -> boo
 
 
 def new_job_id() -> str:
-    return "job_" + uuid.uuid4().hex[:8]
+    """``job_`` + 128 random bits, so an id is a capability: it cannot be guessed or enumerated."""
+    return "job_" + secrets.token_hex(16)
 
 
 def create_job(jobs_root: Path, filename: str, data: bytes | None = None,
-               src: BinaryIO | None = None, offset: int = 0, length: int = 0) -> dict:
+               src: BinaryIO | None = None, offset: int = 0, length: int = 0,
+               extra_status: dict | None = None, adopt: dict[str, Path] | None = None) -> dict:
     """Write ``<jobs_root>/<id>/upload.bin`` (from ``data``, or ``length`` bytes of ``src`` at ``offset``,
-    copied in chunks) and ``status.json``; return the status."""
+    copied in chunks) and ``status.json``; return the status. ``adopt`` maps a name to a prepared folder that is
+    moved to ``<id>/<name>`` before the status exists, so a worker never sees a queued job without it;
+    ``extra_status`` keys are merged into the status."""
     jobs_root = Path(jobs_root)
     job_id = new_job_id()
     job_dir = jobs_root / job_id
@@ -48,7 +53,10 @@ def create_job(jobs_root: Path, filename: str, data: bytes | None = None,
                     break
                 out.write(chunk)
                 left -= len(chunk)
+    for name, folder in (adopt or {}).items():
+        shutil.move(str(folder), str(job_dir / name))
     status = {
+        **(extra_status or {}),
         "id": job_id,
         "status": "queued",
         "created_unix": int(time.time()),
