@@ -11,7 +11,7 @@ REQUIRED_TARGETS = {"install", "test", "sim", "validate", "serve", "clean", "dem
 
 
 def _ci():
-    return yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    return yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
 
 
 def _steps(ci):
@@ -19,7 +19,7 @@ def _steps(ci):
 
 
 def _make_targets():
-    return set(re.findall(r"^([A-Za-z_][\w-]*):", (ROOT / "Makefile").read_text(), re.M))
+    return set(re.findall(r"^([A-Za-z_][\w-]*):", (ROOT / "Makefile").read_text(encoding="utf-8"), re.M))
 
 
 def test_ci_runs_pytest_demo_and_validate():
@@ -30,13 +30,13 @@ def test_ci_runs_pytest_demo_and_validate():
 
 
 def test_ci_is_offline_and_headless():
-    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "secrets." not in text
     ci = _ci()
     job = next(iter(ci["jobs"].values()))
     assert job["env"]["MUJOCO_GL"] == "egl"
     assert "osmesa" in text and "libosmesa6" in text and "libegl1" in text and "libgl1" in text
-    assert job["timeout-minutes"] == 20
+    assert job["timeout-minutes"] == 60
     assert job["strategy"]["matrix"]["python-version"] == ["3.11", "3.12"]
     assert ci["concurrency"]["cancel-in-progress"] is True
 
@@ -44,13 +44,13 @@ def test_ci_is_offline_and_headless():
 def test_makefile_has_required_and_readme_targets():
     targets = _make_targets()
     assert REQUIRED_TARGETS <= targets
-    section = (ROOT / "README.md").read_text().split("## Get started", 1)[1].split("\n## ", 1)[0]
+    section = (ROOT / "README.md").read_text(encoding="utf-8").split("## Get started", 1)[1].split("\n## ", 1)[0]
     named = set(re.findall(r"\bmake ([A-Za-z_][\w-]*)", section))
     assert named <= targets
 
 
 def test_makefile_clean_only_removes_out():
-    text = (ROOT / "Makefile").read_text()
+    text = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert "OUT ?= out" in text
     assert "rm -rf $(OUT)" in text.split("\nclean:", 1)[1]
 
@@ -64,11 +64,11 @@ def test_make_dry_run_parses():
 
 
 def test_dockerfile_and_ignore():
-    d = (ROOT / "Dockerfile").read_text()
+    d = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "FROM python:3.11-slim" in d
     assert "MUJOCO_GL=egl" in d and 'pip install -e ".[sim]"' in d
     assert 'CMD ["python", "-m", "arrival", "serve", "--host", "0.0.0.0"]' in d
-    ignored = (ROOT / ".dockerignore").read_text().split()
+    ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
     for p in ("out/", ".venv/", ".git/", "ios/", "*.egg-info"):
         assert p in ignored
 
