@@ -1,0 +1,8 @@
+out/
+.venv/
+.git/
+ios/
+*.egg-info
+__pycache__/
+.github/
+.claude/
