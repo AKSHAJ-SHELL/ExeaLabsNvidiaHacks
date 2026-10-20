@@ -131,7 +131,10 @@ def _sim_args(a):
         from arrival.scan import bundle as scan_bundle
         from arrival.twin.compile import compile_twin
 
-        twin = compile_twin(scan_bundle.load_room(a.room, Path(a.scans)))
+        try:
+            twin = compile_twin(scan_bundle.load_room(a.room, resolve_scans(a.scans)))
+        except FileNotFoundError:
+            return f"no scan for room {a.room!r} under {resolve_scans(a.scans)} and no twin in {a.out}/twins"
     return fams, twin
 
 
@@ -147,11 +150,21 @@ def cmd_sim(a) -> int:
         agent = TavilyResearchAgent()
         twin = agent.enrich_twin(twin)
     from arrival.sim.collect import collect
+    from arrival.sim.policy import VLANotConfigured
 
-    res = collect(twin, fams, a.episodes, a.out, people=a.people, policy_name=a.policy, res=a.res,
-                  seed=a.seed, save_preview=a.save_preview,
-                  planner_name=a.planner, split=a.split,
-                  use_generated_instructions=(a.instructions == "nemotron"))
+    try:
+        res = collect(twin, fams, a.episodes, a.out, people=a.people, policy_name=a.policy, res=a.res,
+                      seed=a.seed, save_preview=a.save_preview,
+                      planner_name=a.planner, split=a.split,
+                      use_generated_instructions=(a.instructions == "nemotron"))
+    except VLANotConfigured as e:
+        print(f"policy vla: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    except OSError as e:  # URLError is an OSError: the policy server did not answer
+        if a.policy != "vla":
+            raise
+        print(f"policy vla: no answer from {os.environ.get('GR00T_POLICY_URL')}: {e}", file=sys.stderr)
+        return EXIT_USAGE
     r = res["report_data"]
     print(f"dataset: {res['dataset']}")
     print(f"report:  {res['report']}")
@@ -191,7 +204,12 @@ def cmd_research(a) -> int:
         from arrival.scan import bundle as scan_bundle
         from arrival.twin.compile import compile_twin
 
-        twin = compile_twin(scan_bundle.load_room(a.room, Path(a.scans)))
+        try:
+            twin = compile_twin(scan_bundle.load_room(a.room, resolve_scans(a.scans)))
+        except FileNotFoundError:
+            print(f"no scan for room {a.room!r} under {resolve_scans(a.scans)} and no twin in {a.out}/twins",
+                  file=sys.stderr)
+            return EXIT_USAGE
 
     print(f"Researching appliances for room '{a.room}' via Tavily...")
     enriched = agent.enrich_twin(twin)

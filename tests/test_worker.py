@@ -177,3 +177,30 @@ def test_load_upload_accepts_captured_structure_and_null_lists(tmp_path):
     p.write_text(json.dumps({"walls": None, "objects": None}))
     with pytest.raises(ValueError):
         load_upload(p, "x")
+
+
+def test_interrupted_job_is_not_left_running(tmp_path, monkeypatch):
+    from arrival.jobs import worker
+
+    out = tmp_path / "out"
+    job = create_job(out / "jobs", "x.json", data=b"{}")
+
+    def boom(*_a, **_k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(worker, "load_upload", boom)
+    with pytest.raises(KeyboardInterrupt):
+        run_once(out, log=QUIET)
+    st = json.loads((out / "jobs" / job["id"] / "status.json").read_text())
+    assert st["status"] == "failed" and st["error"].startswith("interrupted") and st["finished_at"]
+
+
+def test_work_requeues_jobs_left_running(tmp_path):
+    from arrival.jobs.queue import write_status
+
+    out = tmp_path / "out"
+    job = create_job(out / "jobs", "broken.json", data=b"not json")
+    write_status(out / "jobs" / job["id"], {**job, "status": "running", "stage": "sim"})
+    assert work(out, once=True, log=QUIET) == 1  # reclaimed, then failed on the corrupt upload
+    st = json.loads((out / "jobs" / job["id"] / "status.json").read_text())
+    assert st["status"] == "failed"

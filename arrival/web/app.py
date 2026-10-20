@@ -8,10 +8,10 @@ generates inside the request, and this module does not import the pipeline.
 from __future__ import annotations
 
 import html
-import io
 import json
 import mmap
 import re
+import shutil
 import tempfile
 import zipfile
 from collections import Counter
@@ -149,6 +149,17 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def _send_file(self, f, size: int, ctype: str, extra: dict | None = None):
+        """Stream an open file in READ_CHUNK pieces so a download never sits in memory whole."""
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(size))
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            shutil.copyfileobj(f, self.wfile, READ_CHUNK)
+
     def _html(self, code: int, title: str, body: str):
         self._send(code, _page(title, body), "text/html; charset=utf-8")
 
@@ -253,7 +264,7 @@ class Handler(BaseHTTPRequestHandler):
         root = self.out_dir / "jobs"
         if not root.is_dir():
             return []
-        jobs = [s for d in root.iterdir() if ID_RE.match(d.name) and (s := _read_json(d / "status.json"))]
+        jobs = [s for d in root.iterdir() if ID_RE.match(d.name) and isinstance(s := _read_json(d / "status.json"), dict) and s]
         return sorted(jobs, key=lambda s: (-s.get("created_unix", 0), s.get("id", "")))
 
     def _jobs_table(self) -> str:
@@ -404,15 +415,14 @@ class Handler(BaseHTTPRequestHandler):
         ds = self.out_dir / "datasets" / room
         if not ds.is_dir():
             return self._not_found(f"No dataset for {room}")
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for p in sorted(ds.rglob("*")):
-                if p.is_file():
-                    zf.write(p, Path(room) / p.relative_to(ds))
-        self._send(
-            200, buf.getvalue(), "application/zip",
-            {"Content-Disposition": f"attachment; filename={room}.zip"},
-        )
+        with tempfile.TemporaryFile() as tmp:  # spooled to disk, then streamed
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+                for p in sorted(ds.rglob("*")):
+                    if p.is_file():
+                        zf.write(p, Path(room) / p.relative_to(ds))
+            size = tmp.tell()
+            tmp.seek(0)
+            self._send_file(tmp, size, "application/zip", {"Content-Disposition": f"attachment; filename={room}.zip"})
 
     def _job(self, job_id: str):
         status = read_job(self.out_dir / "jobs", job_id)
@@ -428,8 +438,9 @@ class Handler(BaseHTTPRequestHandler):
         if status.get("status") != "done" or not zip_path.is_file():
             return self._json(404, {"error": "dataset not ready", "id": job_id, "status": status.get("status")})
         room = status.get("room_id") or job_id
-        self._send(200, zip_path.read_bytes(), "application/zip",
-                   {"Content-Disposition": f"attachment; filename={room}_sim.zip"})
+        with open(zip_path, "rb") as f:
+            self._send_file(f, zip_path.stat().st_size, "application/zip",
+                            {"Content-Disposition": f"attachment; filename={room}_sim.zip"})
 
     def _post_job(self):
         try:
