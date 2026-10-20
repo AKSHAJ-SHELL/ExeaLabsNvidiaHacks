@@ -78,11 +78,25 @@ python scripts/render_rooms.py tests/fixtures/roomplan/amal.json
 ## One-command demo
 
 ```bash
+make demo                              # same as: python scripts/demo_all.py --quick --out out
 python scripts/demo_all.py --quick     # 2 episodes, 1 person, 64 px; --full is 8, 2, 128
 python scripts/demo_all.py --room hero_kitchen --out out/demo --serve
+python scripts/demo_all.py --quick --timeout 300     # abort with exit 1 after 300 s (default 900, 0 = none)
 ```
 
-Runs scan and compile, twin layout PNG, sim dataset, validate, scripted-expert eval and contact sheet, prints PASS or FAIL per stage, and writes `<out>/demo_summary.md` and `demo_summary.json`. Exits 1 if a stage fails. See `docs/ref/DEM-4.md`.
+Runs scan and compile, twin layout PNG, sim dataset, validate, scripted-expert eval and contact sheet, prints PASS or FAIL per stage, and writes `<out>/demo_summary.md`, `demo_summary.json` and a self-contained `<out>/index.html` (stage table plus the contact sheet inlined; open it from disk, no server). See `docs/ref/DEM-4.md`.
+
+It needs no network and no keys. `TOKEN_FACTORY_*`, `TAVILY_*`, `GR00T_POLICY_URL` and `COSMOS_URL` are hidden from the run, and every connection to a non-loopback address is refused for its duration. Before running it picks a MuJoCo GL backend by rendering a 16 px frame in a child process, trying the platform default first, then `egl`, `osmesa` and `glfw` on Linux (`glfw` on macOS, `glfw` then `egl` on Windows); an exported `MUJOCO_GL` is respected and tried alone. Exit codes: 0 all stages passed, 1 a stage failed or `--timeout` expired, 2 the machine cannot run it (mujoco not installed: `pip install -e ".[sim]"`, or no working OpenGL backend, with one line saying what was tried). Measured on an Apple Silicon laptop: about 20 s and 0.5 GB peak for `--quick`; the install itself needs a package index once.
+
+## Repo checks (CI)
+
+```bash
+make lint            # ruff: syntax errors and undefined names only
+make docs-check      # scripts/check_docs.py and scripts/check_links.py
+make package-smoke   # python scripts/smoke_package.py [--offline] [--keep DIR] [--build-python PY]
+```
+
+`scripts/check_links.py [--root DIR]` checks every inline Markdown link and image in every tracked Markdown file: a relative target must exist and a `#fragment` must match a heading in the file it points at. External links are not fetched. `scripts/smoke_package.py` builds the sdist and wheel with setuptools, installs the wheel in a fresh venv (`--offline` skips the venv and borrows this interpreter's packages), and from an empty directory imports the installed copy, runs `--help`, runs `demo` against the checkout's `scans/` with `--scans`, and validates the result. The wheel carries only the `arrival` package, so an installed copy needs `--scans`; the last check confirms the failure without it is one clear line. CI (`.github/workflows/ci.yml`) runs tests, the demo and validate on ubuntu, macOS and Windows with Python 3.11 and 3.12 (ubuntu gates; the other two are reported only), the three checks above, a Docker build, and uploads `demo_summary.md`, `demo_summary.json` and `index.html` from each matrix cell as a build artifact. Dependabot (`.github/dependabot.yml`) opens weekly update PRs for Actions, pip and Docker. See `CONTRIBUTING.md`.
 To land a new real scan (CAP-3a), `scripts/intake_scan.py` creates `scans/<room_id>/`, strips EXIF from the photos, writes `notes.md` and `measurements.json`, runs the geometry checks and prints GO or NO-GO (exit 0, 1, or 2 when an input is refused):
 
 ```bash

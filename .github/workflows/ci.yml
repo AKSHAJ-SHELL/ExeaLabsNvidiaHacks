@@ -12,30 +12,48 @@ concurrency:
 permissions:
   contents: read
 
+# Everything here is offline once dependencies are installed: no secrets, no API keys, no GPU.
+# Ubuntu is the gate. macOS and Windows runners are reported but do not fail the run
+# (experimental: true) because hosted runners have no GPU and MuJoCo rendering there is unproven.
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12"]
+        include:
+          - os: ubuntu-latest
+            experimental: false
+          - os: macos-latest
+            experimental: true
+          - os: windows-latest
+            experimental: true
     env:
-      MUJOCO_GL: egl
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: System libraries for headless MuJoCo rendering
+          cache-dependency-path: pyproject.toml
+      - name: System libraries for headless MuJoCo rendering (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libegl1 libgl1 libosmesa6
       - name: Install
         run: python -m pip install -e ".[dev,sim]"
-      - name: Pick a GL backend (egl, else osmesa)
+      - name: "Pick a GL backend (Linux: egl, else osmesa; macOS and Windows keep the MuJoCo default)"
+        if: runner.os == 'Linux'
+        shell: bash
         run: |
+          export MUJOCO_GL=egl
           if python -c "import mujoco; mujoco.Renderer(mujoco.MjModel.from_xml_string('<mujoco/>'), 16, 16)" 2>/dev/null; then
             echo "MUJOCO_GL=egl" >> "$GITHUB_ENV"
           else
@@ -48,3 +66,75 @@ jobs:
         run: python -m arrival demo --episodes 2
       - name: Validate
         run: python -m arrival validate out/datasets/hero_kitchen
+      - name: Offline one-command demo (same as make demo)
+        run: python scripts/demo_all.py --quick --out out/demo --timeout 600
+      - name: Upload demo summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-summary-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: |
+            out/demo/demo_summary.md
+            out/demo/demo_summary.json
+            out/demo/index.html
+          if-no-files-found: ignore
+          retention-days: 14
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev,lint]"
+      - name: Ruff (syntax errors and undefined names)
+        run: ruff check .
+      - name: Docs check (commands parse, paths and labels agree)
+        run: python scripts/check_docs.py
+      - name: Markdown links (relative links and anchors)
+        run: python scripts/check_links.py
+
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            experimental: false
+          - os: macos-latest
+            experimental: true
+          - os: windows-latest
+            experimental: true
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Build tools
+        run: python -m pip install setuptools
+      - name: Build sdist and wheel, install the wheel in a fresh venv, run it from another directory
+        run: python scripts/smoke_package.py
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the CPU image
+        run: docker build -t arrival-ci .
+      - name: Run it
+        run: docker run --rm arrival-ci python -m arrival validate --help

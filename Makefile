@@ -2,7 +2,7 @@
 PY ?= python
 OUT ?= out
 
-.PHONY: install test sim validate demo serve clean
+.PHONY: install test sim validate demo serve lint docs-check package-smoke clean
 
 install:
 	$(PY) -m pip install -e ".[dev,sim]"
@@ -17,9 +17,22 @@ sim:
 validate:
 	$(PY) -m arrival validate $(OUT)/datasets/hero_kitchen_sim
 
-# scripts/demo_all.py is owned by DEM-4.
+# Offline end to end (about 20 s on a laptop, under 1 GB): scan, twin, sim dataset, validate, eval, contact
+# sheet. Picks a working MuJoCo GL backend, refuses network access, ignores API keys, and writes
+# $(OUT)/index.html. Exits 2 with one line if mujoco is missing; install it first with `make install`.
 demo:
-	$(PY) scripts/demo_all.py
+	$(PY) scripts/demo_all.py --quick --out $(OUT)
+
+lint:
+	$(PY) -m ruff check .
+
+docs-check:
+	$(PY) scripts/check_docs.py
+	$(PY) scripts/check_links.py
+
+# Build the sdist and wheel, install the wheel in a temp venv, run it from another directory.
+package-smoke:
+	$(PY) scripts/smoke_package.py
 
 serve:
 	$(PY) -m arrival serve --out $(OUT)

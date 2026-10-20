@@ -30,6 +30,32 @@ def test_quick(demo_all, tmp_path):
     assert all(v is None for v in s["cost"].values())
     assert demo_all.HONEST_LABEL in (tmp_path / "demo_summary.md").read_text()
     assert (tmp_path / "renders" / "hero_kitchen_top.png").is_file()
+    page = (tmp_path / "index.html").read_text()
+    assert "data:image/png;base64," in page and "Overall <b>PASS</b>" in page
+    assert "https://" not in page
+
+
+def test_quick_leaves_sockets_and_keys_as_it_found_them(demo_all, tmp_path, monkeypatch):
+    import socket
+
+    monkeypatch.setenv("TOKEN_FACTORY_API_KEY", "sk-test")
+    real = socket.socket.connect
+    seen = {}
+    real_run = demo_all.run
+
+    def spy(*a, **k):
+        seen["key"] = "TOKEN_FACTORY_API_KEY" in demo_all.os.environ
+        try:
+            socket.socket().connect(("203.0.113.7", 80))
+            seen["blocked"] = False
+        except OSError as e:
+            seen["blocked"] = "offline" in str(e)
+        return real_run(*a, **k)
+
+    monkeypatch.setattr(demo_all, "run", spy)
+    assert demo_all.main(["--quick", "--out", str(tmp_path)]) == 0
+    assert seen == {"key": False, "blocked": True}
+    assert socket.socket.connect is real and demo_all.os.environ["TOKEN_FACTORY_API_KEY"] == "sk-test"
 
 
 def test_missing_room_fails_with_one_line(demo_all, tmp_path, capsys):

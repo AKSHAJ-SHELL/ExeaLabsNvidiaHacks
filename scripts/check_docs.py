@@ -87,17 +87,25 @@ def test_defs(root: Path) -> dict[str, set[str]]:
     return defs
 
 
+PLANNED_SECTION = re.compile(r"^##\s+.*\bto-?do\b", re.I)
+
+
 def check_paths(root: Path, doc: Path, text: str, tests: dict[str, set[str]]) -> list[str]:
+    """Links must resolve everywhere. Code paths must exist too, except under a `## ... to-do` heading,
+    where they name files that are planned and do not exist yet."""
     rel = doc.relative_to(root)
     probs = []
+    planned = False
     for n, line in enumerate(text.splitlines(), 1):
+        if line.startswith("## "):
+            planned = bool(PLANNED_SECTION.match(line))
         for target in LINK.findall(line):
             if re.match(r"^(\w+:|#|//)", target):
                 continue
             p = target.split("#")[0]
             if p and not (doc.parent / p).exists():
                 probs.append(f"{rel}:{n}: broken link {target}")
-        for tok in TICKS.findall(line):
+        for tok in [] if planned else TICKS.findall(line):
             m = PATH.match(tok.strip())
             if not m or re.search(r"[*<>{}]", tok):
                 continue
