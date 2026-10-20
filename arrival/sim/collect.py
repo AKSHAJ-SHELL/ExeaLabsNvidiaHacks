@@ -328,7 +328,12 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
         finish_task(t)
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
     planner = VLMPlanner(log=log, cache_path=cache_path) if planner_name == "vlm" else None
-    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"))
+    from arrival.export.provenance import run_record
+
+    prov = run_record(twin, seed=seed, generator="mujoco_scripted_ik", policy=policy_name, planner=planner_name,
+                      episodes=episodes, families=list(families), people=people, res=res, split=split)
+    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"),
+                              provenance=prov)
     t0 = time.perf_counter()
     per = {}
     preview = [] if save_preview else None

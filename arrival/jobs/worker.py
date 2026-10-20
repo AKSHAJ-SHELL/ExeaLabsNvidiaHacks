@@ -389,6 +389,7 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
     meter = Meter()
     try:
         limits.check_request(episodes, people)
+        from arrival.export.provenance import sha256_file
         from arrival.export.validate import validate
         from arrival.twin.compile import compile_twin, place_default_objects, write_twin
 
@@ -399,6 +400,7 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
         if limits.max_upload_bytes and upload.stat().st_size > limits.max_upload_bytes:
             raise LimitError(f"upload is {upload.stat().st_size} bytes, over the limit of {limits.max_upload_bytes}")
         bundle = load_upload(upload, room)
+        bundle["input_sha256"] = sha256_file(upload)  # provenance: the upload as received
 
         _stage(job_dir, status, "twin", log, meter)
         twin = compile_twin(bundle)
