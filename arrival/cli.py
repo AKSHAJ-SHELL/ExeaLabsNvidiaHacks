@@ -1,4 +1,4 @@
-"""python -m arrival demo | validate | serve | sim | eval | work | gc"""
+"""python -m arrival demo | validate | serve | sim | eval | work | gc | doctor"""
 
 from __future__ import annotations
 
@@ -108,8 +108,22 @@ def cmd_validate(a) -> int:
 def cmd_serve(a) -> int:
     from arrival.web.app import serve
 
-    serve(port=a.port, out_dir=Path(a.out), scans_dir=resolve_scans(a.scans), host=a.host)
+    if a.max_upload_mb <= 0 or a.rate_limit < 0 or a.max_queued < 0:
+        print("--max-upload-mb must be > 0; --rate-limit and --max-queued must be >= 0 (0 = off)", file=sys.stderr)
+        return EXIT_USAGE
+    serve(port=a.port, out_dir=Path(a.out), scans_dir=resolve_scans(a.scans), host=a.host,
+          max_upload_mb=a.max_upload_mb, rate_limit=a.rate_limit, max_queued=a.max_queued,
+          public=a.public, behind_proxy=a.behind_proxy)
     return EXIT_OK
+
+
+def cmd_doctor(a) -> int:
+    """Offline environment check: python, dependencies, MuJoCo, ffmpeg, which keys are set (never their values), disk."""
+    from arrival import doctor
+
+    checks = doctor.run_checks(a.out)
+    print(doctor.render_json(checks) if a.json else doctor.render(checks))
+    return EXIT_INVALID if doctor.exit_code(checks) else EXIT_OK
 
 
 def _sim_args(a):
@@ -318,6 +332,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="0.0.0.0 to accept uploads from the iOS capture app on the same Wi-Fi")
     s.add_argument("--out", default="out")
     s.add_argument("--scans", default="scans")
+    s.add_argument("--max-upload-mb", type=float, default=200,
+                   help="reject a larger upload body with 413 (default 200)")
+    s.add_argument("--rate-limit", type=int, default=10,
+                   help="uploads per minute per client before 429; 0 turns it off (default 10)")
+    s.add_argument("--max-queued", type=int, default=50,
+                   help="refuse uploads with 503 while this many jobs are queued or running; 0 = no cap (default 50)")
+    s.add_argument("--public", action="store_true",
+                   help="public hosting: the page lists only the visitor's own jobs and the API hides server paths")
+    s.add_argument("--behind-proxy", action="store_true",
+                   help="trust X-Forwarded-Proto (HSTS, Secure cookie) and X-Forwarded-For (rate limit) from a reverse proxy")
     s.set_defaults(fn=cmd_serve)
     m = sub.add_parser("sim", help="MuJoCo sim of the room: arm + drawers/doors + people -> LeRobot v2 demos")
     m.add_argument("--room", default="hero_kitchen")
@@ -381,6 +405,10 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--dry-run", action="store_true", help="list what would be deleted, delete nothing")
     g.add_argument("--out", default="out")
     g.set_defaults(fn=cmd_gc)
+    dr = sub.add_parser("doctor", help="check python, mujoco, ffmpeg, optional keys (set or not, never shown) and disk")
+    dr.add_argument("--out", default="out", help="output folder whose disk is checked")
+    dr.add_argument("--json", action="store_true", help="print the checks as JSON")
+    dr.set_defaults(fn=cmd_doctor)
     return p
 
 
