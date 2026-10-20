@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("rooms", nargs="*", type=Path, help="room directories (default: every one under scans/)")
     args = ap.parse_args(argv)
-    dirs = args.rooms or sorted(p for p in (ROOT / "scans").iterdir() if p.is_dir())
+    dirs = args.rooms or sorted(p for p in (ROOT / "scans").glob("*") if p.is_dir())
     failed = measured = 0
     for d in dirs:
         mfile = d / "measurements.json"
@@ -41,6 +41,8 @@ def main(argv: list[str] | None = None) -> int:
             failed += 1
             continue
         by = f"{res['measured_by']}, {res['date']}" if res["measured_by"] else "unknown"
+        if not res["tape_measured"]:
+            by += "; AUTHORED, not tape-measured, not evidence of scan accuracy"
         print(f"{d.name}  (tolerance {res['tolerance_m'] * 100:.1f} cm, measured by {by})")
         for key, r in res["dimensions"].items():
             if r["error_m"] is None:

@@ -152,6 +152,7 @@ def test_script_exit_codes_and_skip(tmp_path, capsys):
     assert scan_accuracy.main([str(ok_room), str(none_room)]) == 0
     out = capsys.readouterr().out
     assert "none_room: no measurements.json, skipped" in out and "1 room(s) measured, 0 failing" in out
+    assert "AUTHORED, not tape-measured" in out  # the fixture is flagged in the report, not just in the data
     assert scan_accuracy.main([str(ok_room), str(bad_room)]) == 1
     out = capsys.readouterr().out
     assert "-6.0 cm  FAIL" in out and "1 failing" in out
