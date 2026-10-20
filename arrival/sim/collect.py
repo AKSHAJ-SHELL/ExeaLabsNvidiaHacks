@@ -63,17 +63,22 @@ class SimEnv:
             self.data.qpos[int(self.model.joint(jn).qposadr[0])] = start[task["family"]]
         self.data.ctrl[:] = list(robot.HOME) + [robot.FINGER_OPEN] * 2
         self.wiped = 0.0  # xy distance the sponge travelled while pressed to the counter (wipe_counter)
-        free = self._free_floor()
-        front = max(f["position"][1] + f["size"][1] / 2 for f in twin["fixtures"])
-        self.walkers = Walkers(task.get("people", 0), free, seed=task.get("seed", 0), base_xy=base[:2],
-                               front_y=front, fixtures=twin["fixtures"]) if task.get("people") else None
+        self.walkers = None
+        if task.get("people"):
+            front = max((f["position"][1] + f["size"][1] / 2 for f in twin["fixtures"]), default=base[1])
+            self.walkers = Walkers(task["people"], self._free_floor(), seed=task.get("seed", 0), base_xy=base[:2],
+                                   front_y=front, fixtures=twin["fixtures"])
         self.safety = SafetyMonitor(self.model)
         mujoco.mj_forward(self.model, self.data)
         self.cameras, self.res = cameras, res
         self.renderer = mujoco.Renderer(self.model, res, res)
         self.big = mujoco.Renderer(self.model, 360, 480) if overview else None
-        for _ in range(SETTLE_STEPS):
-            self.step(np.array(list(robot.HOME) + [robot.FINGER_OPEN]))
+        try:
+            for _ in range(SETTLE_STEPS):
+                self.step(np.array(list(robot.HOME) + [robot.FINGER_OPEN]))
+        except BaseException:
+            self.close()
+            raise
 
     # ---- geometry helpers ----
     @staticmethod
@@ -84,7 +89,8 @@ class SimEnv:
         xs = [p for w in self.twin["walls"] for p in (w["start"][0], w["end"][0])]
         ys = [p for w in self.twin["walls"] for p in (w["start"][1], w["end"][1])]
         mid = (min(ys) + max(ys)) / 2  # the work strip runs along the back wall; anything further in is an obstacle
-        deep = max(f["position"][1] + f["size"][1] / 2 for f in self.twin["fixtures"] if f["position"][1] < mid)
+        deep = max((f["position"][1] + f["size"][1] / 2 for f in self.twin["fixtures"] if f["position"][1] < mid),
+                   default=min(ys))
         return (min(xs) + 0.4, deep + 0.9, max(xs) - 0.4, max(ys) - 0.3)
 
     def _base_pose(self, task: dict, obj_pos: dict):
@@ -92,12 +98,10 @@ class SimEnv:
         if fam in ("counter_to_sink", "counter_to_counter"):
             src = self.fx[task["source"]]
             p = np.array(obj_pos[task["object_id"]])
-            tgt = self.fx[task["target"]]
             mid = (p[0] + task["target_x"]) / 2
             n = _front(src)
             y = src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28)
             base = (mid, y, 0.75)
-            task.setdefault("_place", None)
         elif fam == "wipe_counter":
             src = self.fx[task["source"]]
             p = np.array(obj_pos[task["object_id"]])
@@ -363,15 +367,20 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             task["planned_by"] = planner.source
             if research_ctx:
                 task["tavily_enriched"] = True
-            if plan.get("family") and plan["family"] in families:
-                task["family"] = plan["family"]
-            if plan.get("object") and plan["object"] in obj_ids:
+            # the planner only refines a task's own fields: its family, and the pick/place fields other families lack,
+            # stay as make_tasks set them (a rewritten family would miss its source/target/fixture or flip open/close)
+            if plan.get("family") and plan["family"] != task["family"]:
+                log(f"[sim] task {task['task_id']}: planner family {plan['family']} != {task['family']}; keeping the task's")
+            if plan.get("object") and plan["object"] in obj_ids and "object_id" in task:
                 task["object_id"] = plan["object"]
-            if plan.get("target") and plan["target"] in fx_ids:
+            if plan.get("target") and plan["target"] in fx_ids and "target" in task:
                 task["target"] = plan["target"]
             log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
         env = SimEnv(twin, task, res=res, overview=save_preview and i == 0)
-        ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
+        try:
+            ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
+        finally:
+            env.close()  # idempotent; frees both GL renderers when the policy or the episode raises
         fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0, "human_contacts": 0,
                                               "fridge_visits": 0, "door_contacts": 0})
         fam["attempts"] += 1
@@ -387,6 +396,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             writer.add_episode(ep, task)
         if save_preview and i == 0:
             _write_preview(out_dir / "previews", room, preview, ep)
+            preview = None  # up to ~200 MB of overview frames; not needed past the first episode
     seconds = time.perf_counter() - t0
     info = writer.finish(len(tasks))
     succ = sum(f["successes"] for f in per.values())
@@ -411,7 +421,7 @@ def _write_preview(d: Path, room: str, frames: list, ep: dict) -> None:
     from arrival.export.lerobot import write_video
 
     d.mkdir(parents=True, exist_ok=True)
-    write_video(d / f"{room}_sim_overview.mp4", np.array(frames), FPS)
+    write_video(d / f"{room}_sim_overview.mp4", frames, FPS)
     picks = [frames[int(k)] for k in np.linspace(0, len(frames) - 1, 6)]
     ego = ep["videos"]["ego_view"]
     egos = [np.array(Image.fromarray(ego[int(k)]).resize((480, 360))) for k in np.linspace(0, len(ego) - 1, 6)]

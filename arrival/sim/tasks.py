@@ -104,8 +104,8 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
             from arrival.tasks.instructions import generate_instructions
             gen = generate_instructions(fam, object_name=v.get("object_label"), fixture_name=v.get("name"))
             options = gen.get(split, gen.get("train", SIM_WORDINGS[fam]))
-            w = rng.randrange(len(options))
-            instr = options[w]
+            instr = options[rng.randrange(len(options))]
+            w = -1  # the generated lists have their own indexing: no template index, and no holdout wording
         else:
             words = SIM_WORDINGS[fam]
             w = rng.choice([k for k in range(len(words)) if len(words) <= HOLDOUT_WORDING or (k == HOLDOUT_WORDING) == holdout])
