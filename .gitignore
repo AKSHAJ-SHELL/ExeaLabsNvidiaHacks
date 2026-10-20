@@ -13,3 +13,4 @@ ios/build/
 *.xcuserstate
 .DS_Store
 MUJOCO_LOG.TXT
+arrival/assets/menagerie/

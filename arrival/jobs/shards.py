@@ -25,11 +25,11 @@ from arrival.export.lerobot import chunk_of
 SHARD_RE = re.compile(r"^(\d+)/(\d+)$")
 SHARD_DIR_RE = re.compile(r"^\d+of\d+$")
 FINGERPRINT_KEYS = ("room", "families", "episodes", "seed", "people", "policy", "planner", "split", "instructions",
-                    "base", "res", "shard")
+                    "base", "arm", "res", "shard")
 SKIP_REASONS_KEPT = 50
 # the shard fields that must agree across shards (index and task_range differ by design)
 SHARED_SHARD_KEYS = ("count", "total_tasks", "episodes", "seed", "families", "people", "policy", "planner", "split",
-                     "instructions", "base", "res")
+                     "instructions", "base", "arm", "res")
 
 
 class ShardError(ValueError):
@@ -192,7 +192,8 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
     for s in shards:
         if root.resolve() in (s["root"].resolve(), *s["root"].resolve().parents):
             raise ShardError(f"the output {root} would overwrite shard {s['root']}; pick another --out")
-    w = SimDatasetWriter(root, room, fps, res, tuple(cams), base="mobile" if first["embodiment"].get("base_actuated") else "fixed")
+    w = SimDatasetWriter(root, room, fps, res, tuple(cams), base="mobile" if first["embodiment"].get("base_actuated") else "fixed",
+                        arm=first["embodiment"].get("arm", "procedural"))
     for s in shards:
         size = s["info"].get("chunks_size", 1000)
         for row in s["episodes"]:

@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 
 from arrival.export.lerobot import (CHUNKS_SIZE, MODALITY, SCHEMA, _merge_stats, _stats, check_video_size, chunk_of,
                                     video_info, write_video)
+from arrival.sim import menagerie, robot
 
 
 STATE_DIM = 11  # 7 arm joints, gripper, base x, y, yaw (room frame); same layout for action
@@ -20,11 +21,13 @@ BASE_SLICE = {"start": 8, "end": STATE_DIM}
 
 class SimDatasetWriter:
     def __init__(self, root: str | Path, room_id: str, fps: int, res: int, cameras: tuple[str, ...],
-                 base: str = "fixed", resume: bool = False):
+                 base: str = "fixed", resume: bool = False, arm: str = "procedural"):
         """resume=True keeps what is on disk (the caller then calls `restore`) instead of wiping the folder."""
         check_video_size(res, res)  # before the rmtree below: a bad res must not wipe an existing dataset
         self.root, self.room_id, self.fps, self.res, self.cameras = Path(root), room_id, fps, res, cameras
         self.base = base
+        self.arm = arm
+        self.finger_open = menagerie.FINGER_OPEN if arm == "menagerie" else robot.FINGER_OPEN
         if self.root.exists() and not resume:
             shutil.rmtree(self.root)
         (self.root / "meta").mkdir(parents=True, exist_ok=True)
@@ -132,10 +135,13 @@ class SimDatasetWriter:
         (meta / "modality.json").write_text(json.dumps(modality, indent=2))
         (meta / "embodiment.json").write_text(json.dumps({
             "embodiment": "arrival_sim_panda", "dof_arm": 7, "dof_gripper": 1, "dof_base": 3,
+            "arm": self.arm, "gripper_open": self.finger_open,
             "base": "planar", "base_frame": "room", "base_actuated": self.base == "mobile",
             "control": "absolute_joint_position", "joints_are_placeholder": False,
-            "note": "Procedural Panda-like arm (Franka link offsets, capsule geometry) in MuJoCo. Gripper state = "
-                    "mean finger opening in meters (0..0.05). state[8:11] and action[8:11] are the base x, y, yaw "
+            "note": ("Procedural Panda-like arm (Franka link offsets, capsule geometry)" if self.arm == "procedural"
+                     else "MuJoCo Menagerie Franka Emika Panda (Apache-2.0 meshes, fetched, not committed)")
+                    + f" in MuJoCo. Gripper state = mean finger opening in meters (0..{self.finger_open}). "
+                    "state[8:11] and action[8:11] are the base x, y, yaw "
                     "in the room frame (meters, radians); with base_actuated false they hold the parked pose for "
                     "the whole episode. Not a real-robot dataset.",
         }, indent=2))

@@ -10,7 +10,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-from arrival.sim import robot
+from arrival.sim import menagerie, robot
 from arrival.sim.people import Walkers, frame
 from arrival.sim.safety import SafetyMonitor
 from arrival.catalog.objects import HANDLE_HELD, RIM_HELD
@@ -41,10 +41,13 @@ BASE_MODES = ("fixed", "mobile")
 
 class SimEnv:
     def __init__(self, twin: dict, task: dict, res: int = 128, cameras=("ego_view", "wrist"), overview: bool = False,
-                 base: str = "fixed"):
+                 base: str = "fixed", arm: str = "procedural"):
         if base not in BASE_MODES:
             raise ValueError(f"base must be one of {BASE_MODES}, got {base!r}")
         self.twin, self.task, self.mobile = twin, task, base == "mobile"
+        self.arm = arm
+        self.finger_open = menagerie.FINGER_OPEN if arm == "menagerie" else robot.FINGER_OPEN  # per finger, m
+        self.hand = menagerie.HAND if arm == "menagerie" else robot.HAND
         self.fx = {f["id"]: f for f in twin["fixtures"]}
         self.objs = {o["id"]: o for o in twin["objects"]}
         obj_pos = {}
@@ -58,7 +61,7 @@ class SimEnv:
         base, yaw = self._base_pose(task, obj_pos)
         self.base0 = np.array([base[0], base[1], np.radians(yaw)])  # parked pose, room frame; base joints are zero here
         xml = build_mjcf(twin, base, yaw, obj_pos, task.get("lighting", "neutral"), task.get("people", 0),
-                         seed=task.get("seed"), people_seed=task.get("seed", 0), base="mobile" if self.mobile else "fixed")
+                         seed=task.get("seed"), people_seed=task.get("seed", 0), base="mobile" if self.mobile else "fixed", arm=arm)
         self.model = mujoco.MjModel.from_xml_string(xml)
         self.data = mujoco.MjData(self.model)
         self.qadr = [int(self.model.joint(j).qposadr[0]) for j in robot.ARM_JOINTS]
@@ -67,7 +70,7 @@ class SimEnv:
         self.badr = [int(self.model.joint(j).qposadr[0]) for j in robot.BASE_JOINTS] if self.mobile else []
         self.bact = [int(self.model.actuator(a).id) for a in ("b_x", "b_y", "b_yaw")] if self.mobile else []
         self.data.qpos[self.qadr] = robot.HOME
-        self.data.qpos[self.fadr] = robot.FINGER_OPEN
+        self.data.qpos[self.fadr] = self.finger_open
         if task["family"] in ("close_drawer", "close_door", "put_in_drawer"):  # the part starts open
             jn = f'{task["fixture"]}_door' if task["family"] == "close_door" else f'{task["fixture"]}_drawer0'
             start = {"close_drawer": DRAWER_OPEN, "close_door": DOOR_OPEN, "put_in_drawer": DRAWER_OPEN_PUT}
@@ -75,7 +78,7 @@ class SimEnv:
         if task["family"] in ("load_dishwasher", "unload_dishwasher"):  # door flat, upper rack rolled out over it
             self.data.qpos[int(self.model.joint(f'{task["fixture"]}_door').qposadr[0])] = DOOR_FLAT
             self.data.qpos[int(self.model.joint(f'{task["fixture"]}_rack').qposadr[0])] = RACK_OUT
-        self.data.ctrl[:9] = list(robot.HOME) + [robot.FINGER_OPEN] * 2  # base actuators, if any, stay at zero
+        self.data.ctrl[:9] = list(robot.HOME) + [self.finger_open] * 2  # base actuators, if any, stay at zero
         self.wiped = 0.0  # xy distance the sponge travelled while pressed to the counter (wipe_counter)
         self.people_note = None
         self.walkers = None
@@ -94,7 +97,7 @@ class SimEnv:
         self.big = mujoco.Renderer(self.model, 360, 480) if overview else None
         try:
             for _ in range(SETTLE_STEPS):
-                self.step(np.array(list(robot.HOME) + [robot.FINGER_OPEN]))
+                self.step(np.array(list(robot.HOME) + [self.finger_open]))
         except BaseException:
             self.close()
             raise
@@ -142,7 +145,7 @@ class SimEnv:
         xy = obj_pos[task["object_id"]][:2] if "object_id" in task else None
         if task["family"] == "unload_dishwasher":
             xy = task["start"][:2]  # the object starts in the rack, but the base stands on the side of the counter spot
-        base, yaw, self.anchor = base_pose(self.twin, task, xy, self.mobile)
+        base, yaw, self.anchor = base_pose(self.twin, task, xy, self.mobile, self.arm)
         return base, yaw
 
     def base_pose(self) -> np.ndarray:
@@ -394,12 +397,13 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             policy_name: str = "scripted", res: int = 128, seed: int = 0, save_preview: bool = False,
             planner_name: str = "rule", cache_path: str | Path | None = None,
             split: str = "train", use_generated_instructions: bool = False, base: str = "fixed",
-            shard: tuple[int, int] | None = None, resume: bool = False, log=print) -> dict:
+            shard: tuple[int, int] | None = None, resume: bool = False, arm: str = "procedural", log=print) -> dict:
     """Collect `episodes` attempts; failed attempts are dropped and counted. A task whose stand spot or reach the
     pre-flight rejects never runs (`skipped_unreachable`, counted per rejected variation), and one whose env build
     or rollout raises is logged with its reason, counted as `skipped_error` and never written, so a bad geometry
     costs a task, not the run. base="mobile" gives the arm a driven base (MAN-3), which also admits the
-    counter_to_counter variations a fixed base cannot reach.
+    counter_to_counter variations a fixed base cannot reach. arm="menagerie" swaps in the real Franka asset
+    (`python scripts/fetch_menagerie.py`); the dataset and report say which arm made them.
     shard=(i, n) runs only block i of n of the `episodes` tasks (arrival/jobs/shards.py) and writes under
     <out_dir>/shards/<i>of<n>/, so n processes cover the run with no overlap; `arrival merge-shards` joins them.
     Every run journals each finished task; resume=True continues from that journal (a different run's journal is
@@ -426,11 +430,12 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     planner = VLMPlanner(log=log, cache_path=cache_path) if planner_name == "vlm" else None
     fingerprint = {"room": room, "families": list(families), "episodes": episodes, "seed": seed, "people": people,
                    "policy": policy_name, "planner": planner_name, "split": split,
-                   "instructions": use_generated_instructions, "base": base, "res": res, "shard": list(shard) if shard else None}
+                   "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res,
+                   "shard": list(shard) if shard else None}
     journal = Journal(out_dir / "progress" / f"{room}_sim.jsonl")
     done = journal.start(fingerprint, resume)
     writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"), base=base,
-                              resume=bool(done))
+                              resume=bool(done), arm=arm)
     per: dict = {}
     prior_seconds = 0.0
     if done:
@@ -482,7 +487,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
         stage = "build"
         try:
-            env = SimEnv(twin, task, res=res, overview=save_preview and i == 0, base=base)
+            env = SimEnv(twin, task, res=res, overview=save_preview and i == 0, base=base, arm=arm)
             stage = "rollout"
             try:
                 if env.people_note:
@@ -530,7 +535,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     shard_info = ({"index": shard[0], "count": shard[1], "task_range": [lo, hi], "total_tasks": len(tasks),
                    "episodes": episodes, "seed": seed, "families": list(families), "people": people,
                    "policy": policy_name, "planner": planner_name, "split": split,
-                   "instructions": use_generated_instructions, "base": base, "res": res}) if shard else None
+                   "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res}) if shard else None
     info = writer.finish(attempts, skipped, {"shard": shard_info} if shard else None)
     succ = sum(f["successes"] for f in per.values())
     report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name,
@@ -542,7 +547,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
               "door_contacts": sum(f["door_contacts"] for f in per.values()),
               "families": {k: {**v, "success_rate": round(v["successes"] / v["attempts"], 3)} for k, v in per.items()},
               "people": people, "resolution": res, "physics_checked_success": True, "grasp": "friction",
-              "base": base, **({"shard": shard_info} if shard else {}), **({"resumed_tasks": len(done)} if done else {})}
+              "base": base, "arm": arm, **({"shard": shard_info} if shard else {}), **({"resumed_tasks": len(done)} if done else {})}
     rp = out_dir / "reports" / f"{room}_sim.json"
     rp.parent.mkdir(parents=True, exist_ok=True)
     rp.write_text(json.dumps(report, indent=2))

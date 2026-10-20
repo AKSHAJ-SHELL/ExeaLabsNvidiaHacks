@@ -13,7 +13,7 @@ _spec.loader.exec_module(check_docs)
 @pytest.fixture
 def repo_copy(tmp_path):
     dst = tmp_path / "repo"
-    shutil.copytree(REPO, dst, ignore=shutil.ignore_patterns(".git", ".venv", "out", "__pycache__", "*.egg-info"))
+    shutil.copytree(REPO, dst, ignore=shutil.ignore_patterns(".git", ".venv", "out", "__pycache__", "*.egg-info", "menagerie"))
     return dst
 
 

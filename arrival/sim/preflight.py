@@ -29,6 +29,8 @@ FRIDGE_BASE_YAW = 0.0  # degrees the base turns toward the hinge from facing the
 FLAP_MARGIN = 0.06  # open_oven / open_dishwasher: base column edge to where the open door's top edge lands
 FAUCET_STANDOFF = 0.34  # base column to counter front for turn_on_faucet (0.28 elsewhere): the lever is at the back
 # of the counter above shoulder height, and a horizontal hand reaches it with less joint strain from further out
+ARM_STANDOFF_TRIM = {"procedural": 0.0, "menagerie": 0.02}  # the real hand's closed fingertips reach 8 mm past the eef,
+# the procedural fingers 23 mm: the faucet push stands 2 cm closer with it (0.34 misses the lever, 0.32 turns it to 1.10 rad)
 DISHWASHER_SIDE = 0.55  # load/unload_dishwasher: the base parks this far beside the dishwasher centre, clear of its door
 RACK_FRONT = 0.15  # the rack spot an object is set into (or taken from) lies this far out from the dishwasher front
 FLAP_DOOR_BELOW = {"open_oven": 0.24, "open_dishwasher": 0.18}  # fixture height minus the door's height, per family
@@ -101,11 +103,12 @@ def rack_spot(d: dict) -> tuple[float, float]:
     return float(d["position"][0] + n[0] * out), float(d["position"][1] + n[1] * out)
 
 
-def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False
+def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: str = "procedural"
               ) -> tuple[tuple[float, float, float], float, dict]:
     """(base position, base yaw in degrees, anchor fixture): in front of the fixture the task works at, facing it,
     on any wall. `obj_xy` is the object's xy at the start (the task's `start` when omitted). `mobile` moves the
-    counter_to_counter stand spot MOBILE_STEP toward the target instead of midway: the base drives the rest."""
+    counter_to_counter stand spot MOBILE_STEP toward the target instead of midway: the base drives the rest.
+    `arm` trims the stand spots that push with the closed fingertips (ARM_STANDOFF_TRIM)."""
     fx = {f["id"]: f for f in twin["fixtures"]}
     fam, fixtures = task["family"], twin["fixtures"]
     if obj_xy is None and "object_id" in task:
@@ -147,7 +150,7 @@ def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False
         # counter, at the edge of what a horizontal hand reaches from the usual parking spot
         sink = fx[task["fixture"]]
         src = faucet_counter(twin, sink)
-        base = park(src, to_local(sink["position"][:2], src)[0], FAUCET_STANDOFF)
+        base = park(src, to_local(sink["position"][:2], src)[0], FAUCET_STANDOFF - ARM_STANDOFF_TRIM[arm])
     elif fam in ("load_dishwasher", "unload_dishwasher"):
         # beside the dishwasher, in front of the counter, so the flat door and the rolled-out rack stay clear of the
         # base column and both the rack and the counter spot are within reach

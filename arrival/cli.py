@@ -120,6 +120,12 @@ def _sim_args(a):
         return "mujoco is not installed: pip install -e '.[sim]'"
     from arrival.sim.tasks import SIM_FAMILIES
 
+    if getattr(a, "arm", "procedural") == "menagerie":
+        from arrival.sim import menagerie
+
+        if not menagerie.available():
+            return menagerie.FETCH_HINT
+
     fams = list(SIM_FAMILIES) if a.families == "all" else [f.strip() for f in a.families.split(",") if f.strip()]
     bad = [f for f in fams if f not in SIM_FAMILIES]
     if bad or a.episodes < 1:
@@ -167,7 +173,7 @@ def cmd_sim(a) -> int:
                       seed=a.seed, save_preview=a.save_preview,
                       planner_name=a.planner, split=a.split,
                       use_generated_instructions=(a.instructions == "nemotron"), base=getattr(a, "base", "fixed"),
-                      shard=shard, resume=getattr(a, "resume", False))
+                      shard=shard, resume=getattr(a, "resume", False), arm=getattr(a, "arm", "procedural"))
     except ShardError as e:
         print(e, file=sys.stderr)
         return EXIT_USAGE
@@ -287,7 +293,8 @@ def cmd_eval(a) -> int:
 
     try:
         rep = evaluate(twin, fams, a.episodes, policy_name=a.policy, seed=a.seed, people=a.people,
-                       holdout=a.holdout, res=a.res, out_dir=a.out, base=getattr(a, "base", "fixed"))
+                       holdout=a.holdout, res=a.res, out_dir=a.out, base=getattr(a, "base", "fixed"),
+                       arm=getattr(a, "arm", "procedural"))
     except VLANotConfigured as e:
         print(f"policy vla: {e}", file=sys.stderr)
         return EXIT_USAGE
@@ -356,6 +363,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Dataset instruction split: train or held-out eval")
     m.add_argument("--base", choices=["fixed", "mobile"], default="fixed",
                    help="mobile: the pedestal drives (MAN-3); counter_to_counter becomes reachable")
+    m.add_argument("--arm", choices=["procedural", "menagerie"], default="procedural",
+                   help="menagerie = the real Franka asset from MuJoCo Menagerie (python scripts/fetch_menagerie.py; meshes are not committed)")
     m.add_argument("--res", type=int, default=128)
     m.add_argument("--out", default="out")
     m.add_argument("--scans", default="scans")
@@ -389,6 +398,8 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--people", type=int, default=2)
     e.add_argument("--holdout", action="store_true", help="held-out wording and start offset (docs/07-eval.md)")
     e.add_argument("--base", choices=["fixed", "mobile"], default="fixed", help="mobile: the pedestal drives (MAN-3)")
+    e.add_argument("--arm", choices=["procedural", "menagerie"], default="procedural",
+                   help="menagerie = the real Franka asset from MuJoCo Menagerie (python scripts/fetch_menagerie.py; meshes are not committed)")
     e.add_argument("--res", type=int, default=128)
     e.add_argument("--out", default="out")
     e.add_argument("--scans", default="scans")
