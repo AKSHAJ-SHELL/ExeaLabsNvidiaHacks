@@ -28,6 +28,15 @@ SIM_WORDINGS = {
 }
 
 
+def finish_task(t: dict) -> dict:
+    """Add the handle/joint names the scripted policy and the success check read; shared by collect and eval."""
+    if t["family"] in ("open_drawer", "close_drawer", "put_in_drawer"):
+        t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
+    elif t["family"] in ("open_door", "close_door", "open_fridge"):
+        t["joint"] = f'{t["fixture"]}_door'
+    return t
+
+
 def _fx(twin: dict, fid: str) -> dict:
     return next(f for f in twin["fixtures"] if f["id"] == fid)
 
@@ -104,8 +113,8 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
             from arrival.tasks.instructions import generate_instructions
             gen = generate_instructions(fam, object_name=v.get("object_label"), fixture_name=v.get("name"))
             options = gen.get(split, gen.get("train", SIM_WORDINGS[fam]))
-            w = rng.randrange(len(options))
-            instr = options[w]
+            instr = options[rng.randrange(len(options))]
+            w = -1  # the generated lists have their own indexing: no template index, and no holdout wording
         else:
             words = SIM_WORDINGS[fam]
             w = rng.choice([k for k in range(len(words)) if len(words) <= HOLDOUT_WORDING or (k == HOLDOUT_WORDING) == holdout])

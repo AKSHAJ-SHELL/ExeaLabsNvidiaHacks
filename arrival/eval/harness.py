@@ -13,7 +13,10 @@ import time
 from pathlib import Path
 
 from arrival.sim.collect import FPS, SimEnv, run_episode
-from arrival.sim.tasks import make_tasks
+from arrival.sim.tasks import finish_task, make_tasks
+
+
+EVAL_SEED_BASE = 10_000  # keeps eval task seeds (people paths, lighting) clear of the collect(seed=...) training seeds
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> list[float]:
@@ -27,15 +30,6 @@ def wilson(k: int, n: int, z: float = 1.96) -> list[float]:
     return [round(max(0.0, centre - half), 4), round(min(1.0, centre + half), 4)]
 
 
-def _finish_task(t: dict) -> dict:
-    """Same joint names collect() adds."""
-    if t["family"] == "open_drawer":
-        t["handle"], t["joint"] = f'{t["fixture"]}_drawer0_handle', f'{t["fixture"]}_drawer0'
-    elif t["family"] in ("open_door", "open_fridge"):
-        t["joint"] = f'{t["fixture"]}_door'
-    return t
-
-
 def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = "scripted", seed: int = 0,
              people: int = 2, holdout: bool = False, res: int = 128, out_dir: str | Path = "out",
              log=print) -> dict:
@@ -46,20 +40,28 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
     per: dict[str, dict] = {}
     t_all = time.perf_counter()
     for j, fam in enumerate(families):
-        tasks = [_finish_task(t) for t in make_tasks(twin, [fam], episodes, seed=seed + j, people=people,
+        tasks = [finish_task(t) for t in make_tasks(twin, [fam], episodes, seed=seed + EVAL_SEED_BASE + j, people=people,
                                                      holdout=holdout, log=log)]
         if not tasks:
             continue
         rows = []
         for task in tasks:
             t0 = time.perf_counter()
-            env = SimEnv(twin, task, res=res)
-            ep = run_episode(env, policy, task)
+            try:
+                with SimEnv(twin, task, res=res) as env:
+                    ep = run_episode(env, policy, task)
+            except Exception as e:
+                if isinstance(e, OSError) and not any(per.values()) and not rows:
+                    raise  # the policy server never answered: the CLI reports that, not a run of failures
+                wall = time.perf_counter() - t0
+                rows.append((False, 0.0, wall, False, None, None, 0, 0.0, f"{type(e).__name__}: {e}"))
+                log(f"[eval] {task['task_id']}: ERROR {type(e).__name__}: {e}")
+                continue
             wall = time.perf_counter() - t0
             s = ep["safety"]
             ok = ep["success"] and not s["human_contact"]
             rows.append((ok, len(ep["states"]) / FPS, wall, s["human_contact"], s["min_human_distance_m"],
-                         ep["ik_error"], s["arm_contact_steps"], s["arm_contact_max_depth_m"]))
+                         ep["ik_error"], s["arm_contact_steps"], s["arm_contact_max_depth_m"], None))
             tag = "DROP human_contact" if s["human_contact"] else ("OK " if ok else "MISS")
             arm = f" arm_contact={s['arm_contact_steps']} steps {s['arm_contact_worst']}" if s["arm_contact_steps"] else ""
             log(f"[eval] {task['task_id']}: {tag} {ep['detail']} sim={len(ep['states']) / FPS:.2f}s "
@@ -71,6 +73,7 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
                     "mean_seconds": round(sum(r[1] for r in rows) / n, 3),
                     "mean_wall_seconds": round(sum(r[2] for r in rows) / n, 3),
                     "human_contacts": sum(r[3] for r in rows),
+                    "errors": [r[8] for r in rows if r[8]],  # episodes that raised count as failures
                     "min_human_distance_m": round(min(dists), 4) if dists else None,
                     "ik_error_max": round(max(iks), 4) if iks else None,
                     "arm_contact_episodes": sum(r[6] > 0 for r in rows),
@@ -81,6 +84,7 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
               "people": people, "holdout": holdout, "resolution": res, "families": per,
               "totals": {"episodes": n, "successes": k, "success_rate": round(k / n, 4) if n else None,
                          "wilson_95": wilson(k, n), "human_contacts": sum(f["human_contacts"] for f in per.values()),
+                         "errors": sum(len(f["errors"]) for f in per.values()),
                          "arm_contact_episodes": sum(f["arm_contact_episodes"] for f in per.values()),
                          "wall_seconds": round(time.perf_counter() - t_all, 2)}}
     path = Path(out_dir) / "eval" / f"{room}_{policy_name}.json"

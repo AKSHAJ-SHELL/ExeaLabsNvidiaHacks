@@ -1,6 +1,6 @@
 {
   "counter_to_sink::obj=mug::fx=none": {
-    "source": "token_factory_cached",
+    "source": "template_fallback",
     "train": [
       "Pick up the mug from the counter and place it in the sink.",
       "Put the mug in the sink.",
@@ -15,7 +15,7 @@
     ]
   },
   "counter_to_sink::obj=bowl::fx=none": {
-    "source": "token_factory_cached",
+    "source": "template_fallback",
     "train": [
       "Pick up the bowl from the counter and place it in the sink.",
       "Put the bowl in the sink.",
@@ -30,7 +30,7 @@
     ]
   },
   "open_drawer::obj=none::fx=counter a": {
-    "source": "token_factory_cached",
+    "source": "template_fallback",
     "train": [
       "Open the top drawer.",
       "Pull the top drawer of the counter a open.",
@@ -45,7 +45,7 @@
     ]
   },
   "open_door::obj=none::fx=counter a": {
-    "source": "token_factory_cached",
+    "source": "template_fallback",
     "train": [
       "Open the cabinet door.",
       "Swing the counter a cabinet door open.",

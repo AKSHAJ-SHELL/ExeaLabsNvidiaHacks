@@ -71,12 +71,10 @@ def test_scripted_expert_opens_cabinet_door(twin, fixture):
     env = SimEnv(twin, task, res=32)
     ep = run_episode(env, ScriptedExpert(), task)
     assert ep["success"], ep["detail"]
-    assert ep["detail"]["qpos"] > np.radians(65)  # MAN-2 reaches ~66.6 deg; preserve this narrow margin
+    assert ep["detail"]["qpos"] > np.radians(62)  # 63 to 66 deg with joint 7 held off its stop (MAN-2 had 66.6 with it pinned)
     assert ep["ik_error"] < 0.02
 
 
-@pytest.mark.xfail(strict=True, reason="the door grasp needs the heading that puts joint 7 on its stop; with #47's "
-                   "solid panel the flipped heading opens the door only 26 to 36 deg")
 @pytest.mark.parametrize("fixture", ["counter_a", "counter_b"])
 def test_door_pull_keeps_joint7_off_its_stop(twin, fixture):
     from arrival.sim.collect import run_episode
@@ -85,7 +83,10 @@ def test_door_pull_keeps_joint7_off_its_stop(twin, fixture):
     task = {"family": "open_door", "fixture": fixture, "joint": f"{fixture}_door", "lighting": "neutral", "people": 0,
             "seed": 0}
     ep = run_episode(SimEnv(twin, task, res=32), ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
     assert np.abs(ep["states"][:, 6]).max() < robot.RANGES[6][1] - 0.3
+
+
 def test_scripted_expert_opens_fridge(twin):
     from arrival.sim.collect import FRIDGE_OPEN, run_episode
     from arrival.sim.policy import ScriptedExpert
@@ -234,3 +235,98 @@ def test_vlm_planner_falls_back(monkeypatch):
     plan = p.plan("Put the mug in the sink.", ["mug_1", "bowl_1"], ["sink_1", "counter_a"])
     assert p.source == "rule_based"
     assert plan == {"family": "counter_to_sink", "object": "mug_1", "target": "sink_1"}
+
+
+def test_rule_plan_knows_every_sim_family():
+    from arrival.sim.policy import rule_plan
+
+    objs, fxs = ["mug_1", "sponge_1"], ["sink_1", "counter_a"]
+    assert rule_plan("Open the fridge.", objs, fxs)["family"] == "open_fridge"
+    assert rule_plan("Pull the fridge door open.", objs, fxs)["family"] == "open_fridge"
+    assert rule_plan("Wipe the counter with the sponge.", objs, fxs) == {
+        "family": "wipe_counter", "object": "sponge_1", "target": None}
+    assert rule_plan("Close the drawer.", objs, fxs)["family"] == "close_drawer"
+    assert rule_plan("Close the cabinet door.", objs, fxs)["family"] == "close_door"
+    assert rule_plan("Put the mug in the open drawer.", objs, fxs)["family"] == "put_in_drawer"
+    assert rule_plan("Open the top drawer.", objs, fxs)["family"] == "open_drawer"
+
+
+def test_planner_cache_key_is_stable_across_processes():
+    import hashlib
+
+    p = VLMPlanner(log=lambda *_: None, cache_path=None)
+    key = p._cache_key("Open it.", ["a"], ["b"], research_context="manual says pull")
+    assert key.endswith("::tavily=" + hashlib.sha1(b"manual says pull").hexdigest()[:12])  # not the salted hash()
+
+
+def test_planner_never_rewrites_the_tasks_family(twin, tmp_path, monkeypatch):
+    # a planner that answers with a family lacking the task's fields must not break or relabel the episode
+    monkeypatch.setattr(VLMPlanner, "plan", lambda self, *a, **k: setattr(self, "source", "stub") or
+                        {"family": "counter_to_counter", "object": None, "target": None})
+    res = collect(twin, ["open_fridge"], 1, tmp_path, people=0, res=32, planner_name="vlm",
+                  cache_path=tmp_path / "c.json", log=lambda *_: None)
+    assert list(res["report_data"]["families"]) == ["open_fridge"]
+
+
+def test_collect_closes_the_env_when_the_policy_raises(twin, tmp_path, monkeypatch):
+    from arrival.sim.policy import ScriptedExpert
+
+    closed = []
+    real = SimEnv.close
+    monkeypatch.setattr(SimEnv, "close", lambda self: (closed.append(1), real(self))[1])
+    monkeypatch.setattr(ScriptedExpert, "reset", lambda self, env, task: (_ for _ in ()).throw(ValueError("boom")))
+    with pytest.raises(ValueError):
+        collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=32, log=lambda *_: None)
+    assert closed
+
+
+def test_free_floor_survives_fixtures_only_in_the_far_half(twin):
+    import types
+
+    far = max(w["start"][1] for w in twin["walls"])
+    t = {**twin, "fixtures": [{**f, "position": [f["position"][0], far, f["position"][2]]} for f in twin["fixtures"]]}
+    x0, y0, x1, y1 = SimEnv._free_floor(types.SimpleNamespace(twin=t))
+    assert x0 < x1 and y0 < y1
+
+
+def test_base_pose_leaves_the_task_dict_alone(twin):
+    from arrival.sim.tasks import make_tasks
+
+    task = make_tasks(twin, ["counter_to_sink"], 1, people=0, log=lambda *_: None)[0]
+    before = dict(task)
+    SimEnv(twin, task, res=32).close()
+    assert task == before
+
+
+def test_generated_instructions_do_not_claim_a_template_index(twin):
+    from arrival.sim.tasks import make_tasks
+
+    tasks = make_tasks(twin, ["open_drawer"], 4, split="eval", use_generated_instructions=True, log=lambda *_: None)
+    assert tasks and {t["wording_index"] for t in tasks} == {-1}
+
+
+def test_sim_dataset_has_stats_and_shared_video_info(twin, tmp_path):
+    res = collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=32, log=lambda *_: None)
+    meta = res["dataset"] / "meta"
+    stats = json.loads((meta / "stats.json").read_text(), parse_constant=lambda c: pytest.fail(c))
+    assert {"observation.state", "action", "timestamp", "next.done"} <= set(stats)
+    feat = json.loads((meta / "info.json").read_text())["features"]["observation.images.ego_view"]
+    assert feat["info"]["video.height"] == 32 and feat["info"]["video.pix_fmt"] == "yuv420p"
+
+
+def test_collect_rejects_res_that_mp4_would_resize(twin, tmp_path):
+    with pytest.raises(ValueError, match="multiples of 16"):
+        collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=40, log=lambda *_: None)
+
+
+def test_run_episode_closes_env_when_the_policy_raises(twin, monkeypatch):
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+
+    task = {"family": "open_fridge", "fixture": "fridge_1", "joint": "fridge_1_door", "lighting": "neutral",
+            "people": 0, "seed": 0}
+    monkeypatch.setattr(ScriptedExpert, "reset", lambda self, env, task: (_ for _ in ()).throw(ValueError("boom")))
+    env = SimEnv(twin, task, res=32)
+    with pytest.raises(ValueError):
+        run_episode(env, ScriptedExpert(), task)
+    assert env.renderer is None

@@ -32,7 +32,6 @@ def load_dotenv(paths: list[Path] | None = None) -> None:
             key, value = key.strip(), value.strip().strip("'\"")
             if key and key not in os.environ:
                 os.environ[key] = value
-        return
 
 
 def config() -> dict:

@@ -2,6 +2,8 @@
 
 These were confirmed by the user on Oct 14, 2026, then narrowed for a one-night MVP. If a later doc conflicts with this file, this file wins.
 
+> Superseded in part: the project lead later allowed MuJoCo as an optional `sim` extra (see the build log, "Scope change: MuJoCo allowed"). The "no MuJoCo" and `scripted_retarget` lines below describe the `demo` path only.
+
 ## Product
 
 - New pipeline in this repo, with a four-photo input slot and an oracle that drops failed attempts.

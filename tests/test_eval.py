@@ -196,3 +196,32 @@ def test_walkers_interact_and_avoid_base(base):
                 assert _seg_dist(a, b, np.array(base)) >= (LANE[0] if lane else CLEAR), (seed, a, b)
     once, again = (Walkers(2, floor, seed=3, base_xy=base, front_y=front).paths for _ in range(2))
     assert all(np.allclose(a, b) for pa, pb in zip(once, again) for a, b in zip(pa, pb))
+
+
+def test_finish_task_covers_close_and_put_families():
+    from arrival.sim.tasks import finish_task
+
+    for fam in ("open_drawer", "close_drawer", "put_in_drawer"):
+        t = finish_task({"family": fam, "fixture": "cab"})
+        assert t["handle"] == "cab_drawer0_handle" and t["joint"] == "cab_drawer0"
+    for fam in ("open_door", "close_door", "open_fridge"):
+        assert finish_task({"family": fam, "fixture": "cab"})["joint"] == "cab_door"
+
+
+def test_eval_isolates_a_failing_episode_and_offsets_seeds(twin, tmp_path, monkeypatch):
+    import arrival.eval.harness as harness
+
+    seen = []
+
+    def flaky(env, pol, task):
+        seen.append(task)
+        if len(seen) == 2:
+            raise RuntimeError("ik exploded")
+        return run_episode(env, pol, task)
+
+    monkeypatch.setattr(harness, "run_episode", flaky)
+    rep = evaluate(twin, ["counter_to_sink"], 2, res=32, people=0, out_dir=tmp_path, log=lambda *_: None)
+    f = rep["families"]["counter_to_sink"]
+    assert f["episodes"] == 2 and f["errors"] == ["RuntimeError: ik exploded"] and f["successes"] <= 1
+    assert rep["totals"]["errors"] == 1 and rep["path"].is_file()
+    assert all(t["seed"] >= harness.EVAL_SEED_BASE * 1000 for t in seen)

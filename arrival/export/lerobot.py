@@ -92,6 +92,18 @@ def wants_video(policy: str, episode_index: int) -> bool:
     return False
 
 
+def check_video_size(h: int, w: int) -> None:
+    """imageio's macro_block_size=16 silently resizes any other size, so info.features would lie about the mp4."""
+    if h % 16 or w % 16:
+        raise ValueError(f"video frames are {h}x{w}; height and width must be multiples of 16 or the mp4 "
+                         f"is resized and no longer matches info.features")
+
+
+def video_info(h: int, w: int, c: int, fps: int) -> dict:
+    return {"video.height": h, "video.width": w, "video.codec": "h264", "video.pix_fmt": "yuv420p",
+            "video.fps": fps, "video.channels": c, "video.is_depth_map": False, "has_audio": False}
+
+
 def write_video(path: Path, frames: np.ndarray, fps: int) -> None:
     import imageio.v2 as imageio
 
@@ -178,6 +190,26 @@ class LeRobotWriter:
         ts = np.asarray(timestamps, dtype=np.float32)
         if ts.shape != (n,):
             raise ValueError(f"episode {ep}: timestamps shape {ts.shape} != ({n},)")
+        for what, v in (("states", states), ("actions", actions), ("timestamps", ts)):
+            if not np.isfinite(v).all():  # NaN would also land in stats.json as a bare NaN token (invalid JSON)
+                raise ValueError(f"episode {ep}: {what} contain NaN or inf")
+        # every check before the first write: a rejected episode leaves no orphan parquet or mp4
+        if self.video_policy == "all":
+            missing = [k for k in self.video_keys if not videos or k not in videos]
+            if missing:
+                raise ValueError(f"episode {ep}: video policy 'all' needs frames for {missing}")
+        clips = {}
+        for name, frames in (videos or {}).items():
+            frames = np.asarray(frames, dtype=np.uint8)
+            if frames.ndim != 4 or frames.shape[0] != n or frames.shape[3] != 3:
+                raise ValueError(f"episode {ep}: video {name} shape {frames.shape} != ({n},H,W,3)")
+            if self.video_policy == "all" or self.wants_video(ep):
+                check_video_size(*frames.shape[1:3])
+            if self.video_policy == "all":
+                shape = list(frames.shape[1:])
+                if self.video_shapes.get(name, shape) != shape:
+                    raise ValueError(f"episode {ep}: video {name} shape changed to {shape}")
+            clips[name] = frames
         ti = self.task_index.setdefault(instruction, len(self.task_index))
         reward = np.zeros(n, dtype=np.float32)
         if success:
@@ -201,18 +233,9 @@ class LeRobotWriter:
         path.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(table, path)
 
-        if self.video_policy == "all":
-            missing = [k for k in self.video_keys if not videos or k not in videos]
-            if missing:
-                raise ValueError(f"episode {ep}: video policy 'all' needs frames for {missing}")
-        for name, frames in (videos or {}).items():
-            frames = np.asarray(frames, dtype=np.uint8)
-            if frames.ndim != 4 or frames.shape[0] != n or frames.shape[3] != 3:
-                raise ValueError(f"episode {ep}: video {name} shape {frames.shape} != ({n},H,W,3)")
+        for name, frames in clips.items():
             if self.video_policy == "all":
-                shape = list(frames.shape[1:])
-                if self.video_shapes.setdefault(name, shape) != shape:
-                    raise ValueError(f"episode {ep}: video {name} shape changed to {shape}")
+                self.video_shapes.setdefault(name, list(frames.shape[1:]))
                 write_video(self.root / VIDEO_PATH.format(episode_chunk=chunk, video_key=video_key(name),
                                                           episode_index=ep), frames, self.fps)
                 self.videos += 1
@@ -253,16 +276,24 @@ class LeRobotWriter:
                 h, w, c = self.video_shapes.get(name, [sim_texture.SIZE, sim_texture.SIZE, 3])
                 feats[video_key(name)] = {
                     "dtype": "video", "shape": [h, w, c], "names": ["height", "width", "channel"],
-                    "info": {"video.height": h, "video.width": w, "video.codec": "h264",
-                             "video.pix_fmt": "yuv420p", "video.fps": self.fps, "video.channels": c,
-                             "video.is_depth_map": False, "has_audio": False},
+                    "info": video_info(h, w, c, self.fps),
                 }
         for k, dt in SCALAR_FEATURES.items():
             feats[k] = {"dtype": dt, "shape": [1]}
         return feats
 
-    def finish(self, attempts: int) -> dict:
+    def close(self) -> None:
+        """Release the sidecar handle; idempotent, so an aborted run can call it without finish()."""
         self._sidecar.close()
+
+    def __enter__(self) -> "LeRobotWriter":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    def finish(self, attempts: int) -> dict:
+        self.close()
         meta = self.root / "meta"
         with open(meta / "tasks.jsonl", "w") as f:
             for instr, ti in self.task_index.items():

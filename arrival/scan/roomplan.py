@@ -51,7 +51,7 @@ def _size(dim: list[float]) -> list[float]:
     return [float(dim[0]), float(dim[2]), float(dim[1])]
 
 
-def _wall(w: dict, z0: float) -> dict:
+def _wall(w: dict) -> dict:
     m, dim = w["transform"], w["dimensions"]
     cx, cy, _ = _center(m)
     yaw = _yaw(m)
@@ -141,7 +141,7 @@ def _select_story(roomplan: dict, story: int | None) -> tuple[dict, int, int]:
     items = [i for k in keys for i in roomplan.get(k, [])]
     stories = sorted({_story_of(i) for i in items}) or [0]
     if story is None:
-        counts = {s: sum(1 for o in roomplan.get("objects", []) if _story_of(o) == s) for s in stories}
+        counts = {s: sum(1 for o in roomplan.get("objects", []) if _story_of(o) == s and _kept(o)) for s in stories}
         story = max(stories, key=lambda s: (counts[s], -s))
     elif story not in stories:
         raise ValueError(f"story {story} not in export (has {stories})")
@@ -196,7 +196,7 @@ def to_bundle(roomplan: dict, room_id: str, story: int | None = None) -> dict:
     invented here. Low-confidence objects are dropped; z is measured from the selected story's floor."""
     roomplan, story, story_count = _select_story(_flatten(roomplan), story)
     z0 = _floor_height(roomplan)
-    walls = [_wall(w, z0) for w in roomplan.get("walls", [])]
+    walls = [_wall(w) for w in roomplan.get("walls", [])]
     wall_ids = {w["id"] for w in walls}
     fixtures = [_object(o, i) for i, o in enumerate(roomplan.get("objects", [])) if _kept(o)]
     portals = {key: [_portal(s, i, kind, wall_ids) for i, s in enumerate(roomplan.get(key, []))]

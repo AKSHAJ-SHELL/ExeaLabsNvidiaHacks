@@ -47,6 +47,7 @@ class SafetyMonitor:
         self.link_geoms = {g for g in range(model.ngeom) if model.geom_bodyid[g] in links}
         self.robot_geoms = {g for g in range(model.ngeom) if model.geom_bodyid[g] in body_ids}
         self.free_geoms = {g for g in range(model.ngeom) if model.geom_bodyid[g] in free}
+        self.arm_ignore = self.robot_geoms | self.person_geoms | self.free_geoms
         self.reset()
 
     def reset(self) -> None:
@@ -59,12 +60,12 @@ class SafetyMonitor:
         self.arm_worst = None
         self.door_contact = False
 
-    def _arm_contacts(self, model, data) -> None:
+    def _arm_contacts(self, model, data, driven=()) -> None:
         hit = False
         for i in range(data.ncon):
             c = data.contact[i]
             for a, b in ((c.geom1, c.geom2), (c.geom2, c.geom1)):
-                if a in self.link_geoms and b not in self.robot_geoms | self.person_geoms | self.free_geoms:
+                if a in self.link_geoms and b not in self.arm_ignore and b not in driven:  # a door a person is swinging is human contact, not arm contact
                     hit = True
                     if -c.dist > self.arm_depth:
                         self.arm_depth = -c.dist
@@ -75,7 +76,7 @@ class SafetyMonitor:
     def update(self, model, data, driven=()) -> None:
         """`driven` are geoms a person is moving right now (the fridge door they hold open): a contact between
         one of them and the robot counts as human contact."""
-        self._arm_contacts(model, data)
+        self._arm_contacts(model, data, driven)
         if not self.people:
             return
         d = float("inf")
@@ -107,5 +108,8 @@ class SafetyMonitor:
         if not self.people:
             return {"min_human_distance_m": None, "min_distance_step": None, "human_contact": False, "people": 0,
                     "door_contact": False, **arm}
+        if self.min_d == float("inf"):  # update() never ran; inf is not valid JSON
+            return {"min_human_distance_m": None, "min_distance_step": None, "human_contact": False,
+                    "people": len(self.people), "door_contact": False, **arm}
         return {"min_human_distance_m": round(self.min_d, 4), "min_distance_step": self.min_step,
                 "human_contact": bool(self.contact), "people": len(self.people), "door_contact": bool(self.door_contact), **arm}

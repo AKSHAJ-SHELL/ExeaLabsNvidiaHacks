@@ -56,8 +56,9 @@ python -m arrival serve --host 0.0.0.0   # reachable from the iOS capture app on
 | `POST /jobs` | Multipart upload with file field `scan` (max 200 MB, larger gets 413). Writes `out/jobs/<id>/` and returns `202 {"status":"queued",...}`. Nothing is compiled or generated in the request; `python -m arrival work` drains the queue |
 | `GET /jobs/<id>` | The job's `status.json` |
 | `GET /jobs/<id>/download` | `out/jobs/<id>/dataset.zip` once the job is `done`, else 404 with the current status |
+| `GET /previews/<file>` | A png, mp4 or gif from `out/previews/` (what `sim --save-preview` writes), with `Range` support so browsers can seek video |
 
-The index page lists every job under `out/jobs/` with its status, stage, room id, episode count and a download link. The server binds `127.0.0.1` by default and has no authentication. `--host 0.0.0.0` opens it to the local network for the capture app (`ios/README.md`); do that only on a network you trust. Uploads are streamed to a temp file; a body shorter than `Content-Length`, a missing closing boundary, an empty file, or a part with no filename gets 400. If `out/datasets/<room>_sim` exists, the room page links it and shows its `arrival_generator`, `arrival_physically_valid`, episode count and families.
+The index page shows a card per room (stats and the latest preview), a drag-and-drop upload with a progress bar, and every job under `out/jobs/` with its status, stage bar, room id, episode count and a download link; running jobs refresh live. The server binds `127.0.0.1` by default and has no authentication. `--host 0.0.0.0` opens it to the local network for the capture app (`ios/README.md`); do that only on a network you trust. Uploads are streamed to a temp file and downloads are streamed too; a body shorter than `Content-Length`, a missing closing boundary, an empty file, or a part with no filename gets 400. If `out/datasets/<room>_sim` exists, the room page links it and shows its `arrival_generator`, `arrival_physically_valid`, episode count and families.
 
 From a RoomPlan export instead of the authored scan (`scans/<room>/roomplan.json`):
 
@@ -80,10 +81,9 @@ python scripts/render_rooms.py tests/fixtures/roomplan/amal.json
 
 - **Articulated kitchen** from the twin: counters with drawers (slide joints), cabinet and wall-cabinet doors (hinge joints), a sink with a faucet lever, a stove with a bottom-hinged oven door, and fridge, dishwasher and microwave doors. `arrival.sim.scene.part_names(twin)` lists every joint with its handle site and an open position. Objects collide with the moving parts, so a mug rests on a drawer tray or an open oven door.
 - **Arm**: a procedurally built 7-DoF Panda-like arm (not the Franka asset) driven through IK, so joint states in the dataset are the simulated joint positions, plus a parallel gripper that holds objects by friction contact.
-- **People**: kinematic bodies walking seeded loops through the room: a free point, a lane that crosses behind the robot base, a 2 to 4 s stop at the counter, back out. They move and occlude; they are not simulated humans and they do not collide. `arrival/sim/safety.py` measures the horizontal clearance between every robot collision geom and each person every control step; an episode whose minimum reaches 0 is a human contact and is dropped from the dataset even when the task succeeded. The value is written per episode as `arrival_min_human_distance_m` and `arrival_human_contact` in `meta/episodes.jsonl`.
 - **Lighting and materials**: a key spot with shadows, a cool fill and a warm window light, scaled by the task's `lighting` label and jittered (level within 15%, colour temperature, key position, window side) by the task seed, so every episode in a label looks a little different and the labels never overlap in brightness. Surfaces use MuJoCo builtin textures tinted by the geom colour (tile floor, wood fronts, stone tops, backsplash boards, matte walls), so the scene still loads from a string with no asset files.
 - **People**: kinematic proportioned bodies (seeded height and colours) with a leg and arm swing, walking seeded loops through the room: a free point, a lane that crosses behind the robot base, a 2 to 4 s stop at the counter, back out, every leg routed round the fixture footprints; the walk into a stop slows over its last 0.6 m so the swinging toe never reaches the counter. They move and occlude; they are not simulated humans and they do not collide. `arrival/sim/safety.py` measures the horizontal clearance between every robot collision geom and each person every control step; an episode whose minimum reaches 0 is a human contact and is dropped from the dataset even when the task succeeded. The value is written per episode as `arrival_min_human_distance_m` and `arrival_human_contact` in `meta/episodes.jsonl`.
-- **Cameras**: rendered with MuJoCo's offscreen renderer.
+- **Cameras**: ego and wrist views rendered with MuJoCo's offscreen renderer. `--res` (default 128) must be a multiple of 16; the writer rejects anything else before writing a file.
 - **Policies** behind one interface: a scripted expert (default), a VLM planner via Nebius Token Factory (`--planner vlm`; needs `TOKEN_FACTORY_API_KEY`, falls back to the rule parser without one, and caches responses in `arrival/models/nemotron_cache.json`), and a VLA client for a GR00T policy server (placeholder; no server is shipped or run here).
 - **Success is checked in physics** (object resting in the target region, drawer/door joint past threshold), not asserted by the script.
 
@@ -109,7 +109,7 @@ Status as of Oct 17 (scripted expert, friction grasps, physics-checked; 16/16 ov
 | `wipe_counter` | 100% | sponge pinched and dragged two strokes; success needs 0.4 m travelled pressed to the top and the sponge back on it |
 | `open_fridge` | 100% | 32/32 over two seeds, with and without people; the fingers close round the vertical bar and pull the door to 40°, then the closed fingertips push the inside face to 80° (threshold 60°). Not a default family |
 
-Defaults are `counter_to_sink,open_drawer`. `--families all` runs every family; `counter_to_counter` is skipped with a log line until there is a mobile base (MAN-3), and any failed attempt is dropped and counted. `--planner vlm` sends each instruction through the Nemotron planner (POL-1), `--instructions nemotron --split train|eval` draws generated wordings with a held-out set (POL-2). The VLA client has never run against a real GR00T server.
+Defaults are `counter_to_sink,open_drawer`. `--families all` runs every family; `counter_to_counter` is skipped with a log line until there is a mobile base (MAN-3), and any failed attempt is dropped and counted. `--families` accepts every name in `SIM_FAMILIES` (`arrival/sim/tasks.py`) even though its `--help` text lists only four. `--planner vlm` sends each instruction through the Nemotron planner (POL-1), `--instructions nemotron --split train|eval` draws generated wordings with a held-out set (POL-2). `--tavily` adds appliance research to the twin and the planner prompt (see [Tavily research](#tavily-research)). The VLA client has never run against a real GR00T server.
 
 ### Closed-loop eval
 
@@ -119,20 +119,32 @@ python -m arrival eval --holdout            # wording template 4 and the [0, +0.
 python -m arrival eval --policy vla         # needs GR00T_POLICY_URL; exits 2 with a message when unset or unreachable
 ```
 
-`eval` runs `--episodes` episodes per family through the same `SimEnv` and `run_episode` as `sim`, writes no dataset, prints a table, and writes `out/eval/<room>_<policy>.json` (shape in [04-contracts.md](04-contracts.md)). Per family: episodes, successes, success rate with a Wilson 95% interval, mean sim seconds (frames / 20), mean wall seconds, human contacts, the smallest robot-human distance seen, and the largest IK residual. A human contact counts as a failure. The eval is sim-in-the-twin only; nothing here scores a real robot.
+`eval` runs `--episodes` episodes per family through the same `SimEnv` and `run_episode` as `sim`, writes no dataset, prints a table, and writes `out/eval/<room>_<policy>.json` (shape in [04-contracts.md](04-contracts.md)). Per family: episodes, successes, success rate with a Wilson 95% interval, mean sim seconds (frames / 20), mean wall seconds, human contacts, the smallest robot-human distance seen, the largest IK residual, and arm-fixture contacts (`arm_contact_episodes`, `arm_contact_max_depth_m`). A human contact counts as a failure; an arm-fixture contact is counted, not scored. Every family ends through the same `finish_task` as `sim`, so the close and put families are covered, and an episode that raises is recorded as a failure instead of stopping the run. The eval is sim-in-the-twin only; nothing here scores a real robot.
 
 What this is not: MuJoCo frames are not a Gaussian splat of the room, episodes are not MimicGen output, and no policy was trained on them. Read `arrival_generator` and `arrival_physically_valid` in the sim dataset's `meta/info.json` before using it.
 
 ## Upload worker
 
-`python -m arrival work` runs in a second terminal next to `serve`. It polls `out/jobs/*/status.json` every `--poll` seconds (default 2), takes the oldest `queued` job, marks it `running`, and runs these stages, rewriting `status.json` at each one: `normalize` (the upload is a RoomPlan CapturedRoom export if it has `walls`/`objects` with `transform`, or a `scan.json` if it has `schema_version`; anything else fails here), `twin` (`compile_twin`), `objects` (`place_default_objects` when the scan has no objects, as RoomPlan exports never do; then `out/twins/<room>/`), `sim` (`arrival.sim.collect.collect`, same options as `sim`: `--episodes 8`, `--families counter_to_sink,open_drawer`, `--people 1`, `--res 128`, `--seed 0`), `validate`, and `zip` (`out/jobs/<id>/dataset.zip` holding `<room>_sim/`). The room id is the upload's filename stem in `[a-z0-9_]` plus the job id, so two uploads of `kitchen.json` never share a twin or dataset folder. A job with zero successful episodes or a failing validator ends `failed`. Failures are written to `status.json` (`error`) and `error.txt` (traceback); the worker then moves to the next job. `--once` processes at most one job and exits. Needs the `sim` extra; without MuJoCo every job fails at `sim`.
+`python -m arrival work` runs in a second terminal next to `serve`. It polls `out/jobs/*/status.json` every `--poll` seconds (default 2), takes the oldest `queued` job, marks it `running`, and runs these stages, rewriting `status.json` at each one: `normalize` (the upload is a RoomPlan CapturedRoom export if it has `walls`/`objects` with `transform`, or a `scan.json` if it has `schema_version`; anything else fails here), `twin` (`compile_twin`), `objects` (`place_default_objects` when the scan has no objects, as RoomPlan exports never do; then `out/twins/<room>/`), `sim` (`arrival.sim.collect.collect`, same options as `sim`: `--episodes 8`, `--families counter_to_sink,open_drawer`, `--people 1`, `--res 128`, `--seed 0`), `validate`, and `zip` (`out/jobs/<id>/dataset.zip` holding `<room>_sim/`). The room id is the upload's filename stem in `[a-z0-9_]` plus the job id, so two uploads of `kitchen.json` never share a twin or dataset folder. A job with zero successful episodes or a failing validator ends `failed`. Failures are written to `status.json` (`error`) and `error.txt` (traceback); the worker then moves to the next job. A job left `running` by a killed worker goes back to `queued` when the next worker starts (so do not start a second worker while one runs), and a job that raises mid-stage is recorded as `failed` with an `interrupted:` error. `status.json` is written atomically, so polls never see a torn file. `--once` processes at most one job and exits. Needs the `sim` extra; without MuJoCo every job fails at `sim`.
 
 ```bash
 python -m arrival work                   # until Ctrl+C
 python -m arrival work --once --episodes 2
 ```
 
-Measured on a laptop CPU: a `scan.json` upload with `--episodes 2` took 5.9 s end to end, 2/2 episodes, 322 frames, zip 77,624 bytes. One worker runs at a time; there is no lock against two workers claiming the same job, no retry, and nothing runs on Nebius (OPS-2).
+Measured on a laptop CPU: a `scan.json` upload with `--episodes 2` took 5.9 s end to end, 2/2 episodes, 322 frames, zip 77,624 bytes. One worker runs at a time; there is no lock against two workers claiming the same job, no automatic retry of failed jobs, and nothing runs on Nebius (OPS-2).
+
+## Tavily research
+
+`python -m arrival research` looks up appliance specs (door and handle mechanisms, clearances, safety guidance) and caches the answers in `arrival/models/tavily_cache.json`, so repeat runs need no network. With no `TAVILY_API_KEY`, or when the call fails, it serves the cache and then a small built-in knowledge table; the source of each answer (`tavily_api`, `cache` or `fallback`) is printed.
+
+```bash
+python -m arrival research --room hero_kitchen             # appliances in the room's twin -> out/research/hero_kitchen_research.json
+python -m arrival research --query "dishwasher door latch" # one direct query -> out/research/query_research.json
+python -m arrival sim --tavily --episodes 2                # attach the research to the twin and the VLM planner prompt
+```
+
+Only appliance fixtures present in the twin are looked up (the sink counts; counters and walls are skipped). The research shapes the planner prompt and tags tasks `tavily_enriched`; it does not change the physics.
 
 ## Output layout
 
@@ -153,6 +165,7 @@ out/
     videos/chunk-XXX/observation.images.ego_view/episode_XXXXXX.mp4
   datasets/hero_kitchen_sim/ MuJoCo sim dataset (same layout, ego_view + wrist videos)
   previews/                 sim contact sheets and overview mp4s (--save-preview)
+  research/                 `research` output (<room>_research.json, query_research.json)
   reports/hero_kitchen.json attempts, successes, dropped, seconds, demos/hour, dollars
   eval/hero_kitchen_scripted.json   closed-loop eval: per-family success, Wilson 95%, time, human contacts
   jobs/<job_id>/            upload.bin, status.json; after `work`: dataset.zip (done) or error.txt (failed)
@@ -163,19 +176,21 @@ The demo dataset's embodiment label is `robocasa_panda` (7 joints + 1 gripper, p
 
 ## Credentials
 
-The demo uses no credentials and makes no network calls. Later Nebius Token Factory wiring reads these environment variables, and only inside `arrival.models.token_factory`:
+The demo uses no credentials and makes no network calls, and neither do the tests. Token Factory (Nemotron planner and wordings) reads the variables below, and only inside `arrival.models.token_factory`; Tavily and the VLA client read their own:
 
 | Variable | Purpose |
 |---|---|
 | `TOKEN_FACTORY_API_KEY` | Bearer token |
 | `TOKEN_FACTORY_BASE_URL` | Defaults to `https://api.tokenfactory.nebius.com/v1`. Check it against the live docs |
 | `NEMOTRON_OMNI_MODEL`, `NEMOTRON_ULTRA_MODEL`, `NEMOTRON_SUPER_MODEL`, `NEMOTRON_LIGHTNING_MODEL` | Optional model ids |
+| `TAVILY_API_KEY`, `TAVILY_BASE_URL` | Optional, for `research` and `sim --tavily`; read only in `arrival.models.tavily`. Base URL defaults to `https://api.tavily.com/search` |
+| `GR00T_POLICY_URL` | Address of a GR00T policy server, for `--policy vla` |
 
-Export them in your shell, or put them in an untracked `.env` (gitignored) in the repo root or cwd: `arrival.models.token_factory` reads it itself, only when `TOKEN_FACTORY_API_KEY` is unset, and never overrides variables already set. No other module loads `.env`. Never commit keys. Account links and what to request are in [docs/08-access.md](08-access.md).
+Export them in your shell, or put them in an untracked `.env` (gitignored) in the repo root or cwd: `arrival.models.token_factory` and `arrival.models.tavily` each read it themselves (cwd first, then the repo root), only when their own key is unset, and never override variables already set. No other module loads `.env`. Never commit keys. Account links and what to request are in [docs/08-access.md](08-access.md).
 
 ## Cost
 
-None of the Nebius products below were called. The only measured number is the local generation run, which cost $0 on a laptop CPU. That says nothing yet about how generated data compares with teleoperation, because the comparison has not been measured.
+None of the Nebius products below were called. Token Factory calls from `--planner vlm` and `--instructions nemotron` are not metered here either. The only measured number is the local generation run, which cost $0 on a laptop CPU. That says nothing yet about how generated data compares with teleoperation, because the comparison has not been measured.
 
 | Step | Nebius product | Measured USD |
 |---|---|---|
@@ -213,7 +228,7 @@ The modality config is `configs/gr00t/arrival_panda_config.py` (arm trained as r
 
 Not built yet, and not claimed anywhere in the outputs:
 
-- iPhone capture app (LiDAR + RoomPlan). Uploads are processed only by a local `python -m arrival work` process.
+- Field-tested iPhone capture. The app exists (`ios/`, CAP-1) and uploads to `POST /jobs`, but no real kitchen scanned with it is checked in yet. Uploads are processed only by a local `python -m arrival work` process.
 - MimicGen generation (`arrival/generate/mimicgen.py` is a stub).
 - Gaussian splat training or compositing (`arrival/render/splat.py` is a stub).
 - Cosmos restyle of frames.

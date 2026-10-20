@@ -254,3 +254,39 @@ def test_generic_writer(tmp_path):
     m["state"]["base"]["end"] = 8
     (tmp_path / "ds" / "meta" / "modality.json").write_text(json.dumps(m))
     assert any("slices cover 8" in e for e in validate(tmp_path / "ds"))
+
+
+def _writer(tmp_path, **kw):
+    from arrival.export.lerobot import LeRobotWriter
+
+    return LeRobotWriter(tmp_path / "ds", "room", kw.pop("policy", "none"), state_dim=2, action_dim=2, **kw)
+
+
+def test_writer_rejects_nan_and_leaves_no_orphan(tmp_path):
+    import numpy as np
+
+    with _writer(tmp_path) as w:
+        good = np.zeros((3, 2))
+        bad = good.copy()
+        bad[1, 1] = np.nan
+        for s, a, t in ((bad, good, [0, .05, .1]), (good, bad, [0, .05, .1]), (good, good, [0, np.inf, .1])):
+            with pytest.raises(ValueError, match="NaN or inf"):
+                w.add_episode(s, a, t, "x", True)
+        assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
+        w.add_episode(good, good, [0, .05, .1], "x", True)
+        w.finish(1)
+    json.loads((tmp_path / "ds" / "meta" / "stats.json").read_text(), parse_constant=lambda c: pytest.fail(c))
+
+
+def test_writer_checks_videos_before_writing_and_closes_sidecar(tmp_path):
+    import numpy as np
+
+    w = _writer(tmp_path, policy="all")
+    z = np.zeros((2, 2))
+    with pytest.raises(ValueError, match="needs frames"):
+        w.add_episode(z, z, [0, .05], "x", True)
+    with pytest.raises(ValueError, match="multiples of 16"):
+        w.add_episode(z, z, [0, .05], "x", True, videos={"ego_view": np.zeros((2, 40, 40, 3), np.uint8)})
+    assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
+    w.close()
+    assert w._sidecar.closed

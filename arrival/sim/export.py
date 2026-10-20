@@ -10,16 +10,12 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from arrival.export.lerobot import MODALITY, SCHEMA, write_video
-
-
-def _stats(x: np.ndarray) -> dict:
-    return {"min": x.min(0).tolist(), "max": x.max(0).tolist(), "mean": x.mean(0).tolist(),
-            "std": x.std(0).tolist(), "count": [len(x)]}
+from arrival.export.lerobot import MODALITY, SCHEMA, _merge_stats, _stats, check_video_size, video_info, write_video
 
 
 class SimDatasetWriter:
     def __init__(self, root: str | Path, room_id: str, fps: int, res: int, cameras: tuple[str, ...]):
+        check_video_size(res, res)  # before the rmtree below: a bad res must not wipe an existing dataset
         self.root, self.room_id, self.fps, self.res, self.cameras = Path(root), room_id, fps, res, cameras
         if self.root.exists():
             shutil.rmtree(self.root)
@@ -56,7 +52,11 @@ class SimDatasetWriter:
                               "arrival_min_human_distance_m": ep["safety"]["min_human_distance_m"],
                               "arrival_human_contact": ep["safety"]["human_contact"],
                               "arrival_people_xy": ep["people_xy"][:: max(1, n // 20)]})
-        self.stats.append({"episode_index": i, "stats": {"observation.state": _stats(s), "action": _stats(a)}})
+        cols = {"observation.state": s, "action": a, "timestamp": np.arange(n, dtype=np.float32) / self.fps,
+                "annotation.human.task_description": np.full(n, ti), "task_index": np.full(n, ti),
+                "episode_index": np.full(n, i), "index": np.arange(self.total_frames, self.total_frames + n),
+                "next.reward": reward, "next.done": done.astype(np.float64)}
+        self.stats.append({"episode_index": i, "stats": {k: _stats(v) for k, v in cols.items()}})
         self.total_frames += n
         return i
 
@@ -69,6 +69,9 @@ class SimDatasetWriter:
             with open(meta / name, "w") as f:
                 for r in rows:
                     f.write(json.dumps(r) + "\n")
+        if self.stats:
+            (meta / "stats.json").write_text(json.dumps(
+                {k: _merge_stats([r["stats"][k] for r in self.stats]) for k in self.stats[0]["stats"]}, indent=2))
         modality = json.loads(json.dumps(MODALITY))
         modality["video"] = {c: {"original_key": f"observation.images.{c}"} for c in self.cameras}
         (meta / "modality.json").write_text(json.dumps(modality, indent=2))
@@ -82,7 +85,7 @@ class SimDatasetWriter:
         n = len(self.episodes)
         vid = {f"observation.images.{c}": {"dtype": "video", "shape": [self.res, self.res, 3],
                                             "names": ["height", "width", "channel"],
-                                            "video_info": {"video.fps": self.fps, "video.codec": "h264"}}
+                                            "info": video_info(self.res, self.res, 3, self.fps)}
                for c in self.cameras}
         info = {
             "codebase_version": "v2.1", "robot_type": "arrival_sim_panda", "fps": self.fps,

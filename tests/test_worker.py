@@ -165,3 +165,42 @@ def test_status_is_never_read_half_written(tmp_path):
     assert writes[0] > 0
     assert reads > 100
     assert [p.name for p in (tmp_path / status["id"]).iterdir() if p.name.endswith(".tmp")] == []
+
+
+def test_load_upload_accepts_captured_structure_and_null_lists(tmp_path):
+    import json
+
+    flat = json.loads((REPO / "scans" / "hero_kitchen" / "roomplan.json").read_text())
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps({"rooms": [flat]}))
+    assert load_upload(p, "st_job_00000000")["geometry_source"] == "roomplan"
+    p.write_text(json.dumps({"walls": None, "objects": None}))
+    with pytest.raises(ValueError):
+        load_upload(p, "x")
+
+
+def test_interrupted_job_is_not_left_running(tmp_path, monkeypatch):
+    from arrival.jobs import worker
+
+    out = tmp_path / "out"
+    job = create_job(out / "jobs", "x.json", data=b"{}")
+
+    def boom(*_a, **_k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(worker, "load_upload", boom)
+    with pytest.raises(KeyboardInterrupt):
+        run_once(out, log=QUIET)
+    st = json.loads((out / "jobs" / job["id"] / "status.json").read_text())
+    assert st["status"] == "failed" and st["error"].startswith("interrupted") and st["finished_at"]
+
+
+def test_work_requeues_jobs_left_running(tmp_path):
+    from arrival.jobs.queue import write_status
+
+    out = tmp_path / "out"
+    job = create_job(out / "jobs", "broken.json", data=b"not json")
+    write_status(out / "jobs" / job["id"], {**job, "status": "running", "stage": "sim"})
+    assert work(out, once=True, log=QUIET) == 1  # reclaimed, then failed on the corrupt upload
+    st = json.loads((out / "jobs" / job["id"] / "status.json").read_text())
+    assert st["status"] == "failed"

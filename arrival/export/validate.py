@@ -11,7 +11,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-META = ("info.json", "tasks.jsonl", "episodes.jsonl", "episodes_stats.jsonl", "modality.json", "embodiment.json")
+META = ("info.json", "tasks.jsonl", "episodes.jsonl", "episodes_stats.jsonl", "stats.json", "modality.json", "embodiment.json")
 DTYPES = {
     "observation.state": pa.list_(pa.float32()), "action": pa.list_(pa.float32()), "timestamp": pa.float32(),
     "annotation.human.task_description": pa.int64(), "task_index": pa.int64(), "episode_index": pa.int64(),
@@ -47,13 +47,12 @@ def _check_video(path: Path, frames: int, shape: list[int]) -> str | None:
     import imageio.v2 as imageio
 
     try:
-        r = imageio.get_reader(str(path))
-        n = 0
-        for f in r:
-            if n == 0 and list(f.shape) != list(shape):
-                return f"{path.name}: frame shape {list(f.shape)} != {shape}"
-            n += 1
-        r.close()
+        with imageio.get_reader(str(path)) as r:  # closed on every path: an open ffmpeg blocks deletes on Windows
+            n = 0
+            for f in r:
+                if n == 0 and list(f.shape) != list(shape):
+                    return f"{path.name}: frame shape {list(f.shape)} != {shape}"
+                n += 1
     except Exception as e:  # noqa: BLE001 - any decode failure is a dataset error
         return f"{path.name}: cannot decode ({e})"
     return None if n == frames else f"{path.name}: {n} frames, episodes.jsonl length {frames}"

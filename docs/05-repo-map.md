@@ -57,7 +57,9 @@ python -m arrival validate <dataset_dir>
 python -m arrival serve [--port 8000]
 ```
 
-Defaults: `--episodes 4`, `--videos all` when episodes ≤ 16, otherwise the command errors and tells the user to pass `--videos sparse` or `--videos all`. That stops an accidental giant encode. The done command passes `--videos sparse` for 1,000.
+This is the original MVP surface. The CLI has since gained `sim`, `eval`, `work` and `research`, and `serve --host`; their flags are in [REFERENCE.md](REFERENCE.md).
+
+Defaults: `--episodes 4`, `--videos all` (one mp4 per episode, which GR00T's loader needs). `--videos sparse` or `none` skips the per-episode videos. The 1,000-episode command in REFERENCE.md uses the default.
 
 Exit codes: 0 success, 1 validation failure, 2 usage error.
 

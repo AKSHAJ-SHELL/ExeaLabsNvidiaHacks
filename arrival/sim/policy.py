@@ -8,6 +8,7 @@ VLAClient       HTTP client for a GR00T N1.x policy server (GR00T_POLICY_URL); n
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -32,6 +33,8 @@ FRIDGE_HOOK_ALONG = 0.015  # eef past the bar axis toward the free edge, so the 
 FRIDGE_HOOK_OUT = 0.035  # eef out from the bar axis, so the open inner pad clears the panel on the way in
 FRIDGE_HOOK = np.radians(40)  # door angle the hooked pull covers: the arm follows the bar exactly up to here
 FRIDGE_TURN = 0.3  # share of the door's turn the hand follows while hooked; more folds the elbow onto its stop
+DOOR_TURN = 0.0  # share of the door's turn the hand follows while pulling: the bar is vertical, so the pads can
+# stay put and it turns between them; following it all the way spends joint 7's range on the swing and pins it at its stop
 FRIDGE_FLIP = np.diag([-1.0, -1.0, 1.0])  # half a turn about the approach axis
 FRIDGE_CLEAR = 0.04  # closed fingers slide this far out along the panel, off the bar's free side
 FRIDGE_FAR = 0.90  # metres from the hinge where the hand rounds the free edge (the edge is at 0.745)
@@ -172,9 +175,10 @@ class ScriptedExpert(Policy):
             r = np.linalg.norm((h - hinge)[:2])
             a0 = np.arctan2(*(h - hinge)[[1, 0]])
             s, up = self.seg_steps, np.array([0, 0, 1.0])
-            # Hold the bar at its top: a higher wrist reaches further along the arc, and with the tilt it keeps the
-            # elbow (link4) above the swinging panel, which is solid to its full drawn height (MAN-2).
-            grasp = np.array([0, 0, 0.07])
+            # Hold the bar near its top (the grasp fails from 0.115 up): a higher wrist reaches further along the arc,
+            # and with the tilt it keeps the elbow (link4) above the swinging panel, which is solid to its full drawn
+            # height (MAN-2).
+            grasp = np.array([0, 0, 0.09])
 
             def pt(a):
                 return hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]]) + grasp
@@ -187,7 +191,7 @@ class ScriptedExpert(Policy):
                 along = -along  # equivalent parallel-jaw grasp that does not spin the wrist half a turn
 
             def ori(a):
-                rot = a - a0
+                rot = DOOR_TURN * (a - a0)
                 ax = np.array([np.cos(rot) * along[0] - np.sin(rot) * along[1],
                                np.sin(rot) * along[0] + np.cos(rot) * along[1]])
                 return ik.tilted(nrm(a)[:2], ax, np.radians(15))
@@ -258,8 +262,8 @@ class ScriptedExpert(Policy):
         flip = np.diag([-1.0, -1.0, 1.0])
         plans = [self._plan(env, wps)]
         if task["family"] not in ("open_door", "close_door"):
-            # the cabinet-door grasp is tuned for its own heading against the solid panel (#47); flipped, the arm
-            # meets the panel and the door stops at 26 to 36 deg
+            # flipped, the cabinet-door grasp lands on the other wrist branch (joint 5 negative): link5 or the elbow
+            # then meets the solid panel (#47) and the bar slips out of the pads at 26 to 36 deg
             plans.append(self._plan(env, [(p, R @ flip, *rest) for p, R, *rest in wps]))
         best_err = min(err for _, err, _ in plans)
         self.plan, self.ik_error, _ = min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])
@@ -305,10 +309,19 @@ def rule_plan(instruction: str, objects: list[str], fixtures: list[str]) -> dict
     """Deterministic parser: family + object + target from keywords."""
     s = instruction.lower()
     obj = next((o for o in objects if o.split("_")[0] in s), None)
+    closing = any(w in s for w in ("close", "shut", "push"))
+    if "fridge" in s:
+        return {"family": "open_fridge", "object": None, "target": None}
+    if "wipe" in s or "scrub" in s or "clean" in s:
+        return {"family": "wipe_counter", "object": obj, "target": None}
     if "drawer" in s:
+        if closing:
+            return {"family": "close_drawer", "object": None, "target": None}
+        if obj and any(w in s for w in ("put", "place", "move")):
+            return {"family": "put_in_drawer", "object": obj, "target": None}
         return {"family": "open_drawer", "object": None, "target": None}
     if "door" in s:
-        return {"family": "open_door", "object": None, "target": None}
+        return {"family": "close_door" if closing else "open_door", "object": None, "target": None}
     if "sink" in s:
         return {"family": "counter_to_sink", "object": obj, "target": next((f for f in fixtures if "sink" in f), None)}
     return {"family": "counter_to_counter", "object": obj, "target": None}
@@ -323,12 +336,13 @@ class VLMPlanner:
         self.source = None
         self.cache_path = Path(cache_path) if cache_path else Path(__file__).resolve().parents[1] / "models" / "nemotron_cache.json"
         self._cache = self._load_cache()
+        self._offline = False  # set by the first network failure so later tasks skip the 60 s timeout
 
     def _cache_key(self, instruction: str, objects: list[str], fixtures: list[str],
                    research_context: str | None = None) -> str:
         base = f"{instruction.strip().lower()}::{sorted(objects)}::{sorted(fixtures)}"
         if research_context:
-            return f"{base}::tavily={hash(research_context)}"
+            return f"{base}::tavily={hashlib.sha1(research_context.encode()).hexdigest()[:12]}"  # hash() is salted per process
         return base
 
     def _load_cache(self) -> dict:
@@ -349,6 +363,20 @@ class VLMPlanner:
         except Exception as e:
             self.log(f"[sim] VLMPlanner: warning, could not write cache to {self.cache_path}: {e}")
 
+    @staticmethod
+    def _parse_plan(txt: str, objects: list[str], fixtures: list[str]) -> dict:
+        """First JSON object in the reply, checked against the known families, objects and fixtures."""
+        from arrival.sim.tasks import SIM_FAMILIES
+
+        plan, _ = json.JSONDecoder().raw_decode(txt[txt.index("{"):])
+        if not isinstance(plan, dict) or plan.get("family") not in SIM_FAMILIES:
+            raise ValueError(f"plan has no known family: {plan!r}")
+        if plan.get("object") is not None and plan["object"] not in objects:
+            raise ValueError(f"plan object {plan['object']!r} is not in the scene")
+        if plan.get("target") is not None and plan["target"] not in fixtures:
+            raise ValueError(f"plan target {plan['target']!r} is not in the scene")
+        return {"family": plan["family"], "object": plan.get("object"), "target": plan.get("target")}
+
     def plan(self, instruction: str, objects: list[str], fixtures: list[str],
              research_context: str | None = None) -> dict:
         from arrival.models.token_factory import TokenFactoryNotConfigured, complete
@@ -357,15 +385,18 @@ class VLMPlanner:
         if key in self._cache:
             self.source = "cache"
             return dict(self._cache[key])
+        if self._offline:
+            self.source = "rule_based"
+            return rule_plan(instruction, objects, fixtures)
 
         try:
             user_payload = {"instruction": instruction, "objects": objects, "fixtures": fixtures}
             if research_context:
                 user_payload["research_context"] = research_context
             txt = complete([{"role": "system", "content": "Return only JSON: {\"family\": one of counter_to_sink|"
-                             "counter_to_counter|open_drawer|open_door, \"object\": id|null, \"target\": id|null}"},
+                             "counter_to_counter|open_drawer|open_door|close_drawer|close_door|put_in_drawer|wipe_counter|open_fridge, \"object\": id|null, \"target\": id|null}"},
                             {"role": "user", "content": json.dumps(user_payload)}], role="super")
-            plan = json.loads(re.search(r"\{.*\}", txt, re.S).group(0))
+            plan = self._parse_plan(txt, objects, fixtures)
             self.source = "token_factory"
             self._cache[key] = plan
             self._save_cache()
@@ -373,6 +404,9 @@ class VLMPlanner:
             self.log(f"[sim] VLMPlanner: Token Factory not configured ({e}); using rule-based parser")
             plan, self.source = rule_plan(instruction, objects, fixtures), "rule_based"
         except Exception as e:  # network / parse errors also fall back, loudly
+            if isinstance(e, OSError):  # URLError and timeouts: the endpoint is down, do not retry it per task
+                self._offline = True
+                self.log("[sim] VLMPlanner: endpoint unreachable; rule-based parser for the rest of this run")
             self.log(f"[sim] VLMPlanner: model call failed ({e!r}); using rule-based parser")
             plan, self.source = rule_plan(instruction, objects, fixtures), "rule_based"
         return plan

@@ -39,7 +39,11 @@ def load_upload(path: Path, room_id: str) -> dict:
         bundle = scan_bundle.validate(data)
         bundle["room_id"] = room_id
         return bundle
-    if any(isinstance(x, dict) and "transform" in x for k in ("walls", "objects") for x in data.get(k, [])):
+    def posed(d: dict) -> bool:
+        return any(isinstance(x, dict) and "transform" in x for k in ("walls", "objects") for x in (d.get(k) or []))
+
+    rooms = data.get("rooms")  # a CapturedStructure export nests the room dicts
+    if posed(data) or (isinstance(rooms, list) and any(isinstance(r, dict) and posed(r) for r in rooms)):
         return roomplan.to_bundle(data, room_id)
     raise ValueError("upload is neither a RoomPlan export (walls/objects with transform) nor a scan.json (schema_version)")
 
@@ -75,6 +79,23 @@ def claim_next(jobs_root: Path) -> tuple[Path, dict] | None:
                "error": None, "room_id": None, "twin_dir": None, "dataset_dir": None, "zip": None,
                "attempts": None, "successes": None})
     return job_dir, _write_status(job_dir, st)
+
+
+def requeue_running(jobs_root: Path, log=print) -> int:
+    """Put jobs left ``running`` by a killed worker back in the queue. Call only when no other worker is running."""
+    jobs_root = Path(jobs_root)
+    n = 0
+    for d in sorted(jobs_root.iterdir()) if jobs_root.is_dir() else []:
+        try:
+            st = json.loads((d / "status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(st, dict) and st.get("status") == "running" and "id" in st:
+            st.update({"status": "queued", "stage": None, "started_at": None})
+            _write_status(d, st)
+            log(f"[work] {st['id']}: was running with no worker, requeued")
+            n += 1
+    return n
 
 
 def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, families=DEFAULT_FAMILIES,
@@ -122,8 +143,13 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
                 if p.is_file():
                     zf.write(p, Path(ds.name) / p.relative_to(ds))
         status.update({"zip": str(zip_path), "status": "done"})
-    except Exception as e:  # noqa: BLE001 - any stage failure is the job's failure, not the worker's
-        status.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})
+    except BaseException as e:  # noqa: BLE001 - any stage failure is the job's failure, not the worker's
+        status.update({"status": "failed", "error": f"{type(e).__name__}: {e}" if str(e) else type(e).__name__})
+        if not isinstance(e, Exception):  # Ctrl-C or SystemExit: record it so the job is not left running, then stop
+            status["error"] = f"interrupted: {status['error']}"
+            status["finished_at"] = int(time.time())
+            _write_status(job_dir, status)
+            raise
         (job_dir / "error.txt").write_text(traceback.format_exc(), encoding="utf-8")
         log(f"[work] {status['id']}: failed at {status.get('stage')}: {status['error']}")
     status["finished_at"] = int(time.time())
@@ -145,6 +171,7 @@ def run_once(out_dir: Path, **kw) -> dict | None:
 def work(out_dir: Path, once: bool = False, poll: float = 2.0, log=print, **kw) -> int:
     """Poll until Ctrl-C (or one job with ``once``). Returns the number of jobs processed."""
     n = 0
+    requeue_running(Path(out_dir) / "jobs", log=log)
     try:
         while True:
             st = run_once(out_dir, log=log, **kw)
