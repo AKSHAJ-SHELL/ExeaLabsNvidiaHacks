@@ -12,3 +12,4 @@ DerivedData/
 ios/build/
 *.xcuserstate
 .DS_Store
+MUJOCO_LOG.TXT
