@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    env:
+      MUJOCO_GL: egl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: System libraries for headless MuJoCo rendering
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libosmesa6
+      - name: Install
+        run: python -m pip install -e ".[dev,sim]"
+      - name: Pick a GL backend (egl, else osmesa)
+        run: |
+          if python -c "import mujoco; mujoco.Renderer(mujoco.MjModel.from_xml_string('<mujoco/>'), 16, 16)" 2>/dev/null; then
+            echo "MUJOCO_GL=egl" >> "$GITHUB_ENV"
+          else
+            echo "MUJOCO_GL=osmesa" >> "$GITHUB_ENV"
+            echo "PYOPENGL_PLATFORM=osmesa" >> "$GITHUB_ENV"
+          fi
+      - name: Tests
+        run: python -m pytest -q -p no:cacheprovider
+      - name: Demo dataset
+        run: python -m arrival demo --episodes 2
+      - name: Validate
+        run: python -m arrival validate out/datasets/hero_kitchen
