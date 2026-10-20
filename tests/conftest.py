@@ -1,3 +1,4 @@
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -10,19 +11,24 @@ def pytest_addoption(parser):
     parser.addoption("--no-render", action="store_true", help="skip tests when they need a MuJoCo renderer")
 
 
-@pytest.fixture(autouse=True)
-def render_requirement(request, monkeypatch):
-    if not request.config.getoption("--no-render"):
+def pytest_configure(config):
+    if not config.getoption("--no-render") or importlib.util.find_spec("mujoco") is None:
         return
-    if request.node.get_closest_marker("render"):
+
+    def requires_gl(*args, **kwargs):
         pytest.skip("requires OpenGL; covered by the rendering job")
-    import importlib.util
 
-    if importlib.util.find_spec("mujoco") is not None:
-        def requires_gl(*args, **kwargs):
-            pytest.skip("requires OpenGL; covered by the rendering job")
+    patch = pytest.MonkeyPatch()
+    config.add_cleanup(patch.undo)
+    patch.setattr("mujoco.Renderer", requires_gl)
 
-        monkeypatch.setattr("mujoco.Renderer", requires_gl)
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--no-render"):
+        skip = pytest.mark.skip(reason="requires OpenGL; covered by the rendering job")
+        for item in items:
+            if item.get_closest_marker("render"):
+                item.add_marker(skip)
 
 
 @pytest.fixture
