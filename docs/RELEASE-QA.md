@@ -10,7 +10,7 @@ Run this before each demo, from a fresh clone, and record the result at the bott
 4. `python -m arrival validate out/datasets/hero_kitchen_sim`: `OK:` line, exit 0.
 5. `python -m arrival sim --families all --episodes 16 --people 2 --seed 1`: every family in `SIM_FAMILIES` passes except the ones the README lists as skipped or open; compare with the status table.
 6. `python -m arrival demo --episodes 4` and `validate out/datasets/hero_kitchen`: the placeholder path still works and still says `arrival_physically_valid: false`.
-7. `python -m arrival eval --episodes 2 --people 2`: table printed, `out/eval/hero_kitchen_scripted.json` written.
+7. `python -m arrival eval --episodes 2 --people 2`: table printed, `out/eval/<run_id>/report.json`, `manifest.json` and `episodes.jsonl` written.
 8. `python -m arrival serve` then `python -m arrival work --once --episodes 2` in another terminal with an upload: job goes `queued` to `done` with a `dataset.zip`.
 9. README: the status table, every task bullet's Done/Left text, the folder table and the command comments match what the code does today. REFERENCE: every command and flag exists (`python -m arrival <cmd> --help`). 04-contracts: field names match the files the writers produce.
 10. `git status` is clean after all of it (`out/` is ignored).

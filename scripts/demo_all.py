@@ -133,6 +133,8 @@ def run(room: str, mode: str, out: Path, scans: str = "scans", log=print) -> tup
 
             r = evaluate(twin, FAMILIES, EVAL_EPISODES, "scripted", people=size["people"], res=size["res"],
                          out_dir=out, log=quiet)
+            s["artifacts"].update(eval_report=str(r["path"]), eval_manifest=r["manifest_path"],
+                                  eval_episodes=r["episodes_path"])
             s["per_family"] = {k: {"successes": v["successes"], "episodes": v["episodes"]}
                                for k, v in r["families"].items()}
             if not s["per_family"]:

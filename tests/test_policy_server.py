@@ -144,7 +144,7 @@ def twin():
 def test_eval_vla_against_hold_mock(twin, monkeypatch, tmp_path):
     with MockPolicyServer() as srv:
         monkeypatch.setenv("GR00T_POLICY_URL", srv.url)
-        rep = evaluate(twin, ["open_drawer"], 1, policy_name="vla", people=0, res=64, out_dir=tmp_path,
+        rep = evaluate(twin, ["open_drawer"], 1, policy_name="vla", checkpoint_id="test-mock", people=0, res=64, out_dir=tmp_path,
                        log=lambda *_: None)
         assert srv.requests > 0
     assert rep["totals"]["errors"] == 0 and rep["totals"]["episodes"] == 1
@@ -154,12 +154,12 @@ def test_eval_vla_dead_server_takes_existing_failure_path(twin, monkeypatch, tmp
     with MockPolicyServer(mode="fail_after_n", fail_after=2) as srv:
         monkeypatch.setenv("GR00T_POLICY_URL", srv.url)
         with pytest.raises(OSError):  # nothing finished before the server died: the CLI turns this into exit 2
-            evaluate(twin, ["open_drawer"], 1, policy_name="vla", people=0, res=64, out_dir=tmp_path,
+            evaluate(twin, ["open_drawer"], 1, policy_name="vla", checkpoint_id="test-mock", people=0, res=64, out_dir=tmp_path,
                      log=lambda *_: None)
 
 
 def test_cli_eval_vla_unset_exits_2(monkeypatch):
     from arrival.cli import main
     monkeypatch.delenv("GR00T_POLICY_URL", raising=False)
-    assert main(["eval", "--policy", "vla", "--episodes", "1", "--families", "open_drawer", "--people", "0",
+    assert main(["eval", "--policy", "vla", "--checkpoint-id", "test-mock", "--episodes", "1", "--families", "open_drawer", "--people", "0",
                  "--res", "64"]) == 2

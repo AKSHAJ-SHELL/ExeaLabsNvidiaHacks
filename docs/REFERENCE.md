@@ -138,10 +138,10 @@ Defaults are `counter_to_sink,open_drawer`. `--families all` runs every family; 
 ```bash
 python -m arrival eval --policy scripted --families counter_to_sink,open_drawer --episodes 4 --people 2
 python -m arrival eval --holdout            # wording template 4 and the [0, +0.08] start offset (docs/07-eval.md)
-python -m arrival eval --policy vla         # needs GR00T_POLICY_URL; exits 2 with a message when unset or unreachable
+python -m arrival eval --policy vla --checkpoint-id base-gr00t  # needs GR00T_POLICY_URL; exits 2 with a message when unset or unreachable
 ```
 
-`eval` runs `--episodes` episodes per family through the same `SimEnv` and `run_episode` as `sim`, writes no dataset, prints a table, and writes `out/eval/<room>_<policy>.json` (shape in [04-contracts.md](04-contracts.md)). Per family: episodes, successes, success rate with a Wilson 95% interval, mean sim seconds (frames / 20), mean wall seconds, human contacts, the smallest robot-human distance seen, the largest IK residual, and arm-fixture contacts (`arm_contact_episodes`, `arm_contact_max_depth_m`). A human contact counts as a failure; an arm-fixture contact is counted, not scored. Every family ends through the same `finish_task` as `sim`, so the close and put families are covered, and an episode that raises is recorded as a failure instead of stopping the run. The eval is sim-in-the-twin only; nothing here scores a real robot.
+`eval` runs `--episodes` episodes per family through the same `SimEnv` and `run_episode` as `sim`, writes no dataset, prints a table, and writes `out/eval/<run_id>/report.json` (shape in [04-contracts.md](04-contracts.md)). Per family: episodes, successes, success rate with a Wilson 95% interval, mean sim seconds (frames / 20), mean wall seconds, human contacts, the smallest robot-human distance seen, the largest IK residual, and arm-fixture contacts (`arm_contact_episodes`, `arm_contact_max_depth_m`). A human contact counts as a failure; an arm-fixture contact is counted, not scored. Every family ends through the same `finish_task` as `sim`, so the close and put families are covered, and an episode that raises is recorded as a failure instead of stopping the run. The eval is sim-in-the-twin only; nothing here scores a real robot.
 
 `python -m arrival.generate.retarget` records one scripted-expert seed and replays it for new object start poses (`--attempts`, `--family counter_to_sink|counter_to_counter`, `--res`, `--seed`, `--baseline` to time the scripted expert on the same count). Successes (physics oracle) are written to `out/datasets/<room>_seed_replay/` with `arrival_generator = "seed_replay_retarget"` and a seed reference; unreachable or failed replays are dropped. Details in [ref/DAT-4a.md](ref/DAT-4a.md).
 
@@ -191,7 +191,9 @@ out/
   previews/                 sim contact sheets and overview mp4s (--save-preview)
   research/                 `research` output (<room>_research.json, query_research.json)
   reports/hero_kitchen.json attempts, successes, dropped, seconds, demos/hour, dollars
-  eval/hero_kitchen_scripted.json   closed-loop eval: per-family success, Wilson 95%, time, human contacts
+  eval/<run_id>/report.json        closed-loop eval summary and checkpoint identity
+  eval/<run_id>/manifest.json      frozen twin, settings and ordered trials
+  eval/<run_id>/episodes.jsonl     per-attempt outcomes, safety and errors
   jobs/<job_id>/            upload.bin, status.json; after `work`: dataset.zip (done) or error.txt (failed)
   twins/<stem>_<job_id>/, datasets/<stem>_<job_id>_sim/   what `work` compiled and simulated for an upload
 ```
