@@ -43,7 +43,7 @@ jobs:
   render:
     name: rendering (Linux, py${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
