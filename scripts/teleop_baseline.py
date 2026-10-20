@@ -1,7 +1,6 @@
 """Timed keyboard teleop in the twin, for the generated-vs-teleop cost comparison (L20, OPS-3).
 
-    mjpython scripts/teleop_baseline.py --operator-usd-per-hour 40 --successes 20    # macOS (the viewer needs mjpython)
-    python scripts/teleop_baseline.py --operator-usd-per-hour 40 --successes 20      # Linux, Windows
+    python scripts/teleop_baseline.py --operator-usd-per-hour 40 --successes 20    # plain python, also on macOS
 
 Writes out/teleop_baseline.json (read by `python -m arrival.eval.cost`), out/reports/<room>_teleop_attempts.jsonl,
 and with --record out/datasets/<room>_teleop. Logic and key map: arrival/sim/teleop.py.

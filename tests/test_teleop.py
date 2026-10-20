@@ -116,3 +116,25 @@ def test_failed_and_abandoned_attempts_count_time_but_write_no_baseline(twin, tm
     assert not (tmp_path / "teleop_baseline.json").exists()
     rows = [json.loads(ln) for ln in (tmp_path / "reports" / "hero_kitchen_teleop_attempts.jsonl").read_text().splitlines()]
     assert [r["ended_by"] for r in rows] == ["judge", "give_up"] and not any(r["success"] for r in rows)
+
+
+def test_window_turns_typed_keys_into_frames(twin):
+    """The teleop window, not the MuJoCo viewer, receives the keys (the viewer would eat w/s/r as render toggles)."""
+    try:
+        win = teleop.TeleopWindow(visible=False)
+    except Exception as e:  # no display (CI)
+        pytest.skip(f"no window: {e}")
+    try:
+        task = finish_task(make_tasks(twin, ["counter_to_sink"], 1, seed=0, people=0, log=QUIET)[0])
+        with SimEnv(twin, task, res=64) as env:
+            win.attach(env)
+            frames = iter(win)
+            assert next(frames) == []
+            for ch in "wA ":
+                win._char(ch)
+            win._on_key(win.win, win.glfw.KEY_ENTER, 0, win.glfw.PRESS, 0)
+            win._on_key(win.win, win.glfw.KEY_ESCAPE, 0, win.glfw.RELEASE, 0)  # releases are not keys
+            assert next(frames) == ["w", "A", " ", "\r"]
+            win.sync()
+    finally:
+        win.shutdown()

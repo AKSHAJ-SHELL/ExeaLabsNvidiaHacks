@@ -1,10 +1,11 @@
 """Keyboard teleoperation in the twin, timed, for the generated-vs-teleop baseline (L20, OPS-3 #67).
 
-The operator types in the terminal while the MuJoCo viewer shows the scene. Keys move an end-effector target in
-the robot's own frame (forward = toward the counter the base faces), turn the gripper about the vertical and open
-or close it; every control step (20 Hz) the target goes through the same IK as the scripted expert and the joint
-targets drive the same `SimEnv`. Enter ends an attempt: the arm holds still for one second and then the same
-physics oracle as `sim` decides success. A human contact fails the attempt, as it does for generated data.
+The operator types into a window that shows the scene (`TeleopWindow`; `--no-viewer` reads the terminal instead).
+Keys move an end-effector target in the robot's own frame (forward = toward the counter the base faces), turn the
+gripper about the vertical and open or close it; every control step (20 Hz) the target goes through the same IK as
+the scripted expert and the joint targets drive the same `SimEnv`. Enter ends an attempt: the arm holds still for
+one second and then the same physics oracle as `sim` decides success. A human contact fails the attempt, as it does
+for generated data.
 
 Each attempt's operator time runs from the moment its scene is ready to the moment it is judged, so thinking,
 mistakes and failed attempts all count. The run writes `teleop_baseline.json` in the shape
@@ -34,7 +35,10 @@ GENERATOR = "teleop_keyboard"
 
 # key -> (forward, left, up) in the robot frame
 MOVES = {"w": (1, 0, 0), "s": (-1, 0, 0), "a": (0, 1, 0), "d": (0, -1, 0), "r": (0, 0, 1), "f": (0, 0, -1)}
-HELP = """keys (type in this terminal, the viewer only shows the scene):
+WINDOW_KEYS = ("w / s\na / d\nr / f\nq / e\nspace\nenter\nx\nesc",
+               "forward / back (capital: 4 cm)\nleft / right\nup / down\nturn gripper\nopen / close gripper\n"
+               "judge the attempt\ngive up the attempt\nquit")
+HELP = """keys (type in the teleop window; with --no-viewer, in this terminal):
   w/s forward/back   a/d left/right   r/f up/down   (capital letter: 4 cm, else 1 cm)
   q/e turn gripper   space open/close   enter judge the attempt   x give up the attempt   esc or ctrl-c quit"""
 
@@ -265,14 +269,121 @@ def frame_camera(env, cam) -> None:
     cam.elevation, cam.distance = -48.0, 1.9
 
 
-def passive_viewer(env):
-    """The MuJoCo viewer on the env's model and data. On macOS this needs `mjpython` instead of `python`."""
-    import mujoco.viewer
+class TeleopWindow:
+    """Our own GLFW window: it draws the scene and is where the operator types. (The MuJoCo viewer binds most
+    letters to its own render toggles, so keys typed into it switch on wireframe and shadows instead of moving the
+    arm.) Iterating yields the keys typed since the last frame; closing the window quits. Left drag orbits the
+    camera, right drag pans, scroll zooms. One window serves every attempt: `attach(env)` points it at a new scene.
+    GLFW must run on the main thread, so on macOS start it with plain `python`, not `mjpython`."""
 
-    v = mujoco.viewer.launch_passive(env.model, env.data, show_left_ui=False, show_right_ui=False)
-    with v.lock():
-        frame_camera(env, v.cam)
-    return v
+    def __init__(self, width: int = 1280, height: int = 800, visible: bool = True):
+        import glfw
+        import mujoco
+
+        self.glfw, self.mj = glfw, mujoco
+        if not glfw.init():
+            raise RuntimeError("could not start GLFW (no display?)")
+        glfw.window_hint(glfw.VISIBLE, glfw.TRUE if visible else glfw.FALSE)
+        self.win = glfw.create_window(width, height, "Arrival teleop", None, None)
+        if not self.win:
+            glfw.terminate()
+            raise RuntimeError("could not open a window (no display?)")
+        glfw.make_context_current(self.win)
+        glfw.swap_interval(0)
+        self.keys: list[str] = []
+        self.env = self.ctx = self.scn = None
+        self.cam, self.opt = mujoco.MjvCamera(), mujoco.MjvOption()
+        self._framed, self._drag, self._last = False, None, (0.0, 0.0)
+        glfw.set_char_callback(self.win, lambda w, cp: self._char(chr(cp)))
+        glfw.set_key_callback(self.win, self._on_key)
+        glfw.set_mouse_button_callback(self.win, self._on_button)
+        glfw.set_cursor_pos_callback(self.win, self._on_cursor)
+        glfw.set_scroll_callback(self.win, self._on_scroll)
+
+    def _char(self, ch: str) -> None:
+        """Printable keys, with the case the keyboard produced (capital letters move 4 cm)."""
+        self.keys.append(ch)
+
+    def _on_key(self, w, key, scancode, action, mods):
+        g = self.glfw
+        if action == g.RELEASE:
+            return
+        if key in (g.KEY_ENTER, g.KEY_KP_ENTER):
+            self.keys.append("\r")
+        elif key == g.KEY_ESCAPE:
+            self.keys.append("\x1b")
+
+    def _on_button(self, w, button, action, mods):
+        g = self.glfw
+        left = g.get_mouse_button(w, g.MOUSE_BUTTON_LEFT) == g.PRESS
+        right = g.get_mouse_button(w, g.MOUSE_BUTTON_RIGHT) == g.PRESS
+        self._drag = "rotate" if left else "move" if right else None
+        self._last = g.get_cursor_pos(w)
+
+    def _on_cursor(self, w, x, y):
+        dx, dy = x - self._last[0], y - self._last[1]
+        self._last = (x, y)
+        if self._drag and self.env is not None:
+            m = self.mj.mjtMouse
+            act = m.mjMOUSE_ROTATE_V if self._drag == "rotate" else m.mjMOUSE_MOVE_V
+            h = max(1, self.glfw.get_window_size(w)[1])
+            self.mj.mjv_moveCamera(self.env.model, act, dx / h, dy / h, self.scn, self.cam)
+
+    def _on_scroll(self, w, xoff, yoff):
+        if self.env is not None:
+            self.mj.mjv_moveCamera(self.env.model, self.mj.mjtMouse.mjMOUSE_ZOOM, 0.0, -0.05 * yoff, self.scn, self.cam)
+
+    def attach(self, env) -> TeleopWindow:
+        """Show `env` (the first time, from over the robot's shoulder; after that the operator's camera stays)."""
+        mj = self.mj
+        self.glfw.make_context_current(self.win)  # SimEnv's offscreen renderers switch the GL context
+        if self.ctx is not None:
+            self.ctx.free()
+        self.env = env
+        self.scn = mj.MjvScene(env.model, maxgeom=10000)
+        self.ctx = mj.MjrContext(env.model, mj.mjtFontScale.mjFONTSCALE_150)
+        if not self._framed:
+            frame_camera(env, self.cam)
+            self._framed = True
+        self.sync()
+        self.glfw.focus_window(self.win)
+        return self
+
+    def sync(self) -> None:
+        """Draw the current state, with the key help in a corner."""
+        mj, env = self.mj, self.env
+        self.glfw.make_context_current(self.win)
+        w, h = self.glfw.get_framebuffer_size(self.win)
+        rect = mj.MjrRect(0, 0, w, h)
+        mj.mjv_updateScene(env.model, env.data, self.opt, None, self.cam, mj.mjtCatBit.mjCAT_ALL, self.scn)
+        mj.mjr_render(rect, self.scn, self.ctx)
+        task = getattr(env, "task", {}) or {}
+        mj.mjr_overlay(mj.mjtFont.mjFONT_NORMAL, mj.mjtGridPos.mjGRID_TOPLEFT, rect, task.get("instruction", ""),
+                       "", self.ctx)
+        mj.mjr_overlay(mj.mjtFont.mjFONT_NORMAL, mj.mjtGridPos.mjGRID_BOTTOMLEFT, rect, WINDOW_KEYS[0],
+                       WINDOW_KEYS[1], self.ctx)
+        self.glfw.swap_buffers(self.win)
+        self.glfw.poll_events()
+
+    def __iter__(self) -> Iterator[list[str]]:
+        while True:
+            self.glfw.poll_events()
+            if self.glfw.window_should_close(self.win):
+                yield ["\x1b"]
+                continue
+            keys, self.keys = self.keys, []
+            yield keys
+
+    def close(self) -> None:
+        """Per attempt: keep the window for the next one (`shutdown` closes it)."""
+
+    def shutdown(self) -> None:
+        if self.ctx is not None:
+            self.glfw.make_context_current(self.win)
+            self.ctx.free()
+            self.ctx = None
+        self.glfw.destroy_window(self.win)
+        self.glfw.terminate()
 
 
 def main(argv=None) -> int:
@@ -299,20 +410,21 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     if a.operator_usd_per_hour < 0 or a.setup_usd < 0 or a.successes < 1:
         ap.error("costs must be >= 0 and --successes >= 1")
-    if not sys.stdin.isatty():
-        ap.error("needs an interactive terminal to read keys")
+    if a.no_viewer and not sys.stdin.isatty():
+        ap.error("--no-viewer reads keys from the terminal, so it needs an interactive one")
     twin = compile_twin(load_room(a.room, a.scans))
     print(HELP, flush=True)
-    viewer = None if a.no_viewer else passive_viewer
-    try:
+    kw = dict(people=a.people, seed=a.seed, res=a.res, record=a.record)
+    args = (a.out, a.operator_usd_per_hour, a.setup_usd, a.assumption, a.successes)
+    if a.no_viewer:
         with TerminalKeys() as keys:
-            s = run(twin, keys, a.out, a.operator_usd_per_hour, a.setup_usd, a.assumption, a.successes,
-                    people=a.people, seed=a.seed, res=a.res, record=a.record, viewer_factory=viewer)
-    except RuntimeError as e:
-        if "mjpython" in str(e):
-            print("On macOS the viewer needs mjpython: mjpython scripts/teleop_baseline.py ...", file=sys.stderr)
-            return 2
-        raise
+            s = run(twin, keys, *args, **kw)
+    else:
+        win = TeleopWindow()
+        try:
+            s = run(twin, win, *args, viewer_factory=win.attach, **kw)
+        finally:
+            win.shutdown()
     print(json.dumps(s, indent=2))
     return 0
 
