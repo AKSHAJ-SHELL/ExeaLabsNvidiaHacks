@@ -57,3 +57,18 @@ def test_malformed_manifest_rejected_with_distinct_code(tmp_path, mutate, code):
     with pytest.raises(rgbd.ManifestError) as e:
         rgbd.load_manifest(root)
     assert e.value.code == code and str(e.value).startswith(code + ":")
+
+
+@pytest.mark.parametrize("body", ['[]', '{"schema_version": 1, "room_id": "a", "axes": [1]}'])
+def test_non_object_manifest_raises_manifest_error(tmp_path, body):
+    (tmp_path / rgbd.MANIFEST_NAME).write_text(body)
+    with pytest.raises(rgbd.ManifestError):
+        rgbd.load_manifest(tmp_path)
+
+
+def test_non_object_frame_raises_manifest_error(tmp_path):
+    root = rgbd.write_synthetic_bundle(tmp_path)
+    _edit(root, lambda m: m["frames"].append(5))
+    with pytest.raises(rgbd.ManifestError) as e:
+        rgbd.load_manifest(root)
+    assert e.value.code == "frames"

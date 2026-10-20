@@ -92,12 +92,16 @@ def load_manifest(directory) -> Manifest:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         _fail("bad_json", str(e))
+    if not isinstance(raw, dict):
+        _fail("bad_json", "manifest must be a JSON object")
     if raw.get("schema_version") != SCHEMA_VERSION:
         _fail("schema_version", f"expected {SCHEMA_VERSION}, got {raw.get('schema_version')!r}")
     room_id = raw.get("room_id")
     if not isinstance(room_id, str) or not room_id:
         _fail("room_id", "room_id must be a non-empty string")
-    axes = raw.get("axes") or {}
+    axes = raw.get("axes")
+    if not isinstance(axes, dict):
+        _fail("axis_convention", "axes must be an object with camera and room")
     if axes.get("camera") != CAMERA_AXES or axes.get("room") != ROOM_AXES:
         _fail("axis_convention", f"axes must be camera={CAMERA_AXES!r} room={ROOM_AXES!r}, got {axes}")
     unit = raw.get("depth_unit")
@@ -114,6 +118,8 @@ def load_manifest(directory) -> Manifest:
     seen: set[str] = set()
     last_t = -math.inf
     for i, e in enumerate(entries):
+        if not isinstance(e, dict):
+            _fail("frames", f"frame {i} must be an object")
         fid = e.get("id")
         if not isinstance(fid, str) or not fid:
             _fail("frame_id", f"frame {i} has no id")
@@ -126,7 +132,9 @@ def load_manifest(directory) -> Manifest:
         if t <= last_t:
             _fail("non_monotonic_timestamps", f"frame {fid} timestamp {t} is not after {last_t}")
         last_t = float(t)
-        k = e.get("intrinsics") or {}
+        k = e.get("intrinsics")
+        if not isinstance(k, dict):
+            _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
         try:
             fx, fy, cx, cy = (float(k[n]) for n in ("fx", "fy", "cx", "cy"))
         except (KeyError, TypeError, ValueError):
@@ -155,6 +163,8 @@ def load_manifest(directory) -> Manifest:
                             np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1.0]]), T, split))
 
     split_ids = raw.get("splits")
+    if split_ids is not None and not isinstance(split_ids, dict):
+        _fail("split", "splits must be an object with train and heldout id lists")
     if split_ids is not None:  # optional explicit lists must agree with the per-frame field
         both = set(split_ids.get("train", [])) & set(split_ids.get("heldout", []))
         if both:
