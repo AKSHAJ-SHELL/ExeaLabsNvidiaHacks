@@ -1,4 +1,4 @@
-"""python -m arrival demo | validate | serve | sim | eval | work"""
+"""python -m arrival demo | validate | serve | sim | eval | realism | work"""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ def run_demo(room: str = "hero_kitchen", episodes: int = 4, videos: str = "all",
     """scan -> twin -> tasks -> scripted retarget -> oracle -> sim_texture -> LeRobot v2 -> report."""
     from arrival.eval.report import build_report, write_report
     from arrival.export.lerobot import LeRobotWriter
+    from arrival.export.provenance import run_record
     from arrival.generate.scripted import generate
     from arrival.render.sim_texture import room_center_x
     from arrival.scan import bundle as scan_bundle
@@ -48,6 +49,10 @@ def run_demo(room: str = "hero_kitchen", episodes: int = 4, videos: str = "all",
     else:
         bundle = scan_bundle.load_room(room, scans_dir)
     twin = compile_twin(bundle)
+    if from_roomplan and twin["objects"]:
+        from arrival.export.provenance import note_seed
+
+        note_seed(twin, "default_objects", seed)
     twin_dir = out_dir / "twins" / room
     write_twin(twin, twin_dir)
     tasks = propose(twin)
@@ -58,7 +63,9 @@ def run_demo(room: str = "hero_kitchen", episodes: int = 4, videos: str = "all",
 
     t0 = time.perf_counter()
     dataset_dir = out_dir / "datasets" / room
-    writer = LeRobotWriter(dataset_dir, room, videos, room_center_x=room_center_x(twin))
+    writer = LeRobotWriter(dataset_dir, room, videos, room_center_x=room_center_x(twin), extra_info={
+        "arrival_provenance": run_record(twin, seed=seed, generator="scripted_retarget", episodes=episodes,
+                                         videos=videos)})
     attempts = 0
     for att in generate(tasks["tasks"], twin, episodes, seed=seed):
         attempts += 1
@@ -254,6 +261,29 @@ def cmd_eval(a) -> int:
     return EXIT_OK
 
 
+def cmd_realism(a) -> int:
+    """Score the twin's render against a scan's held-out RGB-D frames; writes out/eval/<room>_realism.json and .png."""
+    try:
+        import mujoco  # noqa: F401
+    except ImportError:
+        print("mujoco is not installed: pip install -e '.[sim]'", file=sys.stderr)
+        return EXIT_USAGE
+    from arrival.eval import realism_cli
+
+    try:
+        rep = realism_cli.run_realism(a.scan, a.out, resolve_scans(a.scans), twin_path=a.twin, max_side=a.max_side,
+                                      max_frames=a.max_frames, png_frames=a.png_frames,
+                                      min_confidence=a.min_confidence)
+    except realism_cli.RealismError as e:
+        print(f"realism: {e}", file=sys.stderr)
+        return EXIT_INVALID
+    print(realism_cli.summary(rep))
+    print(f"json: {rep['path']}")
+    if rep["png"]:
+        print(f"png:  {rep['png']}")
+    return EXIT_OK if rep["valid"] else EXIT_INVALID
+
+
 def cmd_work(a) -> int:
     """Drain out/jobs: each queued upload -> twin -> sim dataset -> out/jobs/<id>/dataset.zip."""
     from arrival.jobs.worker import work
@@ -333,6 +363,19 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--out", default="out")
     e.add_argument("--scans", default="scans")
     e.set_defaults(fn=cmd_eval)
+    rl = sub.add_parser("realism", help="score the twin's render against a scan's held-out RGB-D frames "
+                                        "(JSON + side-by-side PNG, misaligned-pose control)")
+    rl.add_argument("scan", help="scan folder (or a room id under --scans) holding frames_manifest.json and "
+                                 "roomplan.json or scan.json")
+    rl.add_argument("--twin", default=None, help="score against this twin.json instead of compiling the scan's geometry")
+    rl.add_argument("--max-side", type=int, default=192, help="downscale frames so the longer side is at most this")
+    rl.add_argument("--max-frames", type=int, default=8, help="score at most this many held-out frames, evenly spaced")
+    rl.add_argument("--png-frames", type=int, default=3, help="frames shown in the side-by-side PNG")
+    rl.add_argument("--min-confidence", type=int, default=2, choices=[0, 1, 2],
+                    help="ARKit depth confidence a pixel needs to count (2 = high; 0 keeps every non-zero depth)")
+    rl.add_argument("--out", default="out")
+    rl.add_argument("--scans", default="scans")
+    rl.set_defaults(fn=cmd_realism)
     w = sub.add_parser("work", help="process queued uploads under <out>/jobs: twin -> sim dataset -> dataset.zip")
     w.add_argument("--once", action="store_true", help="process one job (or none) and exit")
     w.add_argument("--poll", type=float, default=2.0, help="seconds between queue checks")

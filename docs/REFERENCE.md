@@ -147,6 +147,22 @@ python -m arrival eval --policy vla         # needs GR00T_POLICY_URL; exits 2 wi
 
 What this is not: MuJoCo frames are not a Gaussian splat of the room, episodes are not MimicGen output, and no policy was trained on them. Read `arrival_generator` and `arrival_physically_valid` in the sim dataset's `meta/info.json` before using it.
 
+### Realism: twin render vs real frames
+
+```bash
+python -m arrival realism scans/my_kitchen            # a folder with frames_manifest.json + roomplan.json (or scan.json)
+python -m arrival realism my_kitchen --scans scans --max-frames 4 --max-side 128
+python -m arrival realism scans/my_kitchen --twin out/twins/my_kitchen/twin.json --min-confidence 0
+```
+
+`realism` scores the twin's MuJoCo render against the scan's **held-out** RGB-D frames and writes `out/eval/<room>_realism.json` plus a side-by-side PNG (`<room>_realism.png`: reference RGB, twin RGB, reference depth, twin depth, one row per frame, `--png-frames` rows; the per-frame PNGs sit next to it). It is a driver over `arrival/eval/realism.py`; the frames come from `frames_manifest.json` ([ref/CAP-2a.md](ref/CAP-2a.md)), in ARKit camera axes, which the command converts to the renderer's before scoring. Only frames the manifest marks `heldout` are scored (at most `--max-frames`, evenly spaced); the JSON lists the ids it scored and how many `train` frames it left out, and a manifest with no held-out frame is refused. A pixel counts for depth only if its reference depth is finite and above 0 and its ARKit confidence is at least `--min-confidence` (default 2, high; frames without a confidence map keep every non-zero depth). The twin render hides the robot and people and the recorder films the empty room, so there is no robot mask. Frames larger than `--max-side` (default 192) are downscaled, depth by nearest neighbour.
+
+The JSON also carries a misaligned-pose control (same frames, camera moved 0.15 m and turned 5 degrees) and an `alignment_check`. If depth error does not rise under the control, the poses or the twin's frame are wrong: the report says `valid: false` with the reason, and the command exits 1 so the number is not quoted. A scan without `frames_manifest.json` (RoomPlan only, or four photos) is refused with exit 1 and nothing is written; a four-photo bundle that carries frames reports `realism: null` with the reason from `blocks_claims`. Exit 2 means MuJoCo is not installed. The `scope` field repeats what the number is: the twin is a schematic untextured box render, so `depth_l1_m` measures geometry and the RGB metrics mostly measure missing texture and lighting. Nothing in this repository has run it on a real scan yet: the iOS RGB-D recorder (P1) has not been field-tested, and the tests use frames rendered from the twin itself.
+
+### Provenance
+
+`twin.json` carries a `provenance` block: `input.file_sha256` (the scan file as received: `scan.json`, the RoomPlan export, or the upload's `upload.bin`), `input.bundle_sha256` (the normalized bundle), `code.sha` and `code.dirty` (the git checkout the code ran from; `ARRIVAL_GIT_SHA` overrides it for an image with no `.git`, and both are `null` when neither exists), `generators` (the geometry source, the twin compiler, and how many objects carry each label below) and `seeds` (the default-object placement seed). Each twin object has a `provenance` label: `authored` (a person wrote it into `scan.json`), `default_synthetic` (`place_default_objects` put a catalog object on a counter because RoomPlan sees no small objects) or `detected`, which is reserved: nothing detects objects yet, so no object is labelled it. Every dataset's `meta/info.json` has `arrival_provenance`: the twin's input hash, generators and seeds plus this run's code sha, seed, generator and options. These fields say where data came from; they do not change `arrival_physically_valid` or any other claim.
+
 ## Upload worker
 
 `python -m arrival work` runs in a second terminal next to `serve`. It polls `out/jobs/*/status.json` every `--poll` seconds (default 2), takes the oldest `queued` job, marks it `running`, and runs these stages, rewriting `status.json` at each one: `normalize` (the upload is a RoomPlan CapturedRoom export if it has `walls`/`objects` with `transform`, or a `scan.json` if it has `schema_version`; anything else fails here), `twin` (`compile_twin`), `objects` (`place_default_objects` when the scan has no objects, as RoomPlan exports never do; then `out/twins/<room>/`), `sim` (`arrival.sim.collect.collect`, same options as `sim`: `--episodes 8`, `--families counter_to_sink,open_drawer`, `--people 1`, `--res 128`, `--seed 0`), `validate`, and `zip` (`out/jobs/<id>/dataset.zip` holding `<room>_sim/`). The room id is the upload's filename stem in `[a-z0-9_]` plus the job id, so two uploads of `kitchen.json` never share a twin or dataset folder. A job with zero successful episodes or a failing validator ends `failed`. Failures are written to `status.json` (`error`) and `error.txt` (traceback); the worker then moves to the next job. A job left `running` by a killed worker goes back to `queued` when the next worker starts (so do not start a second worker while one runs), and a job that raises mid-stage is recorded as `failed` with an `interrupted:` error. `status.json` is written atomically, so polls never see a torn file. `--once` processes at most one job and exits. Needs the `sim` extra; without MuJoCo every job fails at `sim`.
@@ -192,6 +208,7 @@ out/
   research/                 `research` output (<room>_research.json, query_research.json)
   reports/hero_kitchen.json attempts, successes, dropped, seconds, demos/hour, dollars
   eval/hero_kitchen_scripted.json   closed-loop eval: per-family success, Wilson 95%, time, human contacts
+  eval/<room>_realism.json, .png    `realism`: twin render vs held-out frames, misaligned-pose control
   jobs/<job_id>/            upload.bin, status.json; after `work`: dataset.zip (done) or error.txt (failed)
   twins/<stem>_<job_id>/, datasets/<stem>_<job_id>_sim/   what `work` compiled and simulated for an upload
 ```

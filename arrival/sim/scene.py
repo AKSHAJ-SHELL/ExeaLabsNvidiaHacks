@@ -8,6 +8,7 @@ import math
 import random
 
 from arrival.catalog.objects import object_spec
+from arrival.scan.bundle import ScanBundleError
 from arrival.sim import people, robot
 from arrival.twin.compile import is_counter_host, to_local
 
@@ -16,6 +17,7 @@ LIGHT_JITTER = 0.15  # per-task intensity jitter inside a label; the three bands
 WARM, COOL = (1.0, 0.93, 0.82), (0.86, 0.93, 1.0)  # key light colour runs between these
 WALL = "0.93 0.91 0.86 1"
 TOP_T = 0.04
+MIN_HALF = 0.0005  # smallest box half-extent written: MuJoCo refuses a size of 0 or less
 CARCASS_H = 0.70  # cabinet body below the counter top (sink basin sits between this and the top)
 DRAWER = 'contype="2" conaffinity="2"'  # moving parts collide with the robot, not with their carcass
 APPLIANCES = ("fridge", "stove", "dishwasher")  # floor-standing: counters are trimmed where they run into one
@@ -32,8 +34,9 @@ MATERIALS = {FRONT: "wood", TOP: "stone", SPLASH: "panel", WALL: "paint"}  # att
 
 def _box(name, pos, size, rgba, extra=""):
     label = f'name="{name}" ' if name else ""
+    half = [max(s / 2, MIN_HALF) for s in size]  # a counter squeezed by neighbours can leave a zero-width panel
     return (f'<geom {label}type="box" pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}" '
-            f'size="{size[0] / 2:.4f} {size[1] / 2:.4f} {size[2] / 2:.4f}" rgba="{rgba}" {extra}/>')
+            f'size="{half[0]:.4f} {half[1]:.4f} {half[2]:.4f}" rgba="{rgba}" {extra}/>')
 
 
 def _vbox(pos, size, rgba):
@@ -195,8 +198,10 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
     for hx, hw, hd, s in holes[:1]:
         lx0, lx1 = x0, hx - hw / 2
         rx0, rx1 = hx + hw / 2, x1
-        g.append(_box(f"{cid}_top_l", ((lx0 + lx1) / 2, 0, zt), (lx1 - lx0, sy, TOP_T), top))
-        g.append(_box(f"{cid}_top_r", ((rx0 + rx1) / 2, 0, zt), (rx1 - rx0, sy, TOP_T), top))
+        if lx1 - lx0 > 1e-4:  # a hole flush with the counter end leaves no slab on that side
+            g.append(_box(f"{cid}_top_l", ((lx0 + lx1) / 2, 0, zt), (lx1 - lx0, sy, TOP_T), top))
+        if rx1 - rx0 > 1e-4:
+            g.append(_box(f"{cid}_top_r", ((rx0 + rx1) / 2, 0, zt), (rx1 - rx0, sy, TOP_T), top))
         rim = (sy - hd) / 2
         g.append(_box(f"{cid}_top_f", (hx, sy / 2 - rim / 2, zt), (hw, rim, TOP_T), top))
         g.append(_box(f"{cid}_top_b", (hx, -sy / 2 + rim / 2, zt), (hw, rim, TOP_T), top))
@@ -539,6 +544,8 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
     """Returns an MJCF string. object_pos overrides {object_id: [x, y, z]} start positions.
     seed jitters the lights within the lighting label (None gives the nominal lights); people_seed picks the walkers' bodies."""
     object_pos = object_pos or {}
+    if not twin["walls"]:
+        raise ScanBundleError("the twin has no walls, so there is no room to simulate; rescan with the walls captured")
     fx = twin["fixtures"]
     sinks = [f for f in fx if f["type"] == "sink"]
     world = []

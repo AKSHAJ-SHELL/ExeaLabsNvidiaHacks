@@ -103,6 +103,7 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
     """Run every stage for one claimed job. Returns the final status; never raises."""
     out_dir, job_dir = Path(out_dir), Path(job_dir)
     try:
+        from arrival.export.provenance import sha256_file
         from arrival.export.validate import validate
         from arrival.twin.compile import compile_twin, place_default_objects, write_twin
 
@@ -110,6 +111,7 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
         status["room_id"] = room
         _stage(job_dir, status, "normalize", log)
         bundle = load_upload(job_dir / "upload.bin", room)
+        bundle["input_sha256"] = sha256_file(job_dir / "upload.bin")  # provenance: the upload as received
 
         _stage(job_dir, status, "twin", log)
         twin = compile_twin(bundle)

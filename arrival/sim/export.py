@@ -14,9 +14,11 @@ from arrival.export.lerobot import MODALITY, SCHEMA, _merge_stats, _stats, check
 
 
 class SimDatasetWriter:
-    def __init__(self, root: str | Path, room_id: str, fps: int, res: int, cameras: tuple[str, ...]):
+    def __init__(self, root: str | Path, room_id: str, fps: int, res: int, cameras: tuple[str, ...],
+                 provenance: dict | None = None):
         check_video_size(res, res)  # before the rmtree below: a bad res must not wipe an existing dataset
         self.root, self.room_id, self.fps, self.res, self.cameras = Path(root), room_id, fps, res, cameras
+        self.provenance = provenance  # export.provenance.run_record: input scan hash, code sha, seeds, generators
         if self.root.exists():
             shutil.rmtree(self.root)
         (self.root / "meta").mkdir(parents=True)
@@ -98,6 +100,7 @@ class SimDatasetWriter:
             "arrival_success_check": "physics", "arrival_successes": n, "arrival_attempts": attempts,
             "arrival_video_policy": "all", "arrival_appearance": "mujoco_raster", "arrival_room_id": self.room_id,
             "arrival_families": sorted({e["arrival_family"] for e in self.episodes}),
+            **({"arrival_provenance": self.provenance} if self.provenance else {}),
             "features": {"observation.state": {"dtype": "float32", "shape": [8]},
                          "action": {"dtype": "float32", "shape": [8]}, **vid,
                          "timestamp": {"dtype": "float32", "shape": [1]},

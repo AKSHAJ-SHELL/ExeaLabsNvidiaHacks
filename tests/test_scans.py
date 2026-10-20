@@ -64,9 +64,11 @@ def _contains(outer: dict, inner: dict, tol: float = 1e-6) -> bool:
 
 
 def _allowed(a: dict, b: dict) -> bool:
-    """A sink or stove inset in a counter, or the counter synthesized around that fixture."""
+    """A sink or stove inset in a counter or counter-height cabinet, or the counter synthesized around that fixture."""
+    from arrival.twin.compile import is_counter_host
+
     for counter, fixture in ((a, b), (b, a)):
-        if counter["type"] != "counter" or fixture["type"] not in ("sink", "stove"):
+        if not is_counter_host(counter) or fixture["type"] not in ("sink", "stove"):
             continue
         if counter["id"] == f"counter_synth_{fixture['id']}" or _contains(counter, fixture):
             return True
