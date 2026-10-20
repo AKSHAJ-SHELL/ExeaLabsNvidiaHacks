@@ -1,0 +1,21 @@
+# Placeholder unit rates for `python -m arrival.eval.cost --pricing configs/pricing.example.yaml`.
+# ASSUMED, NOT INVOICED: none of these numbers came from a Nebius invoice or price list. Replace them with
+# the rates of your contract and set `basis: invoiced` on a line before its dollars may be called measured.
+currency: USD
+products:
+  gpu_hour:
+    unit: GPU-hour
+    usd_per_unit: 2.50
+    basis: assumed, not invoiced
+  cpu_hour:
+    unit: CPU-hour
+    usd_per_unit: 0.05
+    basis: assumed, not invoiced
+  object_storage_gb_month:
+    unit: GB-month
+    usd_per_unit: 0.02
+    basis: assumed, not invoiced
+  token_factory_per_mtoken:
+    unit: million tokens
+    usd_per_unit: 0.50
+    basis: assumed, not invoiced
