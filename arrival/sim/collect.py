@@ -42,7 +42,7 @@ class SimEnv:
             obj_pos[o["id"]] = [task["start"][0], task["start"][1], self._top(src) + o["size"][2] / 2 + 0.003]
         base, yaw = self._base_pose(task, obj_pos)
         xml = build_mjcf(twin, base, yaw, obj_pos, task.get("lighting", "neutral"), task.get("people", 0),
-                         seed=task.get("seed"))
+                         seed=task.get("seed"), people_seed=task.get("seed", 0))
         self.model = mujoco.MjModel.from_xml_string(xml)
         self.data = mujoco.MjData(self.model)
         self.qadr = [int(self.model.joint(j).qposadr[0]) for j in robot.ARM_JOINTS]
@@ -59,7 +59,7 @@ class SimEnv:
         free = self._free_floor()
         front = max(f["position"][1] + f["size"][1] / 2 for f in twin["fixtures"])
         self.walkers = Walkers(task.get("people", 0), free, seed=task.get("seed", 0), base_xy=base[:2],
-                               front_y=front) if task.get("people") else None
+                               front_y=front, fixtures=twin["fixtures"]) if task.get("people") else None
         self.safety = SafetyMonitor(self.model)
         mujoco.mj_forward(self.model, self.data)
         self.cameras, self.res = cameras, res
@@ -76,7 +76,8 @@ class SimEnv:
     def _free_floor(self):
         xs = [p for w in self.twin["walls"] for p in (w["start"][0], w["end"][0])]
         ys = [p for w in self.twin["walls"] for p in (w["start"][1], w["end"][1])]
-        deep = max(f["position"][1] + f["size"][1] / 2 for f in self.twin["fixtures"])
+        mid = (min(ys) + max(ys)) / 2  # the work strip runs along the back wall; anything further in is an obstacle
+        deep = max(f["position"][1] + f["size"][1] / 2 for f in self.twin["fixtures"] if f["position"][1] < mid)
         return (min(xs) + 0.4, deep + 0.9, max(xs) - 0.4, max(ys) - 0.3)
 
     def _base_pose(self, task: dict, obj_pos: dict):
@@ -198,7 +199,7 @@ class SimEnv:
             p = self.body_pos(self.task["object_id"])
             if p[2] < self._top(self.fx[self.task["source"]]) + self.obj_half_h(self.task["object_id"]) + 0.01:
                 self.wiped += float(np.linalg.norm(p[:2] - before))
-        self.safety.update(self.model, self.data)
+        self.safety.update(self.model, self.data, getattr(self.walkers, "driven_geoms", ()))
 
     def render(self, cam: str, big: bool = False) -> np.ndarray:
         r = self.big if big else self.renderer
@@ -294,7 +295,8 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
     env.close()
     return {"states": np.array(states), "actions": np.array(actions), "videos": {c: np.array(v) for c, v in frames.items()},
             "success": ok, "detail": detail, "people_xy": people, "ik_error": getattr(policy, "ik_error", None),
-            "safety": env.safety.summary()}
+            "safety": env.safety.summary(),
+            "fridge_visit": bool(getattr(env.walkers, "visit", None) and getattr(env.walkers, "door_max", 0.0) > 0.0)}
 
 
 def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path = "out", people: int = 2,
@@ -347,13 +349,16 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
         env = SimEnv(twin, task, res=res, overview=save_preview and i == 0)
         ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
-        fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0, "human_contacts": 0})
+        fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0, "human_contacts": 0,
+                                              "fridge_visits": 0, "door_contacts": 0})
         fam["attempts"] += 1
         contact = ep["safety"]["human_contact"]
         fam["human_contacts"] += contact
+        fam["fridge_visits"] += ep["fridge_visit"]
+        fam["door_contacts"] += ep["safety"]["door_contact"]
         tag = "DROP human_contact" if contact else ("OK " if ep["success"] else "MISS")
         log(f"[sim] {task['task_id']}: {tag} {ep['detail']} ik_err={ep['ik_error'] if ep['ik_error'] is None else round(ep['ik_error'], 4)} "
-            f"min_human_d={ep['safety']['min_human_distance_m']}")
+            f"min_human_d={ep['safety']['min_human_distance_m']}" + (" fridge_visit" if ep["fridge_visit"] else ""))
         if ep["success"] and not contact:
             fam["successes"] += 1
             writer.add_episode(ep, task)
@@ -367,6 +372,8 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
               "successes": succ, "dropped": len(tasks) - succ, "seconds": round(seconds, 2),
               "demos_per_hour": round(succ / seconds * 3600, 1) if seconds else 0.0,
               "human_contacts": sum(f["human_contacts"] for f in per.values()),
+              "fridge_visits": sum(f["fridge_visits"] for f in per.values()),
+              "door_contacts": sum(f["door_contacts"] for f in per.values()),
               "families": {k: {**v, "success_rate": round(v["successes"] / v["attempts"], 3)} for k, v in per.items()},
               "people": people, "resolution": res, "physics_checked_success": True, "grasp": "friction"}
     rp = out_dir / "reports" / f"{room}_sim.json"

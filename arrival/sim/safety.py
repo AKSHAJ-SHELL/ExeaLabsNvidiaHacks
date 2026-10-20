@@ -57,6 +57,7 @@ class SafetyMonitor:
         self.arm_steps = 0
         self.arm_depth = 0.0
         self.arm_worst = None
+        self.door_contact = False
 
     def _arm_contacts(self, model, data) -> None:
         hit = False
@@ -90,6 +91,9 @@ class SafetyMonitor:
             g1, g2 = data.contact[i].geom1, data.contact[i].geom2
             if (g1 in self.person_geoms and g2 in self.geoms) or (g2 in self.person_geoms and g1 in self.geoms):
                 d = min(d, 0.0)
+            elif driven and ((g1 in driven and g2 in self.geoms) or (g2 in driven and g1 in self.geoms)):
+                d = min(d, 0.0)
+                self.door_contact = True
         if d < self.min_d:
             self.min_d, self.min_step = d, self.n
         self.contact = self.contact or d <= 0.0
@@ -100,6 +104,6 @@ class SafetyMonitor:
                "arm_contact_worst": list(self.arm_worst) if self.arm_worst else None}
         if not self.people:
             return {"min_human_distance_m": None, "min_distance_step": None, "human_contact": False, "people": 0,
-                    **arm}
+                    "door_contact": False, **arm}
         return {"min_human_distance_m": round(self.min_d, 4), "min_distance_step": self.min_step,
-                "human_contact": bool(self.contact), "people": len(self.people), **arm}
+                "human_contact": bool(self.contact), "people": len(self.people), "door_contact": bool(self.door_contact), **arm}
