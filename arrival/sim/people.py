@@ -464,6 +464,11 @@ class Walkers:
             mujoco.mju_quatZ2Vec(q, b - a)
             model.geom_quat[g] = q
 
+    def _pause_yaw(self, i: int) -> float:
+        if self.faces[i][self.at[i]] in ("open", "look", "close") and self.visit:
+            return self.visit["face"]  # square to the fridge; the toes stay out of the door's swing
+        return -np.pi / 2  # face the counter while stopped
+
     def step(self, model, data, dt: float) -> list[list[float]]:
         if self._gids is None:
             self._bind(model)
@@ -474,12 +479,9 @@ class Walkers:
             if self.wait[i] > 0:
                 self.wait[i] -= dt
                 tag = self.faces[i][self.at[i]]
-                if tag in ("open", "look", "close") and self.visit:
-                    if tag != "look":
-                        self._visit_step(i, tag)
-                    yaw = self.visit["face"]  # square to the fridge; the toes stay out of the door's swing
-                else:
-                    yaw = -np.pi / 2  # face the counter while stopped
+                if tag in ("open", "look", "close") and self.visit and tag != "look":
+                    self._visit_step(i, tag)
+                yaw = self._pause_yaw(i)
             else:
                 k = self.idx[i] % len(path)
                 d = path[k] - self.pos[i]
@@ -497,7 +499,7 @@ class Walkers:
                         v *= float(np.clip(dist / BRAKE[0], BRAKE[1], 1.0))
                     moved = min(dist, v * dt)
                     self.pos[i] += d / dist * moved
-                yaw = np.arctan2(d[1], d[0])
+                yaw = self._pause_yaw(i) if self.wait[i] > 0 else np.arctan2(d[1], d[0])  # no one-frame spin on arrival
             self.yaw[i] = float(yaw)
             self.phase[i] += 2 * math.pi * moved / STRIDE
             target = min(1.0, moved / (self.speed * dt)) if moved > 0 else 0.0  # stride scaled to speed: a full stride at 45% speed puts the toe in the door swing

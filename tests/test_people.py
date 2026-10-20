@@ -193,3 +193,43 @@ def test_episode_with_a_fridge_visit_still_succeeds(twin):
     assert ep["success"], ep["detail"]
     assert not ep["safety"]["human_contact"] and not ep["safety"]["door_contact"]
     assert "door_contact" in ep["safety"]
+
+
+def test_yaw_does_not_spike_on_the_frame_a_walker_arrives_at_a_pause(twin):
+    m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (2.6, 1.0, 0.75), n_people=2, people_seed=3))
+    d = mujoco.MjData(m)
+    walkers = Walkers(2, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=(2.6, 1.0), front_y=0.75,
+                      fixtures=twin["fixtures"], fridge_visit=True)
+    for _ in range(240):
+        walkers.step(m, d, 0.05)
+        for i in range(2):
+            if walkers.wait[i] > 0:  # stopped, including the frame it arrives: already facing the stop yaw
+                assert walkers.yaw[i] == walkers._pause_yaw(i), i
+
+
+def test_summary_is_strict_json_before_the_first_update(twin):
+    import json
+
+    from arrival.sim.safety import SafetyMonitor
+
+    m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (2.6, 1.0, 0.75), n_people=2, people_seed=3))
+    s = SafetyMonitor(m).summary()
+    assert s["min_human_distance_m"] is None and s["people"] == 2
+    json.dumps(s, allow_nan=False)
+
+
+def test_driven_door_contact_is_not_an_arm_contact(twin):
+    from types import SimpleNamespace
+
+    from arrival.sim.safety import SafetyMonitor
+
+    m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (2.6, 1.0, 0.75), n_people=1, people_seed=3))
+    mon = SafetyMonitor(m)
+    door = next(g for g in range(m.ngeom) if m.geom_bodyid[g] == m.body("fridge_1_door").id)
+    link = next(iter(mon.link_geoms))
+    data = SimpleNamespace(ncon=1, contact=[SimpleNamespace(geom1=link, geom2=door, dist=-0.01)])
+    mon._arm_contacts(m, data)
+    assert mon.arm_steps == 1
+    mon.reset()
+    mon._arm_contacts(m, data, {door})
+    assert mon.arm_steps == 0
