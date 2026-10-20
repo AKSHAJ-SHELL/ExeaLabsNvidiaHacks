@@ -248,6 +248,14 @@ class SimEnv:
     # ---- physics success ----
     def success(self, task: dict) -> tuple[bool, dict]:
         fam = task["family"]
+        if fam == "move_on_table":  # resting on the table top within 6 cm of the target spot, nearly still
+            oid = task["object_id"]
+            p = self.body_pos(oid)
+            v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
+            err = float(np.linalg.norm(p[:2] - np.asarray(task["target_xy"])))
+            resting = abs(p[2] - (self._top(self.fx[task["target"]]) + self.obj_half_h(oid))) < 0.025
+            return bool(err < 0.06 and resting and v < 0.05), {
+                "object_pos": p.round(4).tolist(), "object_speed": round(v, 4), "target_error_m": round(err, 4)}
         if fam in ("counter_to_sink", "counter_to_counter"):
             oid = task["object_id"]
             p = self.body_pos(oid)

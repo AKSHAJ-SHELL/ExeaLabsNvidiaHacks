@@ -203,6 +203,26 @@ def _upper_cabinet_xml(cid: str, c: dict, fixtures: list[dict]) -> str:
     return "".join(g)
 
 
+TABLE_LEG = 0.05  # square leg side (m)
+
+
+def is_table(f: dict) -> bool:
+    """A scanned table: compiled as a counter for RoboCasa (default_config_name "dining") but built as a table."""
+    return f.get("type") == "counter" and f.get("default_config_name") == "dining"
+
+
+def table_xml(f: dict) -> str:
+    """A top slab on four legs, no carcass, drawers or doors. Objects rest on the top; the arm collides with it."""
+    (cx, cy, _), (sx, sy, h) = f["position"], f["size"]
+    fid, yaw = f["id"], f.get("yaw", 0.0)
+    wood = "0.62 0.47 0.33 1"
+    g = [_box(f"{fid}_top", (0, 0, h - TOP_T / 2), (sx, sy, TOP_T), wood)]
+    lx, ly, lh = sx / 2 - 0.06 - TABLE_LEG / 2, sy / 2 - 0.06 - TABLE_LEG / 2, h - TOP_T
+    g += [_box(f"{fid}_leg{k}", (px, py, lh / 2), (TABLE_LEG, TABLE_LEG, lh), "0.35 0.27 0.2 1")
+          for k, (px, py) in enumerate(((-lx, -ly), (lx, -ly), (-lx, ly), (lx, ly)))]
+    return f'<body name="{fid}" pos="{cx} {cy} 0" euler="0 0 {yaw}">' + "".join(g) + "</body>"
+
+
 def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
     """Counter in its local frame (+y local = front). Top slab is split around any sink hole; the counter
     is trimmed where it runs into a fridge/stove. Visible fronts are recessed visual twins of the physical
@@ -523,7 +543,7 @@ def part_names(twin: dict) -> list[dict]:
 
     for f in fx:
         t, fid = f["type"], f["id"]
-        if is_counter_host(f):
+        if is_counter_host(f) and not is_table(f):  # a table has no moving parts
             for k in range(2):
                 add(fid, f"{fid}_drawer{k}", "slide", 0.3)
             add(fid, f"{fid}_door", "hinge", 1.2)
@@ -617,7 +637,7 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
     for f in fx:
         t = f["type"]
         if is_counter_host(f):
-            world.append(counter_xml(f, sinks, fx))
+            world.append(table_xml(f) if is_table(f) else counter_xml(f, sinks, fx))
         elif t == "sink":
             if _host_of(f, fx) is None:  # set into a counter or cabinet, the basin is cut by counter_xml
                 world.append(sink_unit_xml(f))

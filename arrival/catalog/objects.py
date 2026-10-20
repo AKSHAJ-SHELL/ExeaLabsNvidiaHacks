@@ -15,14 +15,45 @@ OBJECT_SPECS = {
     "bottle": ("bottle", [0.066, 0.066, 0.22], 0.55, 0.6, "0.55 0.75 0.9 0.7"),
     "pan": ("pan", [0.24, 0.24, 0.045], 0.90, 0.6, "0.2 0.2 0.22 1"),
     "spatula": ("box", [0.035, 0.22, 0.010], 0.05, 0.7, "0.3 0.3 0.32 1"),
+    # office and living room (L9): flat boxes, long side along x, so the pads close across the short side
+    "book": ("box", [0.17, 0.075, 0.025], 0.30, 0.6, "0.2 0.35 0.6 1"),
+    "remote": ("box", [0.17, 0.045, 0.02], 0.10, 0.6, "0.12 0.12 0.14 1"),
+    "laptop": ("box", [0.30, 0.21, 0.02], 1.20, 0.6, "0.62 0.64 0.67 1"),  # closed; too wide to pinch, scenery
 }
 OBJECT_MAP = {label: label for label in OBJECT_SPECS}
-PICKABLE = ("mug", "cup", "sponge", "apple", "bottle")  # fit the 10 cm gripper opening and are held by the body;
+PICKABLE = ("mug", "cup", "sponge", "apple", "bottle", "book", "remote")  # fit the 10 cm gripper opening and are held by the body;
 # the 1 cm spatula sits under the grasp height the expert uses, so it is scenery until the grasp rule changes
 RIM_HELD = ("bowl", "plate")  # hollow, pinched by the rim nearest the robot (MAN-4)
 HANDLE_HELD = ("pan",)  # pinched across the handle, close to the body
 GRASPABLE = PICKABLE + RIM_HELD + HANDLE_HELD
+TABLE_MOVABLE = PICKABLE + ("bowl",)  # what move_on_table carries; the bowl is held by its rim (MAN-4)
+# What a scan with no objects gets on its table or counter, by the kind of room the fixtures say it is (L9).
+# A kitchen keeps the original five; an office does not hold a plate or a bowl.
+ROOM_OBJECTS = {
+    "kitchen": ("mug", "bowl", "plate", "cup", "apple"),
+    "office": ("laptop", "book", "cup"),
+    "living_room": ("remote", "book", "cup"),
+    "bedroom": ("book", "cup"),
+}
+KITCHEN_CATEGORIES = ("counter", "sink", "stove", "oven", "refrigerator", "dishwasher", "microwave")
 SIZE_VARIATION = 0.08  # +-8% on the footprint and on the height, drawn separately
+
+
+def room_kind(fixtures: list[dict]) -> str:
+    """"kitchen", "bedroom", "living_room" or "office", from the scanned categories of `fixtures` (the twin's
+    `source_category`): any kitchen fixture makes a kitchen, then a bed a bedroom, a sofa, television or fireplace a
+    living room, and a table or chair with none of those an office. A room with none of these (nothing scanned yet)
+    is a kitchen, the pipeline's original assumption."""
+    cats = {f.get("source_category") for f in fixtures}
+    if cats & set(KITCHEN_CATEGORIES):
+        return "kitchen"
+    if "bed" in cats:
+        return "bedroom"
+    if cats & {"sofa", "television", "fireplace"}:
+        return "living_room"
+    if cats & {"table", "chair"}:
+        return "office"
+    return "kitchen"
 
 
 def catalog_id(label: str) -> str:

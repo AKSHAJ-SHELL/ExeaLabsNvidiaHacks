@@ -54,10 +54,12 @@ def park(c: dict, along: float, out: float) -> tuple[float, float, float]:
 
 
 def place_point(twin: dict, task: dict) -> np.ndarray:
-    """Where a counter_to_sink / counter_to_counter task sets the object down (eef target, world)."""
+    """Where a counter_to_sink / counter_to_counter / move_on_table task sets the object down (eef target, world)."""
     fx = {f["id"]: f for f in twin["fixtures"]}
     tgt = fx[task["target"]]
     hh = next(o for o in twin["objects"] if o["id"] == task["object_id"])["size"][2] / 2
+    if "target_xy" in task:  # move_on_table: a spot on the same table
+        return np.array([task["target_xy"][0], task["target_xy"][1], top(tgt) + hh + 0.012])
     tops = max(top(f) for f in twin["fixtures"] if is_counter_host(f)) if tgt["type"] == "sink" else top(tgt)
     if tgt["type"] == "sink":
         return np.array([tgt["position"][0], tgt["position"][1], tops + hh + 0.05])
@@ -90,6 +92,14 @@ def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False
         src = fx[task["source"]]
         ox, tx = to_local(obj_xy[:2], src)[0], to_local(place_point(twin, task)[:2], src)[0]
         base = park(src, ox + MOBILE_STEP * float(np.sign(tx - ox)), 0.28)
+    elif fam == "move_on_table":
+        # at the table edge nearer the object (task["side"] is +1 or -1 along the table's local y), halfway between
+        # where the object starts and where it goes, facing in
+        src = fx[task["source"]]
+        ox, tx = to_local(obj_xy[:2], src)[0], to_local(task["target_xy"], src)[0]
+        base = to_world(((ox + tx) / 2, task["side"] * (src["size"][1] / 2 + 0.28)), src) + (0.75,)
+        n = task["side"] * front(src)
+        return base, float(np.degrees(np.arctan2(-n[1], -n[0]))), src
     elif fam in PICK_PLACE:
         src = fx[task["source"]]
         mid = (np.array(obj_xy[:2]) + place_point(twin, task)[:2]) / 2
@@ -137,7 +147,7 @@ def reach_points(twin: dict, task: dict, obj_xy=None, mobile: bool = False) -> l
         obj_xy = task["start"][:2]
     if mobile_drive(task, mobile):
         return [("the object", np.array(obj_xy[:2]))]
-    if fam in PICK_PLACE:
+    if fam in PICK_PLACE or fam == "move_on_table":
         return [("the object", np.array(obj_xy[:2])), ("the place point", place_point(twin, task)[:2])]
     if fam == "put_in_drawer":
         src = next(f for f in twin["fixtures"] if f["id"] == task["fixture"])
