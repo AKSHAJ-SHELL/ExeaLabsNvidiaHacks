@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "arrival-sim"
 version = "0.1.0"
-description = "Arrival: one room scan -> GR00T LeRobot v2 dataset of that room (MVP, placeholder motion)."
+description = "Arrival: one room scan -> digital twin -> MuJoCo-simulated LeRobot v2 demos for GR00T (arm, people, closed-loop eval; a scripted placeholder dataset is also available)."
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
