@@ -83,6 +83,15 @@ python scripts/demo_all.py --room hero_kitchen --out out/demo --serve
 ```
 
 Runs scan and compile, twin layout PNG, sim dataset, validate, scripted-expert eval and contact sheet, prints PASS or FAIL per stage, and writes `<out>/demo_summary.md` and `demo_summary.json`. Exits 1 if a stage fails. See `docs/ref/DEM-4.md`.
+To land a new real scan (CAP-3a), `scripts/intake_scan.py` creates `scans/<room_id>/`, strips EXIF from the photos, writes `notes.md` and `measurements.json`, runs the geometry checks and prints GO or NO-GO (exit 0, 1, or 2 when an input is refused):
+
+```bash
+python scripts/intake_scan.py kitchen_01 --roomplan roomplan.json --photos a.jpg b.jpg --location-type kitchen \
+    --phone "iPhone 15 Pro" --ios 18.1 --lighting daylight --clutter low \
+    --measure counter_length=3.20,counter_height=0.92,sink_width=0.55   # also --no-photos, --scans DIR, --out DIR
+```
+
+`arrival.scan.intake.validate_scan_dir(path)` lists what is still missing. Details in `docs/ref/CAP-3a.md`.
 
 ## Simulation (MuJoCo)
 
