@@ -1,34 +1,12 @@
-// HUD wiring: tasks, playback, scrubber, layers, readouts, picking, index, theme.
+// HUD wiring: tasks, playback, scrubber, layers, readouts, picking, index. (The theme toggle lives in chrome.js.)
 import { FAMILIES, frameUrl } from './data.js';
 import { familyLabel } from './sections.js';
-import { fmt, safeStorage, clamp, $, $$ } from './util.js';
-
-export function readTheme() {
-  const cs = getComputedStyle(document.documentElement), v = (k) => cs.getPropertyValue(k).trim();
-  const paper = v('--paper');
-  const m = /^#?([0-9a-f]{6})$/i.exec(paper);
-  const n = m ? parseInt(m[1], 16) : 0xefe9dc;
-  const lum = (((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.114) / 255;
-  return { paper, ink: v('--ink'), signal: v('--signal'), dark: lum < 0.5 };
-}
+import { fmt, clamp, $, $$ } from './util.js';
 
 export function initUI({ stage, data, announce }) {
   const stageEl = $('#stage');
   const ui = { family: null };
   const J = stage.J;
-
-  // ---------- theme ----------
-  const html = document.documentElement, themeBtn = $('#themeBtn');
-  const isNight = () => html.dataset.theme === 'night' || (html.dataset.theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
-  const syncTheme = () => { stage.setTheme(readTheme()); themeBtn.setAttribute('aria-pressed', String(isNight())); themeBtn.setAttribute('aria-label', isNight() ? 'Switch to day plan' : 'Switch to night plan'); };
-  themeBtn.addEventListener('click', () => {
-    html.classList.add('theme-fade');                       // ease the brightness change instead of a hard flip [14]
-    html.dataset.theme = isNight() ? 'day' : 'night';
-    safeStorage.set('arrival-theme', html.dataset.theme);
-    requestAnimationFrame(syncTheme); setTimeout(() => html.classList.remove('theme-fade'), 400);
-  });
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (html.dataset.theme === 'auto') requestAnimationFrame(syncTheme); });
-  syncTheme();
 
   // ---------- tasks ----------
   const list = $('#taskList'), tray = $('#tray'), trayToggle = $('#trayToggle'), trayCur = $('#trayCur');
@@ -37,12 +15,13 @@ export function initUI({ stage, data, announce }) {
     const s = data.stats.families[f];
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'task tilt'; b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', 'false'); b.dataset.family = f;
-    b.innerHTML = `<img src="${frameUrl(f, 'ego_view', 'mid')}" width="64" height="64" alt="" loading="lazy"><span><span class="task__t">${s.instruction}</span><span class="task__m mono">${familyLabel(f)} · ${s.duration_s.toFixed(1)} s</span></span>`;
+    b.innerHTML = `<img src="${frameUrl(f, 'ego_view', 'mid')}" width="64" height="64" alt="" decoding="async"><span class="task__t">${s.instruction}</span><span class="task__m mono"><span class="task__d">${s.duration_s.toFixed(1)} s</span><span class="task__f">${familyLabel(f)}</span></span>`;
+    b.title = `${s.instruction} (${familyLabel(f)})`;
     b.addEventListener('click', () => selectTask(f));
     list.appendChild(b); cards[f] = b;
   }
   list.addEventListener('keydown', (e) => {                    // roving radio group
-    const i = FAMILIES.indexOf(ui.family);
+    const i = FAMILIES.indexOf(ui.want || ui.family);
     const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
     if (!d) return; e.preventDefault();
     const nf = FAMILIES[(i + d + FAMILIES.length) % FAMILIES.length]; selectTask(nf); cards[nf].focus();
@@ -51,30 +30,44 @@ export function initUI({ stage, data, announce }) {
   trayToggle.addEventListener('click', () => setTray(!tray.classList.contains('is-open')));
   ui.setTray = setTray;
 
-  const rd = { task: $('#rdTask'), time: $('#rdTime'), frame: $('#rdFrame'), result: $('#rdResult'), min: $('#rdMin'), live: $('#rdLive') };
+  const rd = { time: $('#rdTime'), frame: $('#rdFrame'), result: $('#rdResult'), min: $('#rdMin'), live: $('#rdLive') };
   const scrub = $('#scrub'), mark = $('#scrubMark'), timeRead = $('#timeRead'), playBtn = $('#playBtn');
   const cache = {};
   const put = (k, el, txt) => { if (cache[k] !== txt) { cache[k] = txt; el.textContent = txt; } };
 
+  let seq = 0, userPaused = false;
+  const markCards = (f) => { for (const k in cards) { cards[k].setAttribute('aria-checked', String(k === f)); cards[k].tabIndex = k === f ? 0 : -1; } };
+  // Latest click wins: each call takes a token, and a slower earlier load that resolves late is dropped.
   async function selectTask(f, { silent = false } = {}) {
+    if (f === ui.family && !ui.want) return;
+    const my = ++seq; ui.want = f;
+    markCards(f);                                              // respond on press, before the episode arrives
+    const card = cards[f]; card.classList.add('is-loading'); card.setAttribute('aria-busy', 'true');
+    let ep;
+    try { ep = await data.loadEpisode(f); }
+    catch (err) {
+      console.warn('episode failed to load', f, err);
+      card.classList.remove('is-loading'); card.removeAttribute('aria-busy');
+      if (my === seq) { ui.want = null; markCards(ui.family); announce(`Could not load the ${familyLabel(f)} episode. Try again.`); }
+      return;
+    }
+    card.classList.remove('is-loading'); card.removeAttribute('aria-busy');
+    if (my !== seq) return;
+    ui.want = null;
     if (f === ui.family) return;
     const wasPlaying = stage.playing;
-    const ep = await data.loadEpisode(f);
     ui.family = f;
     stage.setEpisode(ep);
-    for (const k in cards) { cards[k].setAttribute('aria-checked', String(k === f)); cards[k].tabIndex = k === f ? 0 : -1; }
     const s = data.stats.families[f];
     trayCur.textContent = s.instruction;
-    put('task', rd.task, s.instruction);
     scrub.max = String(ep.n - 1); scrub.value = '0';
     $('.scrub').style.setProperty('--secs', String(Math.max(1, Math.round(stage.duration))));
     const t = stage.closestApproachT;
     if (t != null) { mark.hidden = false; mark.style.left = `calc(${(t / stage.duration) * 100}% )`; mark.title = `Recorded closest approach to a person: ${ep.min_human_distance_m.toFixed(3)} m at control step ${ep.safety.min_distance_step}`; } else mark.hidden = true;
-    const res = ep.success ? 'success, physics checked' : 'failed';
-    put('result', rd.result, res + (ep.human_contact ? ', person touched' : ', no person touched'));
-    put('min', rd.min, `${ep.min_human_distance_m.toFixed(3)} m recorded`);
+    put('result', rd.result, ep.success ? (ep.human_contact ? 'success, contact' : 'success') : 'failed');
+    put('min', rd.min, `${ep.min_human_distance_m.toFixed(2)}`);
     stage.seekFrame(0);
-    if (wasPlaying || J.autoplay) stage.play();
+    if (wasPlaying || (J.autoplay && !stage.reduced && !userPaused)) stage.play();
     if (!silent) announce(`Task: ${s.instruction} ${ep.success ? 'Succeeded.' : 'Failed.'} Closest person ${ep.min_human_distance_m.toFixed(2)} metres.`);
     select(null);
   }
@@ -83,22 +76,27 @@ export function initUI({ stage, data, announce }) {
   // ---------- playback ----------
   const setPlayState = (p) => { playBtn.dataset.state = p ? 'playing' : 'paused'; playBtn.setAttribute('aria-label', p ? 'Pause' : 'Play'); };
   stage.cb.play = setPlayState; setPlayState(stage.playing);
-  playBtn.addEventListener('click', () => { stage.toggle(); });
+  const userToggle = () => { stage.toggle(); userPaused = !stage.playing; };
+  playBtn.addEventListener('click', userToggle);
   playBtn.setAttribute('aria-keyshortcuts', 'K');
 
   let scrubbing = false;
-  const scrubText = () => { const f = Math.round(+scrub.value); scrub.setAttribute('aria-valuetext', `frame ${f} of ${stage.ep.n - 1}, ${(f / stage.ep.fps).toFixed(1)} seconds`); };
-  scrub.addEventListener('pointerdown', () => { scrubbing = true; });
-  addEventListener('pointerup', () => { scrubbing = false; });
-  scrub.addEventListener('input', () => { stage.pause(); stage.seekFrame(+scrub.value); scrubText(); });
+  const scrubText = (v = +scrub.value) => {
+    const f = Math.round(v), txt = `frame ${f} of ${stage.ep.n - 1}, ${(f / stage.ep.fps).toFixed(1)} seconds`;
+    if (cache.vt !== txt) { cache.vt = txt; scrub.setAttribute('aria-valuetext', txt); }
+  };
+  scrub.addEventListener('pointerdown', () => { scrubbing = true; stageEl.classList.add('bench-seen'); });
+  playBtn.addEventListener('click', () => stageEl.classList.add('bench-seen'));
+  addEventListener('pointerup', () => { scrubbing = false; }); addEventListener('pointercancel', () => { scrubbing = false; });
+  scrub.addEventListener('input', () => { stage.pause(); userPaused = true; stage.seekFrame(+scrub.value); scrubText(); });
   scrub.addEventListener('keydown', (e) => {
     const step = e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'PageUp' ? 15 : e.key === 'PageDown' ? -15 : 0;
-    if (!step) return; e.preventDefault(); stage.pause();
+    if (!step) return; e.preventDefault(); stage.pause(); userPaused = true;
     const f = clamp(Math.round(+scrub.value) + step, 0, stage.ep.n - 1); scrub.value = String(f); stage.seekFrame(f); scrubText();
   });
   addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();
-    if (e.key === 'k' && !e.metaKey && !e.ctrlKey && tag !== 'input' && tag !== 'textarea' && J.autoplay) { stage.toggle(); }
+    if (e.key === 'k' && !e.metaKey && !e.ctrlKey && tag !== 'input' && tag !== 'textarea' && J.autoplay) { userToggle(); }
     if (e.key === 'Escape') {
       if (!$('#indexPanel').hidden) { toggleIndex(false); return; }
       if (!$('#callout').hidden) { select(null); return; }
@@ -109,10 +107,11 @@ export function initUI({ stage, data, announce }) {
   // ---------- readouts, throttled by the stage ----------
   stage.cb.frame = (s) => {
     put('time', rd.time, `${fmt.t(s.t)} / ${fmt.t(s.dur)} s`);
-    put('frame', rd.frame, `${String(Math.round(s.f)).padStart(3, '0')} / ${String(s.n - 1).padStart(3, '0')} at ${stage.ep.fps} fps`);
-    put('live', rd.live, Number.isFinite(s.live) ? `${s.live.toFixed(2)} m now` : 'not shown');
+    put('frame', rd.frame, `${String(Math.round(s.f)).padStart(3, '0')} / ${String(s.n - 1).padStart(3, '0')}`);
+    put('live', rd.live, Number.isFinite(s.live) ? `/ ${s.live.toFixed(2)} m` : '/ n/a');
     put('tr', timeRead, `${fmt.t(s.t)} s`);
     if (!scrubbing && document.activeElement !== scrub) scrub.value = String(s.f);
+    scrubText(s.f);
     if (callout.name) refreshCallout();
   };
 
@@ -123,7 +122,7 @@ export function initUI({ stage, data, announce }) {
   }));
   const modeBtn = $('#modeBtn');
   modeBtn.addEventListener('click', () => stage.setMode(stage.mode === 'explore' ? 'tour' : 'explore'));
-  stage.cb.mode = (m) => { modeBtn.setAttribute('aria-pressed', String(m === 'explore')); modeBtn.textContent = m === 'explore' ? 'Back to tour' : 'Explore'; stageEl.classList.toggle('is-explore', m === 'explore'); announce(m === 'explore' ? 'Explore mode. Drag to orbit, wheel to zoom, Escape to return.' : 'Tour mode.'); };
+  stage.cb.mode = (m) => { modeBtn.setAttribute('aria-pressed', String(m === 'explore')); modeBtn.textContent = m === 'explore' ? 'Back to tour' : 'Explore'; stageEl.classList.toggle('is-explore', m === 'explore'); if (m === 'explore') stageEl.classList.add('bench-seen'); announce(m === 'explore' ? 'Explore mode. Drag to orbit, wheel to zoom, Escape to return.' : 'Tour mode.'); };
 
   // ---------- picking, hover, callout ----------
   const callout = { el: $('#callout'), kind: $('#coKind'), name: null, nameEl: $('#coName'), rows: $('#coRows') };
@@ -193,7 +192,7 @@ export function initUI({ stage, data, announce }) {
   function select(name, focus = false) {
     callout.name = name; callout.sig = null;
     stage.setSelect(name);
-    callout.el.hidden = !name;
+    callout.el.hidden = !name; $('#side').classList.toggle('has-callout', !!name);
     $$('#indexCols button').forEach((b) => b.setAttribute('aria-current', String(b.dataset.name === name)));
     if (name) { refreshCallout(); announce(`${callout.kind.textContent}: ${callout.nameEl.textContent}`); if (focus) stage.focusOn(name); }
   }

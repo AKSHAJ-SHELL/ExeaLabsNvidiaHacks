@@ -125,12 +125,10 @@
         <!-- readouts + camera feeds (right column) -->
         <aside class="side" id="side" aria-label="Live readouts" data-lenis-prevent>
           <dl class="readout mono" id="readout">
-            <div><dt>Task</dt><dd id="rdTask">Open the top drawer.</dd></div>
             <div><dt>Time</dt><dd id="rdTime">00.00 / 00.00 s</dd></div>
-            <div><dt>Frame</dt><dd id="rdFrame">000 / 000 at 15 fps</dd></div>
-            <div><dt>Result</dt><dd id="rdResult">success, physics checked</dd></div>
-            <div><dt>Closest person</dt><dd id="rdMin">0.000 m recorded</dd></div>
-            <div><dt>Hand to person</dt><dd id="rdLive">0.00 m now</dd></div>
+            <div><dt>Frame</dt><dd id="rdFrame">000 / 000</dd></div>
+            <div><dt>Result</dt><dd id="rdResult">success</dd></div>
+            <div><dt>Person</dt><dd title="Closest recorded approach (surface to surface) / distance now (hand to the centre of the nearest limb, computed from the poses, so it stays above the recorded minimum)"><span id="rdMin">0.00</span><span id="rdLive">/ 0.00 m</span></dd></div>
           </dl>
           <div class="feeds" id="feeds">
             <figure class="feed"><div id="feedEgo" class="feed__view"></div><figcaption class="mono">ego_view</figcaption></figure>
@@ -179,8 +177,8 @@
           <article class="note" data-note="bench" aria-hidden="true">
             <p class="note__tag mono">03 &middot; Simulate &middot; b</p>
             <h2 class="note__title">Your turn</h2>
-            <p class="note__lead">Pick a task. Scrub the real trajectory. Click any fixture or part.</p>
-            <p class="note__body">Drag to orbit. Explore mode adds wheel zoom and pan; Esc returns to the tour. The two small views are the cameras the dataset records.</p>
+            <p class="note__lead">Pick a task, then scrub the run.</p>
+            <p class="note__body">Click any part to inspect it.</p>
           </article>
         </div>
 
@@ -204,7 +202,7 @@
             <p class="mono timeread" id="timeRead" aria-hidden="true">00.00 s</p>
             <div class="chips">
               <button class="chip" id="modeBtn" type="button" aria-pressed="false">Explore</button>
-              <button class="chip" id="indexBtn" type="button" aria-expanded="false" aria-controls="indexPanel">Index</button>
+              <button class="chip chip--icon" id="indexBtn" type="button" aria-expanded="false" aria-controls="indexPanel" aria-label="Plan index" title="Plan index"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></button>
             </div>
           </div>
         </div>
@@ -375,7 +373,6 @@
   <p class="close__lead">The twin, the physics and the dataset on this page are real, produced by the pipeline in this repository. A GR00T fine-tune and a scan of a real kitchen are what turn this from a working pipeline into a result.</p>
   <div class="close__actions">
     <button class="btn" id="toTop" type="button">Back to the plan</button>
-    <p class="mono close__run">Run it: <code>make site</code> then open <code>localhost:8765</code></p>
   </div>
   <footer class="sheetfoot mono">
     <span>Exea Labs</span><span>Sheet A-06 / 06</span><span>Data: site/data, exported by scripts/export_demo_data.py</span><span data-bind="stats.sim.engine"></span>
