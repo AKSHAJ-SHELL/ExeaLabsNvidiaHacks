@@ -233,6 +233,12 @@ class SimEnv:
         r.update_scene(self.data, cam)
         return r.render().copy()
 
+    def __enter__(self) -> "SimEnv":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
     def close(self) -> None:
         """Free the GL contexts. On Windows, letting an old renderer be collected after a new one exists leaves
         no context current, and every frame from then on is black."""
@@ -299,27 +305,29 @@ def robot_drawer_z() -> float:
 
 
 def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: list | None = None) -> dict:
-    policy.reset(env, task)
-    env.safety.reset()
-    states, actions, frames, people = [], [], {c: [] for c in env.cameras}, []
-    tail = 0
-    for t in range(max_steps):
-        obs = env.obs()
-        a = policy.act(obs)
-        states.append(obs["state"])
-        actions.append(np.asarray(a, dtype=np.float32))
-        for c in env.cameras:
-            frames[c].append(obs[c])
-        if preview is not None:
-            preview.append(env.render("overview", big=True))
-        env.step(a)
-        people.append(env.people_xy)
-        if getattr(policy, "done", lambda: False)():
-            tail += 1
-            if tail > 10:
-                break
-    ok, detail = env.success(task)
-    env.close()
+    try:
+        policy.reset(env, task)
+        env.safety.reset()
+        states, actions, frames, people = [], [], {c: [] for c in env.cameras}, []
+        tail = 0
+        for t in range(max_steps):
+            obs = env.obs()
+            a = policy.act(obs)
+            states.append(obs["state"])
+            actions.append(np.asarray(a, dtype=np.float32))
+            for c in env.cameras:
+                frames[c].append(obs[c])
+            if preview is not None:
+                preview.append(env.render("overview", big=True))
+            env.step(a)
+            people.append(env.people_xy)
+            if getattr(policy, "done", lambda: False)():
+                tail += 1
+                if tail > 10:
+                    break
+        ok, detail = env.success(task)
+    finally:
+        env.close()  # idempotent; frees both GL renderers when the policy, the step or the success check raises
     return {"states": np.array(states), "actions": np.array(actions), "videos": {c: np.array(v) for c, v in frames.items()},
             "success": ok, "detail": detail, "people_xy": people, "ik_error": getattr(policy, "ik_error", None),
             "safety": env.safety.summary(),

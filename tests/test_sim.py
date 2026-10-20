@@ -303,3 +303,30 @@ def test_generated_instructions_do_not_claim_a_template_index(twin):
 
     tasks = make_tasks(twin, ["open_drawer"], 4, split="eval", use_generated_instructions=True, log=lambda *_: None)
     assert tasks and {t["wording_index"] for t in tasks} == {-1}
+
+
+def test_sim_dataset_has_stats_and_shared_video_info(twin, tmp_path):
+    res = collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=32, log=lambda *_: None)
+    meta = res["dataset"] / "meta"
+    stats = json.loads((meta / "stats.json").read_text(), parse_constant=lambda c: pytest.fail(c))
+    assert {"observation.state", "action", "timestamp", "next.done"} <= set(stats)
+    feat = json.loads((meta / "info.json").read_text())["features"]["observation.images.ego_view"]
+    assert feat["info"]["video.height"] == 32 and feat["info"]["video.pix_fmt"] == "yuv420p"
+
+
+def test_collect_rejects_res_that_mp4_would_resize(twin, tmp_path):
+    with pytest.raises(ValueError, match="multiples of 16"):
+        collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=40, log=lambda *_: None)
+
+
+def test_run_episode_closes_env_when_the_policy_raises(twin, monkeypatch):
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+
+    task = {"family": "open_fridge", "fixture": "fridge_1", "joint": "fridge_1_door", "lighting": "neutral",
+            "people": 0, "seed": 0}
+    monkeypatch.setattr(ScriptedExpert, "reset", lambda self, env, task: (_ for _ in ()).throw(ValueError("boom")))
+    env = SimEnv(twin, task, res=32)
+    with pytest.raises(ValueError):
+        run_episode(env, ScriptedExpert(), task)
+    assert env.renderer is None

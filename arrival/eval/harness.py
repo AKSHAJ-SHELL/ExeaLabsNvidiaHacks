@@ -53,8 +53,8 @@ def evaluate(twin: dict, families: list[str], episodes: int, policy_name: str = 
         rows = []
         for task in tasks:
             t0 = time.perf_counter()
-            env = SimEnv(twin, task, res=res)
-            ep = run_episode(env, policy, task)
+            with SimEnv(twin, task, res=res) as env:
+                ep = run_episode(env, policy, task)
             wall = time.perf_counter() - t0
             s = ep["safety"]
             ok = ep["success"] and not s["human_contact"]
