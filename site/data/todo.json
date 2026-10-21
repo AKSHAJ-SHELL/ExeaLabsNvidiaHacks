@@ -1,7 +1,7 @@
 {
  "as_of": "2026-10-21",
  "repo": "AvnehSBhatia/ExeaLabsNvidiaHacks",
- "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site",
+ "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site; teammate PRs #118, #126-#150 and #152-#155 merged on feat/gap-fixes",
  "counts": {
   "done": 53,
   "review": 0,
@@ -258,7 +258,7 @@
       99
      ],
      "issue": 42,
-     "note": "Replaces #49, #75 and #77. Corner-cabinet doors on the U-kitchen are now accepted by a wider stand-spot search; its drawers and the rotated kitchen fridge stay rejected."
+     "note": "Replaces #49, #75 and #77. The U-kitchen corner cabinet door now opens from a stand spot 0.25 m along its run. Its drawers, its close_door and the rotated kitchen fridge stay rejected."
     },
     {
      "id": "L2",

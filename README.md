@@ -84,7 +84,7 @@ Pull requests against main. All are merged into feat/demo-site and none is on ma
 
 | id | what | size | priority | status | PRs or issue |
 |---|---|---|---|---|---|
-| L1 | Fixtures on any wall (#49, #75, #77 folded into one PR) Replaces #49, #75 and #77. Corner-cabinet doors on the U-kitchen are now accepted by a wider stand-spot search; its drawers and the rotated kitchen fridge stay rejected. | M | must | Shipped | #99 |
+| L1 | Fixtures on any wall (#49, #75, #77 folded into one PR) Replaces #49, #75 and #77. The U-kitchen corner cabinet door now opens from a stand spot 0.25 m along its run. Its drawers, its close_door and the rotated kitchen fridge stay rejected. | M | must | Shipped | #99 |
 | L2 | Failed task skips instead of crashing; pre-flight reach check | S | must | Shipped | #99 |
 | L3 | Worker hard limits: subprocess timeout, size caps, stage-tagged errors | M | must | Shipped | #96 |
 | L4 | Harden the web app for public hosting | M | must | Shipped | #97 |
@@ -129,7 +129,7 @@ A GPU host with 40 GB or more, or a Linux box.
 | id | what | size | priority | status | PRs or issue |
 |---|---|---|---|---|---|
 | G1 | Real GR00T loader check and 100-step fine-tune on hero_kitchen_sim Offline slice done: 28 of 28 episodes at 224 px, validator passes, loader check passes with 4 warnings. GR00T itself has not loaded the data. | M | must | Blocked | issue #63 |
-| G2 | Real GR00T policy server: chunking, both camera keys, golden-file test Wire-format golden test and the 8-float and 11-float schemas are done. The shim has run against a real GR00T server (fixed base, 100-step checkpoint; arm actions come back absolute, see docs/ref/POL-3.md); the 11-float schema has not. | M | must | Shipped | none |
+| G2 | Real GR00T policy server: chunking, both camera keys, golden-file test Wire-format golden test and the 8-float and 11-float schemas are done. The shim has not run against a real GR00T server. | M | must | Blocked | none |
 | G3 | Three-cell held-out eval, 50 episodes per cell, Wilson intervals | L | must | Blocked | issue #64 |
 | G4 | Generic-RoboCasa baseline dataset and fine-tune | M | must | Blocked | issue #64 |
 | G5 | Dockerfile.gpu, run_finetune.sh, train and serve targets Dockerfile.gpu, scripts/run_finetune.sh and the train, eval-policy and serve-policy targets are written and never run on a GPU. Unverified items are listed in the build log. | L | must | Blocked | issue #63 |
@@ -172,8 +172,8 @@ Physical rooms, a LiDAR iPhone, or a human.
 
 - The GR00T loader has not read our dataset since the latest fixes; only our own validator and the offline conformance check have (G1).
 - The mobile base (L13) is behind `--base mobile` and the real Franka behind `--arm menagerie`; the defaults are still the fixed Panda-style arm. The Menagerie arm was measured over all families only at seed 5 with no people.
-- In a 28-episode 224 px run, `close_door` episodes 4, 14 and 24 are still flagged by the quality check for a joint at its limit. Every alternative grasp either missed the handle or put a finger into the door front.
-- With a fixed base, drawers on the U-kitchen's corner cabinet and the rotated kitchen's fridge stay unreachable and are skipped. The reach planner checks the arm's IK, not collisions.
+- A 28-episode run at 64 px after the door joint-limit fix (#152) succeeds 28 of 28 with 0 episodes flagged by the quality check. It was not rerun at 224 px.
+- With a fixed base, drawers and `close_door` on the U-kitchen's corner cabinet and the rotated kitchen's fridge stay unreachable and are skipped. Only the corner cabinet's `open_door` takes a shifted stand spot. The reach planner checks the arm's IK, not collisions.
 - The expert's fridge push heading ignores the fixture's yaw, and walker yield ignores the arm links.
 - The memory cap (`ARRIVAL_MAX_JOB_MB`) was never measured on Linux.
 - The web page was checked with curl, tests and scripts, not in a browser. Uploads are processed by local workers that share one `out/` folder.

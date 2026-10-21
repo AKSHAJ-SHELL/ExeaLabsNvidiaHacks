@@ -33,7 +33,7 @@ WIDE_SHIFTS = sorted(((da, do) for do in (0.0, -0.1, 0.1, -0.2, 0.2, 0.3) for da
 # stood at from further along its own run. The planner's checks are the same; the expert's run decides the rest.
 IK_FAMILIES = ("counter_to_sink", "counter_to_counter", "move_on_table", "put_in_drawer", "wipe_counter",
                "load_dishwasher", "unload_dishwasher")  # the families whose hand targets come from the twin alone
-WIDE_FAMILIES = IK_FAMILIES + ("open_door", "close_door")
+WIDE_FAMILIES = IK_FAMILIES + ("open_door",)  # close_door is left out: its two-phase push is not modelled by the waypoints here
 # the families the second grid serves: the IK families (their reach is solved at each spot) and the cabinet door tasks,
 # whose handle is reached from beside the door (the corner cabinet of u_kitchen_42, 8 of 8 runs from 0.2 m along). A drawer
 # is pulled from straight in front of it (0 of 36 spots on the one drawer a sink blocks) and the fridge's hook-and-push

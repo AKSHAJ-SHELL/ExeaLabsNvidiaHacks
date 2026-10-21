@@ -117,8 +117,8 @@ def test_no_drawer_or_door_task_where_the_base_cannot_stand():
 
 
 def test_corner_cabinet_door_stands_along_its_run_but_the_blocked_drawer_and_outside_fridge_stay_rejected():
-    """u_kitchen_42's storage_b has the sink run on its stand spot: its doors take a spot 0.25 m along the run (the
-    wide fallback grid) and open and close in the sim; its drawer is pulled from in front of the sink, so it stays
+    """u_kitchen_42's storage_b has the sink run on its stand spot: its door takes a spot 0.25 m along the run (the
+    wide fallback grid) and opens in the sim; its drawer is pulled from in front of the sink, so it stays
     rejected, and rotated_kitchen's fridge, whose free-edge side is outside the room, stays rejected too."""
     from arrival.sim.collect import SimEnv, run_episode
     from arrival.sim.policy import ScriptedExpert
@@ -133,10 +133,10 @@ def test_corner_cabinet_door_stands_along_its_run_but_the_blocked_drawer_and_out
         corner += [t for t in tasks if t.get("fixture") == "storage_b"]
         pre["rejected"] = pre.get("rejected", 0) + pre_f["rejected"]
         pre.setdefault("reasons", []).extend(pre_f["reasons"])
-    assert {t["family"] for t in corner} == {"open_door", "close_door"}
+    assert {t["family"] for t in corner} == {"open_door"}  # close_door is not offered at the corner: see reach.WIDE_FAMILIES
     assert all(t["base_shift"] == [0.25, 0.0] for t in corner)
-    assert pre["rejected"] == 2 and all("sink" in r["reason"] for r in pre["reasons"])
-    for fam in ("open_door", "close_door"):
+    assert pre["rejected"] == 3  # open_drawer, close_drawer (the sink run is on the stand spot) and close_door (not offered at the corner)
+    for fam in ("open_door",):
         t = finish_task(next(t for t in corner if t["family"] == fam))
         ep = run_episode(SimEnv(twin, t, res=32), ScriptedExpert(), t)
         assert ep["success"], fam
