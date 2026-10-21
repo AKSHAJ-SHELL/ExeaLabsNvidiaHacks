@@ -71,3 +71,14 @@ def test_gives_up_after_max_attempts_and_refuses_other_settings(tmp_path):
 def test_nebius_stub_is_not_a_backend():
     with pytest.raises(NotImplementedError):
         NebiusBackendStub().submit(CFG, 0)
+
+
+def test_unknown_backend_state_does_not_count_as_a_failed_attempt(tmp_path):
+    class UnknownBackend(LocalBackend):
+        def poll(self, job_id):
+            return "queued"
+
+    be = UnknownBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    with pytest.raises(ShardError, match="unknown state 'queued'"):
+        run_fanout(be, CFG, tmp_path / "out", poll_seconds=0, log=quiet)
+    assert be.submissions == [(0, 1), (1, 1)]
