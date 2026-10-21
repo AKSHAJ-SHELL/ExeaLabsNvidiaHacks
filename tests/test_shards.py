@@ -68,6 +68,17 @@ def test_journal_resume_rejects_out_of_order_task_records(tmp_path):
     assert j.path.read_bytes() == before
 
 
+def test_journal_does_not_discard_a_corrupt_completed_line(tmp_path):
+    j = Journal(tmp_path / "progress.jsonl")
+    j.start(FP, resume=False)
+    with j.path.open("a") as stream:
+        stream.write("{broken}\n")  # a complete line, not an interrupted append
+    before = j.path.read_bytes()
+    with pytest.raises(ShardError, match="line 2 is not JSON"):
+        j.start(FP, resume=True)
+    assert j.path.read_bytes() == before
+
+
 # ---- merge, on synthetic episodes (no MuJoCo) ----
 
 def _episode(n, seed):
