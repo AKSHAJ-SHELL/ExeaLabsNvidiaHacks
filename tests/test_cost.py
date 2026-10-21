@@ -187,6 +187,19 @@ def test_empty_out_dir(tmp_path):
     assert "no reports" in text and "comparison not measured" in text
 
 
+@pytest.mark.parametrize("usage,metric", [
+    ({"wall_seconds": -1}, "wall_seconds"),
+    ({"frames": 2.5}, "frames"),
+    ({"upload_bytes": True}, "upload_bytes"),
+    ({"episodes_attempted": 1, "episodes_succeeded": 2}, "episodes_succeeded"),
+])
+def test_invalid_job_metering_cannot_change_totals(tmp_path, usage, metric):
+    (tmp_path / "usage").mkdir()
+    (tmp_path / "usage" / "jobs.jsonl").write_text(json.dumps({"id": "job1", **usage}) + "\n")
+    with pytest.raises(cost.CostError, match=metric):
+        cost.metering_totals(tmp_path)
+
+
 def test_unreadable_report_is_a_cost_error_not_a_traceback(tmp_path):
     (tmp_path / "reports").mkdir()
     (tmp_path / "reports" / "bad.json").write_text("{not json")

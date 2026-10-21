@@ -202,6 +202,17 @@ def dollars(usage: dict | None, pricing: dict | None) -> dict:
 def metering_totals(out_dir: str | Path) -> dict:
     """Sum of the worker's per-job metering. Each total is None when no job measured it (a sum over nothing is not 0)."""
     jobs = job_usage(out_dir)
+    for job_id, usage in jobs.items():
+        for key in METER_KEYS:
+            value = usage.get(key)
+            if value is None:
+                continue
+            valid = _num(value) and value >= 0 if key == "wall_seconds" else type(value) is int and value >= 0
+            if not valid:
+                raise CostError(f"job {job_id}: invalid metering value for {key}")
+        attempted, succeeded = usage.get("episodes_attempted"), usage.get("episodes_succeeded")
+        if attempted is not None and succeeded is not None and succeeded > attempted:
+            raise CostError(f"job {job_id}: episodes_succeeded exceeds episodes_attempted")
     tot: dict = {"jobs": len(jobs)}
     for k in METER_KEYS:
         vals = [u[k] for u in jobs.values() if _num(u.get(k))]
