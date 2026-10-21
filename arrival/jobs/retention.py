@@ -2,10 +2,10 @@
 
 ``python -m arrival gc --max-age-hours N`` and the worker's sweep (``ARRIVAL_RETENTION_HOURS``) call ``gc``; a future
 token-gated ``DELETE /jobs/<id>`` would call ``delete_job``. A job is removed with its ``out/jobs/<id>/`` folder (the
-upload, status, zip), its twin ``out/twins/<room>/``, its dataset ``out/datasets/<room>_sim/`` and its sim report. Queued
-and running jobs are never touched. The usage ledger ``out/usage/jobs.jsonl`` is kept so metering survives deletion.
-Only paths derived from the job id are removed: a room that does not end with the job id (a hand-made room such as
-``hero_kitchen``) is never deleted.
+upload, status, zip), its twin ``out/twins/<room>/``, its dataset ``out/datasets/<room>_sim/``, its sim report and its
+sim progress journal ``out/progress/<room>_sim.jsonl``. Queued and running jobs are never touched. The usage ledger
+``out/usage/jobs.jsonl`` is kept so metering survives deletion. Only paths derived from the job id are removed: a room
+that does not end with the job id (a hand-made room such as ``hero_kitchen``) is never deleted.
 """
 
 from __future__ import annotations
@@ -37,7 +37,8 @@ def job_paths(out_dir: Path, job_id: str, status: dict) -> list[Path]:
     paths = []
     room = status.get("room_id")
     if isinstance(room, str) and ID_RE.match(room) and room.endswith(job_id):
-        paths += [out / "twins" / room, out / "datasets" / f"{room}_sim", out / "reports" / f"{room}_sim.json"]
+        paths += [out / "twins" / room, out / "datasets" / f"{room}_sim", out / "reports" / f"{room}_sim.json",
+                  out / "progress" / f"{room}_sim.jsonl"]
     paths.append(out / "jobs" / job_id)
     return [p for p in paths if p.exists()]
 

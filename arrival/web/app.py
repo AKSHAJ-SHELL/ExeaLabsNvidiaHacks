@@ -1045,6 +1045,8 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         offset, size, filename = find_part(buf, boundary, "scan")
                         frames_part = find_part(buf, boundary, "frames", optional=True)
+                        if frames_part and frames_part[1] == 0 and not frames_part[2]:
+                            frames_part = None  # a browser sends the optional input left empty as a nameless, empty part
                     except UploadError as e:
                         return self._json(400, {"error": str(e)})
                     head = bytes(buf[offset:offset + min(size, 64)])
