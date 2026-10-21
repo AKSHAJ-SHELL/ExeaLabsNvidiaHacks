@@ -73,13 +73,14 @@ class Journal:
         fp = {k: fingerprint.get(k) for k in FINGERPRINT_KEYS}
         fp["exec_noise"] = fp["exec_noise"] or 0.0
         if resume and self.path.is_file():
-            lines = self.path.read_text().splitlines()
+            body = self.path.read_text()
+            lines = body.splitlines()
             rows = []
             for k, line in enumerate(lines):
                 try:
                     rows.append(json.loads(line))
                 except json.JSONDecodeError:
-                    if k != len(lines) - 1:
+                    if k != len(lines) - 1 or body.endswith("\n"):
                         raise ShardError(f"{self.path}: line {k + 1} is not JSON; delete the progress file to start over")
                     break  # a kill mid-write: that task counts as not done
             if rows:
