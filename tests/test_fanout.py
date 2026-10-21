@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("mujoco")
 
 from arrival.export.validate import validate  # noqa: E402
-from arrival.jobs.fanout import FanoutConfig, LocalBackend, NebiusBackendStub, run_fanout  # noqa: E402
+from arrival.jobs.fanout import FanoutConfig, LocalBackend, NebiusBackendStub, marker_key, run_fanout  # noqa: E402
 from arrival.jobs.shards import ShardError  # noqa: E402
 from conftest import SCANS  # noqa: E402
 
@@ -71,3 +71,13 @@ def test_gives_up_after_max_attempts_and_refuses_other_settings(tmp_path):
 def test_nebius_stub_is_not_a_backend():
     with pytest.raises(NotImplementedError):
         NebiusBackendStub().submit(CFG, 0)
+
+
+@pytest.mark.parametrize("marker", [b"{broken", b'{"shard": 1, "attempts": 1}',
+                                    b'{"shard": 0, "attempts": 0}'])
+def test_invalid_done_marker_cannot_skip_a_shard(tmp_path, marker):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    be.put_object(marker_key(CFG, 0), marker)
+    with pytest.raises(ShardError, match="invalid done marker"):
+        run_fanout(be, CFG, tmp_path / "out", log=quiet)
+    assert be.submissions == []
