@@ -169,13 +169,21 @@ def load_manifest(directory) -> Manifest:
     if split_ids is not None and not isinstance(split_ids, dict):
         _fail("split", "splits must be an object with train and heldout id lists")
     if split_ids is not None:  # optional explicit lists must agree with the per-frame field
-        both = set(split_ids.get("train", [])) & set(split_ids.get("heldout", []))
+        for name in SPLITS:
+            ids = split_ids.get(name)
+            if not isinstance(ids, list) or not all(isinstance(fid, str) for fid in ids):
+                _fail("split", f"splits.{name} must be a list of frame ids")
+            if len(ids) != len(set(ids)):
+                _fail("split", f"splits.{name} contains duplicate frame ids")
+        both = set(split_ids["train"]) & set(split_ids["heldout"])
         if both:
             _fail("frame_in_both_splits", f"frames in both train and heldout: {sorted(both)}")
         for name in SPLITS:
-            wrong = [f.id for f in frames if f.id in split_ids.get(name, []) and f.split != name]
-            if wrong:
-                _fail("frame_in_both_splits", f"frames listed in {name} but marked otherwise: {wrong}")
+            expected = {f.id for f in frames if f.split == name}
+            listed = set(split_ids[name])
+            if listed != expected:
+                _fail("split", f"splits.{name} disagrees with frame entries: missing {sorted(expected - listed)}, "
+                      f"unknown or mislabelled {sorted(listed - expected)}")
     return Manifest(room_id, root, rgb_size, depth_size, unit, world, frames)
 
 
