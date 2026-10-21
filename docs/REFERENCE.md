@@ -23,6 +23,44 @@ python -m pip install -e ".[dev,sim]"    # + MuJoCo for `python -m arrival sim`
 python -m pytest -q
 ```
 
+## Synchronized ego and exocentric capture
+
+The existing MuJoCo pipeline can export three views of each observation: robot-base `ego_view`, hand-mounted
+`wrist`, and the fixed room camera `overview` (exocentric). This is one physics rollout, not independently
+recorded episodes: every camera is rendered from the same simulation state before the action is applied.
+Frame `k` in all three MP4s corresponds to parquet row `k`, timestamp `k / 20` seconds within that episode.
+The added camera does not change the expert, success checks, actions, or the two original camera streams.
+
+```bash
+python -m arrival sim --room hero_kitchen --families open_drawer --episodes 2 --people 1 --res 128 --seed 3 --exocentric --save-preview --out out/multiview
+python -m arrival validate out/multiview/datasets/hero_kitchen_sim
+```
+
+`--exocentric` is opt-in; without it the original two-camera dataset is written. `--save-preview` also writes
+`out/multiview/previews/hero_kitchen_sim_ego_exo.mp4` and a middle-frame `.png`: labeled side-by-side views with
+one shared frame number and timestamp. These pairs use the exact observation frames supplied to the dataset
+writer; labels are added only to the human preview. The existing overview movie and contact sheet remain available.
+As with existing previews, the first task must reach rollout for a preview to be written; it may show a failed attempt.
+
+The external video is `videos/chunk-000/observation.images.overview/episode_000000.mp4` inside the dataset.
+It has the same dimensions, episode length, frame rate and indexing as ego and wrist; `meta/info.json` and
+`meta/modality.json` declare all three. `arrival_camera_capture` records the camera roles and `pre_action` capture
+phase. The writer rejects a missing, short, wrong-size or non-uint8 camera array before writing episode files.
+The collection report and provenance record the chosen cameras. `--resume` refuses a different camera set,
+including enabling the external view on a previous two-camera run. Use the same flag for every shard;
+`merge-shards` retains all three cameras and rejects mixed schemas.
+
+For a fixed-base GR00T experiment, use [arrival_panda_multiview_config.py](../configs/gr00t/arrival_panda_multiview_config.py)
+instead of the default config. It requests all three cameras at observation index zero and keeps the existing
+arm/gripper state and action semantics. The default config continues to use ego and wrist, so it can still read
+these datasets while ignoring the extra view. The current policy-server wire format also continues to send ego
+and wrist only; this contribution does not serve a three-camera model.
+
+This is physics-simulated, scripted-expert data, not a trained policy or real robot demonstration. The overview
+uses the existing room-wide camera; framing and occlusion depend on the room. No three-view GR00T training,
+policy-quality improvement, GPU run or cloud cost has been measured. Test and preview evidence is in
+[tests/test_multiview.py](../tests/test_multiview.py) and [the paired example](media/ego-exo.png).
+
 ## Run
 
 Smoke demo, 4 episodes, under a minute:

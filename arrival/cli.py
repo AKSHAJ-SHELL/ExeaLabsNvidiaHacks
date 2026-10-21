@@ -221,7 +221,8 @@ def cmd_sim(a) -> int:
                       seed=a.seed, save_preview=a.save_preview,
                       planner_name=a.planner, split=a.split,
                       use_generated_instructions=(a.instructions == "nemotron"), base=getattr(a, "base", "fixed"),
-                      shard=shard, resume=getattr(a, "resume", False), arm=getattr(a, "arm", "procedural"))
+                      shard=shard, resume=getattr(a, "resume", False), arm=getattr(a, "arm", "procedural"),
+                      exocentric=getattr(a, "exocentric", False))
     except ShardError as e:
         print(e, file=sys.stderr)
         return EXIT_USAGE
@@ -557,6 +558,8 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--scans", default="scans")
     m.add_argument("--seed", type=int, default=0)
     m.add_argument("--save-preview", action="store_true")
+    m.add_argument("--exocentric", action="store_true",
+                   help="also export the synchronized external overview camera; --save-preview adds a paired ego/exo video")
     m.add_argument("--shard", default=None, metavar="I/N",
                    help="run block I of N of the --episodes tasks (I counts from 0), into <out>/shards/<I>of<N>/; "
                         "join with merge-shards")
