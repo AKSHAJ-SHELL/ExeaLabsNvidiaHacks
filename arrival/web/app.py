@@ -162,6 +162,7 @@ progress { flex:1; min-width:140px; height:10px; accent-color:var(--accent); }
 STAGES = ("normalize", "twin", "realism", "objects", "sim", "validate", "zip")  # arrival.jobs.worker stage order
 PREVIEW_TYPES = {".png": "image/png", ".mp4": "video/mp4", ".gif": "image/gif"}
 PREVIEW_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+UPLOADED_ASSET_RE = re.compile(r"(?:^|_)(job_[0-9a-f]{8,32})_sim(?:$|_)")
 
 JS = """
 (function () {
@@ -792,7 +793,7 @@ class Handler(BaseHTTPRequestHandler):
         """Serve one png/mp4/gif from out/previews, with Range support so browsers can seek video."""
         f = self.out_dir / "previews" / name
         ctype = PREVIEW_TYPES.get(f.suffix.lower())
-        if not PREVIEW_RE.match(name) or ctype is None or not f.is_file():
+        if not PREVIEW_RE.match(name) or ctype is None or not f.is_file() or not self._room_asset_allowed(name):
             return self._not_found("No such preview")
         size = f.stat().st_size
         m = re.match(r"bytes=(\d*)-(\d*)$", self.headers.get("Range", ""))
@@ -820,7 +821,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _download(self, room: str):
         ds = self.out_dir / "datasets" / room
-        if not ds.is_dir():
+        if not ds.is_dir() or not self._room_asset_allowed(room):
             return self._not_found(f"No dataset for {room}")
         if not self.server.heavy_slots.acquire(blocking=False):  # zipping a dataset is the other costly request
             return self._error(503, "server is busy, retry shortly", {"Retry-After": "5"})
@@ -845,8 +846,30 @@ class Handler(BaseHTTPRequestHandler):
                 out.pop(k, None)
         return out
 
-    def _job(self, job_id: str):
+    def _room_asset_allowed(self, name: str) -> bool:
+        """Uploaded sim datasets and previews inherit the job's public-mode owner check."""
+        if not self.server.public:
+            return True
+        match = UPLOADED_ASSET_RE.search(name)
+        if match is None:
+            return True
+        status = read_job(self.out_dir / "jobs", match.group(1))
+        owner = self._owner()
+        return (status is not None and owner is not None and status.get("owner") == owner
+                and status.get("room_id") == name[:match.end(1)])
+
+    def _job_for_request(self, job_id: str) -> dict | None:
         status = read_job(self.out_dir / "jobs", job_id)
+        if status is None:
+            return None
+        if self.server.public:
+            owner = self._owner()
+            if owner is None or status.get("owner") != owner:
+                return None
+        return status
+
+    def _job(self, job_id: str):
+        status = self._job_for_request(job_id)
         if status is None:
             return self._json(404, {"error": "job not found"})
         self._json(200, self._public_status(status))
@@ -914,7 +937,7 @@ class Handler(BaseHTTPRequestHandler):
         self._html(200, "Room comparison", body)
 
     def _job_download(self, job_id: str):
-        status = read_job(self.out_dir / "jobs", job_id)
+        status = self._job_for_request(job_id)
         if status is None:
             return self._json(404, {"error": "job not found"})
         zip_path = self.out_dir / "jobs" / job_id / "dataset.zip"
