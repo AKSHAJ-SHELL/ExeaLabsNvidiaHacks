@@ -5,8 +5,9 @@ no done-marker to a `Backend`, polls, retries a failed shard, copies a finished 
 storage and writes that shard's done-marker LAST, so a marker means the shard's files are all there. A rerun after a
 kill skips every shard with a marker. When all markers exist the shards are downloaded and joined with `merge_shards`.
 
-Only `LocalBackend` exists and is tested: shards are local subprocesses and a directory stands in for object storage.
-`NebiusBackendStub` is an UNTESTED interface stub. No Nebius account was used; nothing here has run against Nebius."""
+`LocalBackend` runs shards as local subprocesses, with a directory standing in for object storage. `NebiusBackend`
+(arrival/jobs/nebius.py) runs them as Nebius Serverless AI Jobs with an Object Storage bucket; it is tested only
+against fakes and has never run against Nebius. `NebiusBackendStub` below is the earlier stub, which still raises."""
 
 from __future__ import annotations
 
