@@ -154,7 +154,12 @@ def validate(root: Path) -> dict:
     for f in m.frames:
         open_image(f.rgb, rgb_wh, "rgb")
         if f.confidence is not None:
-            open_image(f.confidence, None, "confidence")
+            mode = open_image(f.confidence, m.depth_size, "confidence")
+            if mode != "L":
+                raise FramesError("bad_confidence", f"confidence {f.confidence.name} must be an 8-bit grayscale PNG")
+            with Image.open(f.confidence) as im:
+                if np.asarray(im).max() > 2:
+                    raise FramesError("bad_confidence", f"confidence {f.confidence.name} must use ARKit levels 0, 1 or 2")
         if m.depth_unit == "m":
             try:
                 head = np.load(f.depth, mmap_mode="r", allow_pickle=False)
