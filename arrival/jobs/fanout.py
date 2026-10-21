@@ -170,6 +170,13 @@ def shard_prefix(cfg: FanoutConfig, i: int) -> str:
     return f"{cfg.run_id}/shards/{i}of{cfg.shards}"
 
 
+def require_shard_artifacts(backend: Backend, cfg: FanoutConfig, i: int) -> None:
+    base = f"{shard_prefix(cfg, i)}/datasets/{cfg.room}_sim/meta"
+    for name in ("info.json", "episodes.jsonl"):
+        if not backend.exists(f"{base}/{name}"):
+            raise ShardError(f"shard {i}/{cfg.shards} is missing {base}/{name}; done marker is not trustworthy")
+
+
 def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, parallel: int = 2, max_attempts: int = 3,
                poll_seconds: float = 0.2, on_shard_done: Callable[[int], None] | None = None, log=print) -> dict:
     """Run every shard without a done-marker, retry failures up to `max_attempts` submissions each, then download and
@@ -203,6 +210,7 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
         if (not isinstance(marker, dict) or type(marker.get("shard")) is not int or marker["shard"] != i or
                 type(marker.get("attempts")) is not int or marker["attempts"] < 1):
             raise ShardError(f"invalid done marker {key}: shard or attempts do not match")
+        require_shard_artifacts(backend, cfg, i)
     skipped = [i for i in range(cfg.shards) if i not in todo]
     if skipped:
         log(f"fanout: shards {skipped} already done, skipping")
@@ -223,6 +231,7 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
             del running[job_id]
             if state == SUCCEEDED:
                 backend.fetch_result(job_id, shard_prefix(cfg, i))
+                require_shard_artifacts(backend, cfg, i)
                 backend.put_object(marker_key(cfg, i), json.dumps({"shard": i, "attempts": attempts[i]}).encode())
                 ran.append(i)
                 log(f"fanout: shard {i}/{cfg.shards} done (attempt {attempts[i]})")
