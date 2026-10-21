@@ -177,10 +177,21 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
         cursor = hi
     if cursor != first["shard"]["total_tasks"]:
         raise ShardError(f"the shards cover {cursor} tasks, the run had {first['shard']['total_tasks']}")
+    seen_tasks: set[str] = set()
     for s in shards:
         if len(s["episodes"]) != s["info"]["total_episodes"]:
             raise ShardError(f"{s['root']}: episodes.jsonl has {len(s['episodes'])} rows, "
                              f"info.total_episodes={s['info']['total_episodes']}; the shard is damaged")
+        lo, hi = s["shard"]["task_range"]
+        for row in s["episodes"]:
+            task_id = row.get("arrival_task_id")
+            match = re.fullmatch(r"sim_(.+)_(\d+)", task_id) if isinstance(task_id, str) else None
+            if not match or match.group(1) not in first["shard"]["families"]:
+                raise ShardError(f"shard {s['shard']['index']} has an invalid task id {task_id!r}")
+            task_index = int(match.group(2))
+            if task_id in seen_tasks or not lo <= task_index < hi:
+                raise ShardError(f"shard {s['shard']['index']} has duplicate or out-of-range task {task_id!r}")
+            seen_tasks.add(task_id)
     if sum(len(s["episodes"]) for s in shards) == 0:
         raise ShardError("no shard holds an episode; nothing to merge")
 
