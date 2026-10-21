@@ -152,7 +152,7 @@ def test_contact_episode_is_dropped(twin, tmp_path, monkeypatch):
         def __init__(self, n, floor, seed=0, **kw):
             self.n = n
 
-        def step(self, model, data, dt):
+        def step(self, model, data, dt, clearance=None):
             b = data.body("robot_base").xpos
             data.mocap_pos[0] = [b[0], b[1], 0.0]
             return [[float(b[0]), float(b[1])]] * self.n
