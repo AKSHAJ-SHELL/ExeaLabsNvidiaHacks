@@ -32,6 +32,27 @@ Protocol, later, in simulation of the scanned room only:
 
 Tonight: do not run this. `usefulness` is `null`.
 
+### Results so far (Oct 22 2026): fine-tunes of our own data, not the three cells above
+
+These are not the protocol's cells: there is no base-GR00T cell and no generic-RoboCasa cell, the trials are not the held-out wordings, and `usefulness` stays `null`. They compare our own fine-tunes against each other on identical trials (`eval --manifest`, one policy server per model, `counter_to_sink` and `open_drawer`, no people, 224 px), 24 trials per family.
+
+| model | data | steps | counter_to_sink | open_drawer | total |
+|---|---|---|---|---|---|
+| run 2 | 480 clean episodes | 3,200 | 6/24 (25%) | 20/24 (83%) | 26/48 (54%) |
+| run 3 | the same plus 646 DART episodes (`sim --dart 0.025`) | 4,000 | 13/24 (54%) | 9/24 (38%) | 22/48 (46%) |
+
+Paired exact sign tests, run 3 against run 2: total 22 against 26 (p = 0.56, no reliable difference); counter_to_sink run 3 wins 11 trials and loses 4 (p = 0.12, suggestive: mugs 1 of 8 to 6 of 8); open_drawer run 3 wins 0 and loses 11 (p = 0.001). An earlier 6,000-step run on 320 clean episodes scored 10/24; its checkpoint was lost with the notebook.
+
+What was found, with how it was checked:
+
+- The policy can see the object. Given frames from expert episodes, its first predicted target is within 0.3 cm of the expert's and within about 1 to 1.7 cm 0.4 to 0.75 s ahead (12 episodes, near the grasp). In closed loop, in the 4 failing mug rollouts I traced, it closed the gripper 2 to 8 cm from the mug, against a grasp tolerance of about 1 cm: errors compound into states the demonstrations never show.
+- That is what DART addresses, and it helped the grasp task. It hurt drawers, and the cause is in the data. The clean expert ends every drawer pull at 0.300 m. With even 0.01 rad of execution noise about 30% of the kept drawer demos end under 0.28 m (36% at 0.025, 47% at 0.04), all above the 0.15 m success bar, so the physics check keeps them. In the 646-episode set 102 of 339 drawer demos are under 0.28 m. Run 3's failed drawers opened 5 to 15 cm: under-pulls, not misses.
+- The same checkpoint scored 2/12 and 7/12 on the same 12 trials, so a 12-trial score cannot separate two models. Replanning every 4 steps, 16 denoising steps, and averaging 8 sampled chunks (`gr00t_shim --samples`, #161) each showed no closed-loop gain on counter_to_sink (2 of 24, against roughly 10 to 17% for the baseline, 24 trials each; replanning every 8 steps was not finished).
+- Scoring a checkpoint on the GPU that is training it slowed training from 1.4 to 0.15 steps/s; two clients on one policy server produced intermittent HTTP 500s (a lock fixes it).
+
+Not shown: whether DART helps in general (one seed and one run per model; run 3 also trained 800 steps longer), any result on held-out wordings, or anything about counter_to_counter.
+
+
 ## Realism
 
 Claim it supports: the twin looks like the room.

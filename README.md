@@ -37,7 +37,8 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 | GR00T-format dataset + validator | ✅ Passes our validator, and the layout matches GR00T's loader source. ⚠️ Not yet loaded by GR00T itself since the latest fixes |
 | Local web page: browse, download, upload | ✅ Works. Redesigned page: room cards with previews and stats, drag-and-drop upload, live job stages. Uploads are processed by `python -m arrival work` on the same machine (twin, sim dataset, zip); a killed worker's jobs are requeued. Hardening, worker limits, shardable sim, frames upload and a static export are in review (L3, L4, L5, L14, L23). ⚠️ No cloud fan-out yet; the page was checked with curl and tests, not in a browser |
 | VLM planner (Nemotron) / VLA client (GR00T server) | ✅ VLM planner (Nemotron) wired into sim collection with Token Factory and offline cache fixture (POL-1); dynamic instruction generation with held-out eval set (POL-2). ⚠️ VLA client tested offline |
-| GR00T fine-tune, MimicGen, splats, Cosmos, Nebius scale-out | ❌ Not built yet. This is what remains for the hackathon: the GR00T fine-tune (DAT-2), the GR00T policy server (POL-3) and real scans (CAP-3) |
+| GR00T N1.7 fine-tune and paired evaluation | ✅ Three fine-tunes of GR00T N1.7-3B on `hero_kitchen_sim` ran on one 96 GB GPU and were scored in the sim on identical trials (`docs/07-eval.md`, "Results so far"). Best so far about half of 48 trials; counter_to_sink and open_drawer move in opposite directions with the data mix. ⚠️ Small samples; the generic-RoboCasa and base-GR00T cells of the usefulness protocol (DAT-3) are not run, so `usefulness` stays `null` |
+| MimicGen, splats, Cosmos, Nebius scale-out | ❌ Not built yet. This is what remains for the hackathon: the DAT-3 baseline cells and real scans (CAP-3) |
 
 There are two datasets. `python -m arrival sim` writes **physics-simulated** data with real joint states (`arrival_physically_valid: true`). `python -m arrival demo` writes a fast **scripted placeholder** with zero joint values (`arrival_physically_valid: false`). Never train on the placeholder.
 
@@ -128,7 +129,7 @@ A GPU host with 40 GB or more, or a Linux box.
 
 | id | what | size | priority | status | PRs or issue |
 |---|---|---|---|---|---|
-| G1 | Real GR00T loader check and 100-step fine-tune on hero_kitchen_sim Offline slice done: 28 of 28 episodes at 224 px, validator passes, loader check passes with 4 warnings. GR00T itself has not loaded the data. | M | must | Blocked | issue #63 |
+| G1 | Real GR00T loader check and 100-step fine-tune on hero_kitchen_sim Done. GR00T's own stats tool and loader read the 224 px datasets (all stats finite), a 100-step smoke fine-tune ran in 58 s and its checkpoint reloads for inference, then longer runs (3,200 to 6,000 steps, batch 32, about 1.4 steps/s, 66 GB). Results and what they showed are in `docs/07-eval.md`. Checkpoints are not in the repo (12.6 GB each). | M | must | Shipped | issue #63 |
 | G2 | Real GR00T policy server: chunking, both camera keys, golden-file test Wire-format golden test and the 8-float and 11-float schemas are done. The shim has not run against a real GR00T server. | M | must | Blocked | none |
 | G3 | Three-cell held-out eval, 50 episodes per cell, Wilson intervals | L | must | Blocked | issue #64 |
 | G4 | Generic-RoboCasa baseline dataset and fine-tune | M | must | Blocked | issue #64 |
@@ -170,7 +171,7 @@ Physical rooms, a LiDAR iPhone, or a human.
 
 ### Known limits
 
-- The GR00T loader has not read our dataset since the latest fixes; only our own validator and the offline conformance check have (G1).
+- GR00T trains on our datasets (three fine-tunes, `docs/07-eval.md`), but every score is from 24 to 48 paired trials and the same checkpoint has scored 2 of 12 and 7 of 12 on the same 12 trials: only large paired differences mean anything.
 - The mobile base (L13) is behind `--base mobile` and the real Franka behind `--arm menagerie`; the defaults are still the fixed Panda-style arm. The Menagerie arm was measured over all families only at seed 5 with no people.
 - A 28-episode run at 64 px after the door joint-limit fix (#152) succeeds 28 of 28 with 0 episodes flagged by the quality check. It was not rerun at 224 px.
 - With a fixed base, drawers and `close_door` on the U-kitchen's corner cabinet and the rotated kitchen's fridge stay unreachable and are skipped. Only the corner cabinet's `open_door` takes a shifted stand spot. The reach planner checks the arm's IK, not collisions.
