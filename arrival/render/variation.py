@@ -196,6 +196,8 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     src, dst = Path(src), Path(dst)
     if backend not in ("cosmos", "local_stub"):
         raise ValueError(f"unknown backend {backend!r}")
+    if client is not None and getattr(client, "name", None) != backend:
+        raise ValueError(f"client backend {getattr(client, 'name', None)!r} does not match requested {backend!r}")
     select_frames(0, 0, seed, fraction)  # reject invalid fractions before copying the dataset
     if dst.exists():
         raise FileExistsError(f"{dst} exists; the copy directory must be new")
