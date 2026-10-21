@@ -562,11 +562,14 @@ The worker (`python -m arrival work`) keeps those fields and adds these when it 
   "dataset_dir": "out/datasets/hero_kitchen_job_01587ed1_sim",
   "zip": "out/jobs/job_01587ed1/dataset.zip",
   "attempts": 2,
-  "successes": 2
+  "successes": 2,
+  "job_attempts": 1
 }
 ```
 
 `status` is one of `queued`, `running`, `done`, `failed`. `stage` is the last stage entered: `normalize`, `twin`, `realism`, `objects`, `sim`, `validate`, `zip`. `started_at` and `finished_at` are unix seconds like `created_unix`. `error` is null unless `status` is `failed`, then `"<ExceptionType>: <message>"`. `room_id` is the upload filename stem reduced to `[a-z0-9_]` plus `_<id>`. Paths are as the worker saw them (relative to its cwd when `--out` is relative). Fields not reached yet are null.
+
+`job_attempts` is how many times a worker has started this job; it is incremented when the job is claimed and is absent until then. A failed attempt that may pass is written back as `queued` (never `failed`) with `error` null, and the attempt's error is appended to `retry_errors` (a list of `"<ExceptionType>: <message>"`, oldest first). After the last allowed retry, `status` is `failed`, `error` is that last attempt, and `job_attempts` is the number of starts. `ARRIVAL_JOB_RETRIES` (or `arrival work --retries`) is how many times a failed attempt is queued again; default 2, `0` means never. A bad upload (`ValueError`, including unreadable JSON and `ScanBundleError`), a request over a limit, `unsupported_layout`, a dataset with nothing to ship, or the wall-clock timeout is not retried.
 
 The job status also has `realism`, initially null, then `{state, metrics, consumed, preview, reason}`. Scored results add `frame_count` and `association`. `metrics` is null unless the camera-offset control passes; otherwise it contains `depth_l1_m`, `rgb_mae`, `rgb_one_minus_ssim`, `n_depth`, `n_rgb` and `frames`. These fields describe the uploaded-frame comparison only, not the generated dataset. Raw reports, the comparison PNG, a pre-placement twin and the applied camera transform stay under the job's `realism/` directory. The public report route returns only the status projection. Normalized RoomPlan bundles carry `arkit_world_to_room` as a row-major 4x4 matrix, used as `bundle_world_to_room @ inverse(manifest_world_to_room)` before scoring.
 
