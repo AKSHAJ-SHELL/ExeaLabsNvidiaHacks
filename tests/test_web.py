@@ -722,6 +722,14 @@ def test_frames_not_a_zip_or_wrong_name_is_rejected(make):
     assert _job_dirs(out) == []
 
 
+def test_frames_input_left_empty_by_a_browser_is_ignored(make):
+    # an unselected <input type=file> is still sent: filename="" and no bytes. The scan alone must queue.
+    srv, out = make(rate_limit=0)
+    code, body, _ = _post(srv, [("scan", "s.json", HERO_SCAN), ("frames", "", b"")])
+    assert code == 202, body
+    assert "frames" not in json.loads((out / "jobs" / body["id"] / "status.json").read_text())
+
+
 def test_frames_zip_bomb_is_stopped_by_the_streamed_size_cap(make, monkeypatch):
     from arrival.web import frames as frames_mod
 
