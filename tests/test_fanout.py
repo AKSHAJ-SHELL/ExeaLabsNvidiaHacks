@@ -80,6 +80,18 @@ def test_run_id_cannot_escape_scratch_or_storage(run_id):
     with pytest.raises(ShardError, match="run_id"):
         FanoutConfig(run_id, 2)
 
+
+@pytest.mark.parametrize("patch,name", [
+    ({"shards": 0}, "shards"), ({"shards": 1.5}, "shards"),
+    ({"episodes": 0}, "episodes"), ({"people": -1}, "people"),
+    ({"res": True}, "res"), ({"seed": 1.2}, "seed"),
+    ({"room": " "}, "room"), ({"families": "open_drawer,"}, "families"),
+    ({"scans": " "}, "scans"),
+])
+def test_invalid_sim_settings_fail_before_submission(patch, name):
+    with pytest.raises(ShardError, match=name):
+        FanoutConfig(**{"run_id": "run", "shards": 2, **patch})
+
 @pytest.mark.parametrize("controls", [
     {"parallel": 0}, {"parallel": -1}, {"parallel": True},
     {"max_attempts": 0}, {"max_attempts": -1},
