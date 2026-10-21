@@ -81,7 +81,7 @@ jobs:
         run: python scripts/demo_all.py --quick --out out/demo --timeout 600
       - name: Upload demo summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: demo-summary-linux-py${{ matrix.python-version }}
           path: |
