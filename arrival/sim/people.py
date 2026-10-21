@@ -9,6 +9,8 @@ import math
 import mujoco
 import numpy as np
 
+from arrival.sim.safety import yield_factor
+
 CLEAR = 0.6  # min distance (m) from the base column for any path segment: 0.12 pedestal + 0.17 torso + margin
 LANE = (0.5, 0.75)  # the crossing lane runs this far behind the base, closer than CLEAR on purpose
 
@@ -509,16 +511,21 @@ class Walkers:
             return self.visit["face"]  # square to the fridge; the toes stay out of the door's swing
         return -np.pi / 2 + self.work_yaw  # face the counter while stopped
 
-    def step(self, model, data, dt: float) -> list[list[float]]:
+    def step(self, model, data, dt: float, clearance=None) -> list[list[float]]:
+        """`clearance(xy, radius)` is the walker's clearance to the robot hand or base (safety.yield_clearance). A
+        walker slows with it and stands still below safety.YIELD[0], then resumes; at a pause (the counter stop)
+        the timer is held while the robot is that close. None: nobody yields, as before."""
         if self._gids is None:
             self._bind(model)
         out = []
         for i, path in enumerate(self.paths):
             moved = 0.0
             self.reach[i] = None
+            give = yield_factor(clearance(self.pos[i], self.specs[i]["torso_r"])) if clearance else 1.0
             if self.wait[i] > 0:
-                self.wait[i] -= dt
                 tag = self.faces[i][self.at[i]]
+                if not (tag is None and give == 0.0):  # counter use pauses while the hand is at the walker's elbow
+                    self.wait[i] -= dt
                 if tag in ("open", "look", "close") and self.visit and tag != "look":
                     self._visit_step(i, tag)
                 yaw = self._pause_yaw(i)
@@ -537,7 +544,7 @@ class Walkers:
                     v = self.speed * (SLOW if self.slow[i][nk] else 1.0)
                     if self.pauses[i][nk] > 0 and not self.slow[i][nk]:  # the slow fridge steps are planned for SLOW
                         v *= float(np.clip(dist / BRAKE[0], BRAKE[1], 1.0))
-                    moved = min(dist, v * dt)
+                    moved = min(dist, v * give * dt)
                     self.pos[i] += d / dist * moved
                 yaw = self._pause_yaw(i) if self.wait[i] > 0 else np.arctan2(d[1], d[0])  # no one-frame spin on arrival
             self.yaw[i] = float(yaw)

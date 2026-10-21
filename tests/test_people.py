@@ -233,3 +233,63 @@ def test_driven_door_contact_is_not_an_arm_contact(twin):
     mon.reset()
     mon._arm_contacts(m, data, {door})
     assert mon.arm_steps == 0
+
+
+def test_walker_yields_to_the_hand_and_resumes(twin):
+    from arrival.sim.safety import YIELD, SafetyMonitor, yield_factor
+
+    assert yield_factor(YIELD[0]) == 0.0 and yield_factor(YIELD[1]) == 1.0 and 0 < yield_factor(sum(YIELD) / 2) < 1
+    env = SimEnv(twin, TASK, res=32)
+    w, mon = env.walkers, SafetyMonitor(env.model)
+    p0 = w.pos[0].copy()
+    for _ in range(20):
+        w.step(env.model, env.data, 0.05, lambda p, r: 0.1)  # something sits at the walker's elbow
+    assert np.allclose(w.pos[0], p0) and w.amp[0] < 0.1
+    for _ in range(20):
+        w.step(env.model, env.data, 0.05, lambda p, r: 1.0)  # it moves away
+    assert np.linalg.norm(w.pos[0] - p0) > 0.3 and mon.yield_geoms
+
+
+def test_counter_pause_is_held_while_the_hand_is_close(twin):
+    w = Walkers(1, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=twin["fixtures"],
+                fridge_visit=False)
+    m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (2.6, 1.0, 0.75), n_people=1, people_seed=3))
+    d = mujoco.MjData(m)
+    for _ in range(2000):
+        w.step(m, d, 0.05)
+        if w.wait[0] > 0.5 and w.pauses[0][w.at[0]] > 0:
+            break
+    before = w.wait[0]
+    for _ in range(10):
+        w.step(m, d, 0.05, lambda p, r: 0.0)
+    assert w.wait[0] == before
+    w.step(m, d, 0.05, lambda p, r: 1.0)
+    assert w.wait[0] < before
+
+
+def test_heads_and_arms_clear_wall_cabinets_and_the_fridge_door(twin):
+    from arrival.sim.safety import overhead_clearance
+
+    m = mujoco.MjModel.from_xml_string(build_mjcf(twin, (2.6, 1.0, 0.75), n_people=2, people_seed=3))
+    d = mujoco.MjData(m)
+    w = Walkers(2, (0.4, 1.65, 3.6, 2.7), seed=3, base_xy=(2.6, 1.0), front_y=0.75, fixtures=twin["fixtures"],
+                fridge_visit=True)
+    lo = float("inf")
+    for _ in range(300):
+        w.step(m, d, 0.05)
+        mujoco.mj_kinematics(m, d)
+        lo = min(lo, overhead_clearance(m, d))
+    assert lo > 0.0, lo
+
+
+def test_open_fridge_with_walkers_succeeds_without_contact(twin):
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+
+    for seed in (3, 5):
+        task = {"family": "open_fridge", "fixture": "fridge_1", "joint": "fridge_1_door", "lighting": "neutral",
+                "people": 2, "seed": seed}
+        env = SimEnv(twin, task, res=32)
+        ep = run_episode(env, ScriptedExpert(), task)
+        assert ep["success"], (seed, ep["detail"])
+        assert not ep["safety"]["human_contact"] and not ep["safety"]["door_contact"], seed

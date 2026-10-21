@@ -271,7 +271,7 @@ class SimEnv:
         before = self.body_pos(self.task["object_id"])[:2] if self.task["family"] == "wipe_counter" else None
         for _ in range(SUBSTEPS):
             mujoco.mj_step(self.model, self.data)
-        self.people_xy = self.walkers.step(self.model, self.data, 1.0 / FPS) if self.walkers else []
+        self.people_xy = self.walkers.step(self.model, self.data, 1.0 / FPS, self.safety.yield_clearance(self.data)) if self.walkers else []
         if before is not None:
             p = self.body_pos(self.task["object_id"])
             if p[2] < self._top(self.fx[self.task["source"]]) + self.obj_half_h(self.task["object_id"]) + 0.01:
