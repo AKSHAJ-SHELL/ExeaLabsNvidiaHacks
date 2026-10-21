@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
@@ -67,6 +68,8 @@ def to_chunk(action: dict, reduce: str = "mean") -> np.ndarray:
 
 
 def make_handler(policy, samples: int = 1, reduce: str = "mean"):
+    lock = threading.Lock()  # the server is threaded; Gr00tPolicy is not safe to call from two requests at once (HTTP 500)
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -93,7 +96,8 @@ def make_handler(policy, samples: int = 1, reduce: str = "mean"):
             except (ProtocolError, ValueError) as e:
                 return self._send(400, {"error": str(e)})
             try:
-                action, _info = policy.get_action(to_observation(req, samples))
+                with lock:
+                    action, _info = policy.get_action(to_observation(req, samples))
                 self._send(200, encode_response(to_chunk(action, reduce)))
             except Exception as e:  # the client sees a 500 with the reason, the server keeps running
                 self._send(500, {"error": f"{type(e).__name__}: {e}"})

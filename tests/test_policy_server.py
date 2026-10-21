@@ -135,6 +135,40 @@ def test_shim_batches_the_observation_and_reduces_samples():
         gr00t_shim.to_chunk(act, "mode")
 
 
+def test_shim_handles_concurrent_requests_one_at_a_time():
+    import threading
+    import time
+    from http.server import ThreadingHTTPServer
+
+    active, peak = [0], [0]
+
+    class Fake:  # stands in for Gr00tPolicy, which is not safe to call from two threads at once
+        def get_action(self, obs):
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+            time.sleep(0.05)
+            active[0] -= 1
+            return {"single_arm": np.zeros((1, 16, 7)), "gripper": np.zeros((1, 16, 1))}, {}
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), gr00t_shim.make_handler(Fake()))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    results = []
+
+    def call():
+        c = VLAClient(f"http://127.0.0.1:{srv.server_address[1]}")
+        c.reset(None, {"instruction": "x"})
+        results.append(c.act(_obs()).shape)
+
+    try:
+        threads = [threading.Thread(target=call) for _ in range(4)]
+        [th.start() for th in threads]
+        [th.join(30) for th in threads]
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert results == [(8,)] * 4 and peak[0] == 1
+
+
 def test_shim_exits_without_gr00t(monkeypatch):
     import sys
     monkeypatch.setitem(sys.modules, "gr00t", None)
