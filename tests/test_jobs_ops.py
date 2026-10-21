@@ -386,6 +386,8 @@ def _finished_job(out, name, hours_old, status="done", with_outputs=True):
         (d / "dataset.zip").write_bytes(b"z" * 50)
         (out / "reports").mkdir(exist_ok=True)
         (out / "reports" / f"{room}_sim.json").write_text("{}")
+        (out / "progress").mkdir(exist_ok=True)
+        (out / "progress" / f"{room}_sim.jsonl").write_text("{}\n")
     return job, room
 
 
@@ -410,6 +412,8 @@ def test_gc_deletes_old_finished_jobs_and_everything_they_produced(tmp_path):
     assert not (jobs_of(out) / old["id"]).exists() and not (jobs_of(out) / failed["id"]).exists()
     assert not (out / "twins" / old_room).exists() and not (out / "datasets" / f"{old_room}_sim").exists()
     assert not (out / "reports" / f"{old_room}_sim.json").exists()
+    assert not (out / "progress" / f"{old_room}_sim.jsonl").exists()
+    assert (out / "progress" / f"{young_room}_sim.jsonl").exists()
     assert hand_made.is_dir()  # odd's room_id does not end with its job id, so its room is not its to delete
     for p in (jobs_of(out) / young["id"], jobs_of(out) / running["id"], jobs_of(out) / queued["id"],
               out / "twins" / young_room, out / "datasets" / f"{young_room}_sim", out / "reports" / f"{young_room}_sim.json"):
@@ -424,8 +428,9 @@ def test_delete_job_removes_twin_dataset_report_and_zip_but_not_a_busy_job(tmp_p
     job, room = _finished_job(out, "mine", 0.1)
     res = delete_job(out, job["id"])
     assert res["bytes"] >= 250 and not (jobs_of(out) / job["id"]).exists()
-    for p in (out / "twins" / room, out / "datasets" / f"{room}_sim", out / "reports" / f"{room}_sim.json"):
-        assert not p.exists()
+    for p in (out / "twins" / room, out / "datasets" / f"{room}_sim", out / "reports" / f"{room}_sim.json",
+              out / "progress" / f"{room}_sim.jsonl"):
+        assert not p.exists(), p
     assert delete_job(out, job["id"]) is None and delete_job(out, "../out") is None
     q = create_job(jobs_of(out), "q.json", data=b"{}")
     with pytest.raises(JobBusy):
