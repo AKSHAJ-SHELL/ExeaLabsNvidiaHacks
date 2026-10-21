@@ -103,6 +103,36 @@ def test_door_pull_keeps_joint7_off_its_stop(twin, fixture):
     assert np.abs(ep["states"][:, 6]).max() < robot.RANGES[6][1] - 0.3
 
 
+def test_door_pull_keeps_the_wrist_off_the_wall_beside_the_hinge(twin):
+    """counter_b is hinged 1 cm from the east wall, so the pull ends with the bar near it. From the usual door spot
+    link7 grazed the wall for 22 steps in every episode; open_door stands OPEN_DOOR_WALL_OUT further out there."""
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.preflight import OPEN_DOOR_WALL_OUT, base_pose
+
+    (_, y_a, _), _, _ = base_pose(twin, {"family": "open_door", "fixture": "counter_a"})
+    (_, y_b, _), _, _ = base_pose(twin, {"family": "open_door", "fixture": "counter_b"})
+    assert y_b - y_a == pytest.approx(OPEN_DOOR_WALL_OUT)  # both runs face +y; counter_a is clear of the walls
+
+    task = {"family": "open_door", "fixture": "counter_b", "joint": "counter_b_door", "lighting": "neutral",
+            "people": 0, "seed": 0}
+    env = SimEnv(twin, task, res=32)
+    m, d = env.model, env.data
+    links = {g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith("link")}
+    walls = {g for g in range(m.ngeom) if m.geom(g).name.startswith("wall_")}
+    hits = []
+    step = env.step
+
+    def checked_step(a):
+        step(a)
+        hits.extend(1 for c in d.contact[:d.ncon] if {c.geom1, c.geom2} & links and {c.geom1, c.geom2} & walls)
+
+    env.step = checked_step
+    ep = run_episode(env, ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+    assert not hits
+
+
 def test_scripted_expert_opens_fridge(twin):
     from arrival.sim.collect import FRIDGE_OPEN, run_episode
     from arrival.sim.policy import ScriptedExpert

@@ -22,12 +22,16 @@ PART_CLEAR = 0.13  # base centre to an open door or drawer: the column's radius 
 DRAWER_TRAVEL = {"put_in_drawer": 0.14, "open_drawer": 0.325, "close_drawer": 0.30}  # how far each has it pulled
 DRAWER_HANDLE = 0.062  # the bar's outer face past the closed carcass front (front 2 cm in, 7 cm standoff, 12 mm bar)
 WALL_CLEAR = 0.15  # base centre to the wall's face
+OPEN_DOOR_WALL_OUT = 0.12  # open_door: the base stands this much further out when the door is hinged within WALL_CLEAR
+# of a wall: the pull ends with the bar by that wall, and from the usual spot link7 grazes it for 22 steps (15 at 0.06)
 DRAWER_OPEN_PUT = 0.14  # start state for put_in_drawer: wide enough for a mug on the exposed tray, and the base
 # can then park straight in front without the pulled-out front reaching its column
 FRIDGE_BASE_ALONG = 0.1  # base centre past the door's free edge, along the front
 FRIDGE_BASE_OUT = 0.75  # base centre out from the fridge front: nearer, the handle's arc folds the elbow onto its stop
 FRIDGE_BASE_YAW = 0.0  # degrees the base turns toward the hinge from facing the front
 FLAP_MARGIN = 0.06  # open_oven / open_dishwasher: base column edge to where the open door's top edge lands
+OVEN_ALONG = 0.25  # open_oven: base centre this far along the run from the bar, +x side first. Straight in front,
+# the hand pointing into the panel holds joint 5 on its stop for 71 steps; from 0.20 to 0.30 either side no joint nears one
 FAUCET_STANDOFF = 0.34  # base column to counter front for turn_on_faucet (0.28 elsewhere): the lever is at the back
 # of the counter above shoulder height, and a horizontal hand reaches it with less joint strain from further out
 ARM_STANDOFF_TRIM = {"procedural": 0.0, "menagerie": 0.02}  # the real hand's closed fingertips reach 8 mm past the eef,
@@ -109,10 +113,15 @@ def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: st
     """(base position, base yaw in degrees, anchor fixture): in front of the fixture the task works at, facing it,
     on any wall. `obj_xy` is the object's xy at the start (the task's `start` when omitted). `mobile` moves the
     counter_to_counter stand spot MOBILE_STEP toward the target instead of midway: the base drives the rest.
-    `arm` trims the stand spots that push with the closed fingertips (ARM_STANDOFF_TRIM). A task carrying
+    `arm` trims the stand spots that push with the closed fingertips (ARM_STANDOFF_TRIM). open_door stands
+    OPEN_DOOR_WALL_OUT further out when the door is hinged next to a wall. A task carrying
     `base_shift` (metres along the anchor fixture's local x, and out from the face of it the base stands at; set by
     the reach planner when the rule's spot cannot reach) stands that far from the rule's spot."""
     base, yaw, src = _stand_rule(twin, task, obj_xy, mobile, arm)
+    hinge = to_world((src["size"][0] / 2, src["size"][1] / 2), src)  # cabinet doors hinge at the run's +x end
+    if task["family"] == "open_door" and _wall_gap(twin, hinge) < WALL_CLEAR:
+        n = front(src)
+        base = (base[0] + n[0] * OPEN_DOOR_WALL_OUT, base[1] + n[1] * OPEN_DOOR_WALL_OUT, base[2])
     if task.get("base_shift"):
         along, out = task["base_shift"]
         a = src.get("yaw", 0.0)
@@ -154,11 +163,14 @@ def _stand_rule(twin: dict, task: dict, obj_xy, mobile: bool, arm: str) -> tuple
         along = (drawer_x(src, fixtures) + to_local(obj_xy[:2], src)[0]) / 2
         base = park(src, along, DRAWER_OPEN_PUT + 0.07 + 0.14)  # front + handle bar + base column + margin
     elif fam in FLAP_DOOR_BELOW:
-        # straight in front of the bar, just far enough out that the door swings all the way down to flat without
-        # its top edge reaching the base column; parking beside the swing instead puts the wrist under the arm for a
+        # in front of the bar (the oven OVEN_ALONG to either side, still in front of the door, whichever side has room,
+        # else straight in front), just far enough out that the door swings all the way down to flat without its top
+        # edge reaching the base column; parking beside the swing instead puts the wrist under the arm for a
         # horizontal grasp
         src = fx[task["fixture"]]
-        base = park(src, 0.0, src["size"][2] - FLAP_DOOR_BELOW[fam] + 0.12 + FLAP_MARGIN)
+        out = src["size"][2] - FLAP_DOOR_BELOW[fam] + 0.12 + FLAP_MARGIN
+        spots = [park(src, a, out) for a in ((OVEN_ALONG, -OVEN_ALONG, 0.0) if fam == "open_oven" else (0.0,))]
+        base = next((b for b in spots if _stand_problem(twin, np.array(b[:2]), src, task=task) is None), spots[-1])
     elif fam == "turn_on_faucet":
         # in front of the counter run at the sink, closer than for counter_to_sink: the lever is at the back of the
         # counter, at the edge of what a horizontal hand reaches from the usual parking spot
@@ -188,6 +200,13 @@ def _segment_distance(p, a, b) -> float:
     ab = b - a
     t = float(np.clip((p - a) @ ab / max(float(ab @ ab), 1e-12), 0.0, 1.0))
     return float(np.linalg.norm(a + t * ab - p))
+
+
+def _wall_gap(twin: dict, xy) -> float:
+    """Distance from `xy` to the nearest wall face (inf in a room without walls)."""
+    walls = twin.get("walls") or []
+    return min((_segment_distance(xy, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
+               default=math.inf)
 
 
 def _footprint_distance(xy, f: dict) -> float:
