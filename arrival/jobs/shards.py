@@ -25,7 +25,7 @@ from arrival.export.lerobot import chunk_of
 SHARD_RE = re.compile(r"^(\d+)/(\d+)$")
 SHARD_DIR_RE = re.compile(r"^\d+of\d+$")
 FINGERPRINT_KEYS = ("room", "families", "episodes", "seed", "people", "policy", "planner", "split", "instructions",
-                    "base", "arm", "res", "shard")
+                    "base", "arm", "res", "shard", "exec_noise")
 SKIP_REASONS_KEPT = 50
 # the shard fields that must agree across shards (index and task_range differ by design)
 SHARED_SHARD_KEYS = ("count", "total_tasks", "episodes", "seed", "families", "people", "policy", "planner", "split",
@@ -71,6 +71,7 @@ class Journal:
         (a torn last line, from a kill mid-write, is cut off), or start fresh when there is no journal. Raises
         ShardError when the journal belongs to a run with other settings."""
         fp = {k: fingerprint.get(k) for k in FINGERPRINT_KEYS}
+        fp["exec_noise"] = fp["exec_noise"] or 0.0
         if resume and self.path.is_file():
             lines = self.path.read_text().splitlines()
             rows = []
@@ -83,6 +84,8 @@ class Journal:
                     break  # a kill mid-write: that task counts as not done
             if rows:
                 saved = rows[0].get("fingerprint")
+                if saved is not None:
+                    saved = {**saved, "exec_noise": saved.get("exec_noise") or 0.0}  # journals from before DART have none
                 if saved != fp:
                     diff = sorted(k for k in set(fp) | set(saved or {}) if (saved or {}).get(k) != fp.get(k))
                     raise ShardError(f"--resume: the saved progress in {self.path} is for a run with different "
