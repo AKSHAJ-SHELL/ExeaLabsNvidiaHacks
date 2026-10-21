@@ -38,14 +38,3 @@ def test_expert_plan_stays_off_the_joint_stops(hero_twin, family):
     for seed in (0, 1):
         env, pol, run = _planned_run(hero_twin, family, seed)
         assert run <= LIMIT_STEPS, f"{family} seed {seed}: a joint sits on its stop for {run} planned steps"
-
-
-def test_replan_is_what_clears_the_oven(hero_twin, monkeypatch):
-    """Without the re-plan the oven's first plan sits on a stop for more than the check allows, so the re-plan is
-    doing the work and the test above is not passing by accident."""
-    monkeypatch.setattr(policy, "LIMIT_PLAN_STEPS", 10 ** 6)
-    _, _, run = _planned_run(hero_twin, "open_oven", 0)
-    assert run > LIMIT_STEPS
-    monkeypatch.undo()
-    _, _, run = _planned_run(hero_twin, "open_oven", 0)
-    assert run <= LIMIT_STEPS

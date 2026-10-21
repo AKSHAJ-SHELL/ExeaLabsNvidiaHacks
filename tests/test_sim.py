@@ -103,6 +103,28 @@ def test_door_pull_keeps_joint7_off_its_stop(twin, fixture):
     assert np.abs(ep["states"][:, 6]).max() < robot.RANGES[6][1] - 0.3
 
 
+@pytest.mark.parametrize("family,fixture", [("close_door", "counter_a"), ("close_door", "counter_b"),
+                                            ("open_oven", "stove_1")])
+def test_door_episodes_keep_every_joint_off_its_stops(twin, family, fixture):
+    """The 224 px G1 dataset had all of its close_door and open_oven episodes flagged joint_at_limit: the closing
+    push sat on joint 2's -1.76 stop (and on joint 7's +2.90 at counter_a), the oven grasp on joint 5's +2.90. No arm
+    joint may now come inside the band the quality check measures, on any step."""
+    from arrival.export.quality import LIMIT_FRAC, check_trace
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.tasks import finish_task
+
+    task = finish_task({"family": family, "fixture": fixture, "lighting": "neutral", "people": 0, "seed": 0})
+    ep = run_episode(SimEnv(twin, task, res=32), ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+    lo, hi = np.array(robot.RANGES).T
+    q = ep["states"][:, :7].astype(float)
+    margin = np.minimum(q - lo, hi - q).min(0)
+    assert (margin > LIMIT_FRAC * (hi - lo)).all(), np.round(margin, 3)
+    assert not check_trace(ep["states"], ep["actions"], robot.RANGES)
+    assert ep["ik_error"] < 0.005  # the plan no longer asks for poses past a stop (1.3 to 1.9 cm before)
+
+
 def test_scripted_expert_opens_fridge(twin):
     from arrival.sim.collect import FRIDGE_OPEN, run_episode
     from arrival.sim.policy import ScriptedExpert
