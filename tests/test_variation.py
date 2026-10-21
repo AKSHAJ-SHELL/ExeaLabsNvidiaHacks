@@ -154,3 +154,12 @@ def test_mask_check_flags_repainted_region():
     bad[mask] = bad[mask][::-1]
     chk = variation.check_frame(img, bad, mask)
     assert not chk["ok"] and chk["mask_change"] > variation.MASK_CHANGE_MAX
+
+
+def test_non_image_backend_output_is_rejected():
+    orig = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
+    bad = orig.astype(float)
+    bad[0, 0, 0] = float("nan")
+    chk = variation.check_frame(orig, bad)
+    assert not chk["ok"] and "uint8" in chk["reason"]
+    assert chk["edge_corr"] is None

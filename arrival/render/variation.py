@@ -74,10 +74,15 @@ def check_frame(orig: np.ndarray, var: np.ndarray, mask: np.ndarray | None = Non
     if var.shape != orig.shape:
         return {"ok": False, "reason": f"shape {list(var.shape)} != {list(orig.shape)}",
                 "edge_corr": None, "mask_change": None}
+    if var.dtype != np.uint8:
+        return {"ok": False, "reason": f"expected uint8 RGB frame, got {var.dtype}",
+                "edge_corr": None, "mask_change": None}
     corr = edge_correlation(orig, var)
     mc = masked_change(orig, var, mask)
     reason = None
-    if corr < edge_min:
+    if not math.isfinite(corr) or (mc is not None and not math.isfinite(mc)):
+        reason = "non-finite geometry check"
+    elif corr < edge_min:
         reason = f"edge correlation {corr:.3f} < {edge_min}"
     elif mc is not None and mc > mask_max:
         reason = f"masked region changed {mc:.3f} > {mask_max}"
