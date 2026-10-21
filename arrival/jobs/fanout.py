@@ -11,6 +11,9 @@ Only `LocalBackend` exists and is tested: shards are local subprocesses and a di
 from __future__ import annotations
 
 import json
+import re
+
+import math
 import shutil
 import subprocess
 import sys
@@ -36,6 +39,11 @@ class FanoutConfig:
     res: int = 128
     seed: int = 0
     scans: str = "scans"
+
+    def __post_init__(self) -> None:
+        # The run id becomes both a scratch-directory component and an object-storage prefix.
+        if not isinstance(self.run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", self.run_id):
+            raise ShardError("run_id must be 1-64 letters, digits, underscores or hyphens, starting with a letter or digit")
 
     def sim_args(self, i: int) -> list[str]:
         return ["sim", "--room", self.room, "--families", self.families, "--episodes", str(self.episodes),
@@ -102,9 +110,10 @@ class LocalBackend:
 
     def fetch_result(self, job_id: str, prefix: str) -> None:
         _, i, out, _ = self._jobs[job_id]
-        src = next(iter((out / "shards").glob("*of*")), None)
-        if src is None:
-            raise ShardError(f"job {job_id} reported success but wrote no shard folder under {out}")
+        expected = Path(prefix).name
+        src = out / "shards" / expected
+        if expected.split("of", 1)[0] != str(i) or not src.is_dir():
+            raise ShardError(f"job {job_id} reported success but wrote no expected shard folder {src}")
         for f in sorted(p for p in src.rglob("*") if p.is_file()):
             self.put_object(f"{prefix}/{f.relative_to(src).as_posix()}", f.read_bytes())
 
@@ -159,6 +168,12 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
     when a shard fails every attempt (finished shards keep their markers, so a rerun resumes)."""
     if cfg.shards < 1:
         raise ShardError("shards must be at least 1")
+    if type(parallel) is not int or parallel < 1:
+        raise ShardError("parallel must be a positive integer")
+    if type(max_attempts) is not int or max_attempts < 1:
+        raise ShardError("max_attempts must be a positive integer")
+    if type(poll_seconds) not in (int, float) or not math.isfinite(poll_seconds) or poll_seconds < 0:
+        raise ShardError("poll_seconds must be a finite, nonnegative number")
     manifest = {"config": cfg.__dict__}
     mkey = f"{cfg.run_id}/run.json"
     if backend.exists(mkey):
@@ -166,7 +181,19 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
             raise ShardError(f"run {cfg.run_id!r} in storage was started with different settings; use a new run id")
     else:
         backend.put_object(mkey, json.dumps(manifest, sort_keys=True).encode())
-    todo = [i for i in range(cfg.shards) if not backend.exists(marker_key(cfg, i))]
+    todo = []
+    for i in range(cfg.shards):
+        key = marker_key(cfg, i)
+        if not backend.exists(key):
+            todo.append(i)
+            continue
+        try:
+            marker = json.loads(backend.get_object(key))
+        except (ValueError, UnicodeDecodeError) as e:
+            raise ShardError(f"invalid done marker {key}: {e}") from e
+        if (not isinstance(marker, dict) or type(marker.get("shard")) is not int or marker["shard"] != i or
+                type(marker.get("attempts")) is not int or marker["attempts"] < 1):
+            raise ShardError(f"invalid done marker {key}: shard or attempts do not match")
     skipped = [i for i in range(cfg.shards) if i not in todo]
     if skipped:
         log(f"fanout: shards {skipped} already done, skipping")
@@ -182,6 +209,8 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
             state = backend.poll(job_id)
             if state == RUNNING:
                 continue
+            if state not in (SUCCEEDED, FAILED):
+                raise ShardError(f"job {job_id} returned unknown state {state!r}")
             del running[job_id]
             if state == SUCCEEDED:
                 backend.fetch_result(job_id, shard_prefix(cfg, i))

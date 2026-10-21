@@ -102,6 +102,14 @@ def test_twin_frames_score_near_zero_and_only_heldout_counts(scan_dir, tmp_path,
     assert "texture" in rep["scope"] and rep["masks"]["robot"]
 
 
+@pytest.mark.parametrize("transform", [np.eye(3), np.full((4, 4), np.nan),
+                                       np.diag([1, 1, 1, 2]), [["bad"]] * 4])
+def test_invalid_camera_transform_is_rejected_before_scoring(tmp_path, transform):
+    with pytest.raises(realism_cli.RealismError, match="camera_transform"):
+        realism_cli.run_realism(tmp_path / "missing_scan", tmp_path / "out", camera_transform=transform)
+    assert not (tmp_path / "out").exists()
+
+
 def test_masked_depth_is_not_scored(scan_dir, tmp_path):
     """The 5 m error in the confidence-0 columns must not reach the mean; with the mask off it does."""
     _, masked = _run(scan_dir, tmp_path)

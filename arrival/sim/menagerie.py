@@ -21,7 +21,8 @@ RENAMES = {"link0": "robot_base", "left_finger": "finger_l", "right_finger": "fi
            "finger_joint1": "finger_l", "finger_joint2": "finger_r"}
 CLASSES = {"panda": "panda", "finger": "panda_finger", "visual": "panda_visual", "collision": "panda_collision"}
 FINGER_FORCE = 40
-HAND = {"flap_bar": 0.0084, "flap_up": 0.3}  # see robot.HAND
+HAND = {"flap_bar": 0.0084, "flap_up": 0.3,  # see robot.HAND
+        "door_z": 0.04, "door_push": 0.015}  # close_door: the closed fingertips reach 15 mm less than the procedural ones, so the push stands 15 mm nearer the bar
 PAD_FRICTION = {"friction": "2.0 0.05 0.001", "condim": "6"}  # same pads as robot.py's fingers
 FETCH_HINT = "Menagerie Panda not found; run: python scripts/fetch_menagerie.py"
 

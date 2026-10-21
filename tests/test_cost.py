@@ -95,9 +95,9 @@ def test_baseline_and_usage_give_comparison_with_both_sample_sizes(out, tmp_path
     assert c["measured"] and c["generated"]["n_success"] == 7 and c["teleop"]["n_success"] == 10
     assert rep["teleop_baseline"]["seconds_per_success"] == 150.0 and rep["teleop_baseline"]["usd_per_success"] == 5.0
     assert c["generated"]["scope"] == "task" and c["generated"]["seconds_per_success"] is None  # no per-family seconds
-    assert c["generated"]["usd_per_success"] == 0.5 and c["generated"]["usd_measured"] is False
+    assert c["generated"]["usd_per_success"] is None and c["generated"]["usd_measured"] is False
     text = cost.markdown(rep)
-    assert "| generated (task) | 7 |" in text and "| teleop | 10 | 150.0 | 5.0 |" in text and "(estimate)" in text
+    assert "| generated (task) | 7 |" in text and "| teleop | 10 | 150.0 | 5.0 |" in text
     assert cost.main(["--out", str(out), "--usage", str(usage), "--pricing", str(PRICING), "--baseline", str(base),
                       "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["comparison"]["teleop"]["n_success"] == 10
@@ -111,10 +111,34 @@ def test_room_level_comparison_has_ratio(out, tmp_path):
     assert c["generated"]["usd_per_success"] is None
 
 
+def test_scoped_usage_prices_only_matching_task(out, tmp_path):
+    base = _w(tmp_path / "b.json", BASELINE)
+    usage = _w(tmp_path / "usage.json", {"scope": {"room": "hero_kitchen", "task": "counter_to_sink"},
+                                        "gpu_hour": 2})
+    c = cost.build(out, usage, PRICING, base)["comparison"]
+    assert c["generated"]["n_success"] == 7
+    assert c["generated"]["usd_per_success"] == round(5 / 7, 4)
+    usage = _w(tmp_path / "usage.json", {"scope": {"room": "garage", "task": "counter_to_sink"},
+                                        "gpu_hour": 2})
+    assert cost.build(out, usage, PRICING, base)["comparison"]["generated"]["usd_per_success"] is None
+
+
+def test_usage_scope_requires_room_and_task(tmp_path):
+    with pytest.raises(cost.CostError, match="scope"):
+        cost.load_usage(_w(tmp_path / "usage.json", {"scope": {"room": "hero_kitchen"}, "gpu_hour": 2}))
+
+
 def test_baseline_for_another_room_is_not_measured(out, tmp_path):
     base = _w(tmp_path / "b.json", {**BASELINE, "room": "garage"})
     c = cost.build(out, baseline_path=base)["comparison"]
     assert c["measured"] is False and "garage" in c["reason"]
+
+
+def test_baseline_for_unreported_task_does_not_use_room_totals(out, tmp_path):
+    base = _w(tmp_path / "b.json", {**BASELINE, "task": "pick_and_place"})
+    c = cost.build(out, baseline_path=base)["comparison"]
+    assert c["measured"] is False
+    assert "pick_and_place" in c["reason"]
 
 
 @pytest.mark.parametrize("patch,msg", [
@@ -145,6 +169,19 @@ def test_unknown_usage_product_raises(tmp_path):
         cost.load_usage(_w(tmp_path / "u.json", {"tpu_hour": 1}))
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_cost_inputs_cannot_be_reported(tmp_path, bad):
+    with pytest.raises(cost.CostError, match="operator_seconds_total"):
+        cost.load_baseline(_w(tmp_path / "baseline.json", {**BASELINE, "operator_seconds_total": bad}))
+    with pytest.raises(cost.CostError, match="cost_basis_usd"):
+        cost.load_baseline(_w(tmp_path / "baseline.json", {**BASELINE, "cost_basis_usd": bad}))
+    with pytest.raises(cost.CostError, match="gpu_hour"):
+        cost.load_usage(_w(tmp_path / "usage.json", {"gpu_hour": bad}))
+    pricing = _w(tmp_path / "pricing.json", {"products": {"gpu_hour": {"usd_per_unit": bad}}})
+    with pytest.raises(cost.CostError, match="gpu_hour"):
+        cost.load_pricing(pricing)
+
+
 def test_empty_out_dir(tmp_path):
     text = cost.markdown(cost.build(tmp_path / "nothing"))
     assert "no reports" in text and "comparison not measured" in text
@@ -155,3 +192,12 @@ def test_unreadable_report_is_a_cost_error_not_a_traceback(tmp_path):
     (tmp_path / "reports" / "bad.json").write_text("{not json")
     with pytest.raises(cost.CostError):
         cost.collect_rows(tmp_path)
+
+
+@pytest.mark.parametrize("attempts,successes", [(2, 3), (-1, 0), (True, 1), (3, False)])
+def test_inconsistent_report_counts_cannot_produce_throughput(tmp_path, attempts, successes):
+    _w(tmp_path / "reports" / "bad.json", {"room_id": "room", "attempts": attempts,
+                                          "successes": successes, "seconds": 10})
+    row, = cost.collect_rows(tmp_path)
+    assert row["attempts"] is row["successes"] is None
+    assert row["drop_rate"] is row["demos_per_hour"] is None

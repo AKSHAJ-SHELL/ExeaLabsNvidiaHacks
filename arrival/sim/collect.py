@@ -40,6 +40,9 @@ _front, _corners = front, corners  # the stand-rule helpers live in preflight; t
 BASE_MODES = ("fixed", "mobile")
 
 
+DOOR_KEEP = 0.3  # m past the panel's width that walkers keep from the hinge (the hand pulls the free edge)
+
+
 class SimEnv:
     def __init__(self, twin: dict, task: dict, res: int = 128, cameras=("ego_view", "wrist"), overview: bool = False,
                  base: str = "fixed", arm: str = "procedural"):
@@ -90,7 +93,8 @@ class SimEnv:
             free, bxy, front, self.people_note = self._free_floor(self.anchor, base)
             to = None if self.drive_to is None else frame(self.anchor.get("yaw", 0.0)) @ self.drive_to[:2]
             self.walkers = Walkers(task["people"], free, seed=task.get("seed", 0), base_xy=bxy, front_y=front,
-                                   fixtures=twin["fixtures"], yaw=self.anchor.get("yaw", 0.0), base_to=to)
+                                   fixtures=twin["fixtures"], yaw=self.anchor.get("yaw", 0.0), base_to=to,
+                                   keep=self._door_keepout(task))
         self.safety = SafetyMonitor(self.model)
         mujoco.mj_forward(self.model, self.data)
         self.cameras, self.res = cameras, res
@@ -107,6 +111,19 @@ class SimEnv:
     @staticmethod
     def _top(f: dict) -> float:
         return f["position"][2] + f["size"][2] / 2
+
+    def _door_keepout(self, task: dict) -> list:
+        """The disc the robot's door swings through, for the walkers to stay out of: centred on the hinge, with the
+        panel's width plus 0.3 m as radius. Nothing for a task without a hinged door."""
+        name = f'{task.get("fixture")}_door'
+        try:
+            b = self.model.body(name).id
+        except KeyError:
+            return []
+        mujoco.mj_forward(self.model, self.data)
+        w = max((2 * float(max(self.model.geom_size[g][:2])) for g in range(self.model.ngeom)
+                 if self.model.geom_bodyid[g] == b and self.model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX), default=0.0)
+        return [(self.data.xpos[b][:2].copy(), w + DOOR_KEEP)] if w else []
 
     def _free_floor(self, anchor: dict, base):
         """Floor for the walkers, in the frame where `anchor` (the fixture the task works at) faces +y: the strip
@@ -459,7 +476,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
                    "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res,
                    "shard": list(shard) if shard else None}
     journal = Journal(out_dir / "progress" / f"{room}_sim.jsonl")
-    done = journal.start(fingerprint, resume)
+    done = journal.start(fingerprint, resume, tasks[lo:hi])
     writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"), provenance=prov,
                               base=base, resume=bool(done), arm=arm)
     per: dict = {}

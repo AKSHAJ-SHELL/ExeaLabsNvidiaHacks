@@ -66,7 +66,7 @@ class Journal:
     def __init__(self, path: str | Path):
         self.path = Path(path)
 
-    def start(self, fingerprint: dict, resume: bool) -> list[dict]:
+    def start(self, fingerprint: dict, resume: bool, expected_tasks: list[dict] | None = None) -> list[dict]:
         """Begin the run. Fresh: truncate and write the fingerprint, return []. Resume: return the journaled records
         (a torn last line, from a kill mid-write, is cut off), or start fresh when there is no journal. Raises
         ShardError when the journal belongs to a run with other settings."""
@@ -82,11 +82,22 @@ class Journal:
                         raise ShardError(f"{self.path}: line {k + 1} is not JSON; delete the progress file to start over")
                     break  # a kill mid-write: that task counts as not done
             if rows:
+                if not isinstance(rows[0], dict):
+                    raise ShardError(f"{self.path}: invalid fingerprint record")
                 saved = rows[0].get("fingerprint")
                 if saved != fp:
                     diff = sorted(k for k in set(fp) | set(saved or {}) if (saved or {}).get(k) != fp.get(k))
                     raise ShardError(f"--resume: the saved progress in {self.path} is for a run with different "
                                      f"{', '.join(diff)}; rerun without --resume to start over")
+                if expected_tasks is not None:
+                    done = rows[1:]
+                    if len(done) > len(expected_tasks):
+                        raise ShardError(f"{self.path}: more completed tasks than this run contains")
+                    for index, (record, task) in enumerate(zip(done, expected_tasks)):
+                        if (not isinstance(record, dict) or record.get("task_id") != task["task_id"]
+                                or record.get("family") != task["family"]
+                                or record.get("outcome") not in ("ok", "miss", "contact", "skip")):
+                            raise ShardError(f"{self.path}: record {index + 1} does not match the task sequence")
                 self.path.write_text("".join(json.dumps(r) + "\n" for r in rows))  # drops a torn last line
                 return rows[1:]
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,10 +188,21 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
         cursor = hi
     if cursor != first["shard"]["total_tasks"]:
         raise ShardError(f"the shards cover {cursor} tasks, the run had {first['shard']['total_tasks']}")
+    seen_tasks: set[str] = set()
     for s in shards:
         if len(s["episodes"]) != s["info"]["total_episodes"]:
             raise ShardError(f"{s['root']}: episodes.jsonl has {len(s['episodes'])} rows, "
                              f"info.total_episodes={s['info']['total_episodes']}; the shard is damaged")
+        lo, hi = s["shard"]["task_range"]
+        for row in s["episodes"]:
+            task_id = row.get("arrival_task_id")
+            match = re.fullmatch(r"sim_(.+)_(\d+)", task_id) if isinstance(task_id, str) else None
+            if not match or match.group(1) not in first["shard"]["families"]:
+                raise ShardError(f"shard {s['shard']['index']} has an invalid task id {task_id!r}")
+            task_index = int(match.group(2))
+            if task_id in seen_tasks or not lo <= task_index < hi:
+                raise ShardError(f"shard {s['shard']['index']} has duplicate or out-of-range task {task_id!r}")
+            seen_tasks.add(task_id)
     if sum(len(s["episodes"]) for s in shards) == 0:
         raise ShardError("no shard holds an episode; nothing to merge")
 

@@ -11,8 +11,14 @@ worker process is gone on the same host, is requeued by ``reap_stale``. The clai
 network share without working ``O_EXCL`` it is not safe.
 
 Limits (``arrival.jobs.limits``): a wall-clock timeout per job (the job runs in a child process that is killed),
-episodes and people ceilings, and the upload size. Each finished job gets a ``usage`` block in ``status.json`` and
-one line in ``out/usage/jobs.jsonl``; ``arrival.eval.cost`` reads both.
+episodes and people ceilings, and the upload size. Each finished attempt gets a ``usage`` block in ``status.json``
+and one line in ``out/usage/jobs.jsonl``; ``arrival.eval.cost`` reads both.
+
+A failed attempt goes back to the queue up to ``limits.job_retries`` times (``requeue_failed``), unless the failure
+would only repeat (``retryable``): a bad upload or a request over a limit, a layout the sim cannot use, a dataset with
+nothing usable in it, or the wall-clock timeout. ``job_attempts`` in ``status.json`` counts the starts and
+``retry_errors`` keeps the error of each attempt that was retried. The requeue is written while the worker still
+holds ``claim.lock``, so no other worker can take the job before this one lets go of it.
 """
 
 from __future__ import annotations
@@ -61,6 +67,22 @@ class UnsupportedLayout(RuntimeError):
     def __init__(self, message: str, reasons: list[str] | None = None):
         super().__init__(message)
         self.reasons = reasons or []
+
+
+class UnusableDataset(RuntimeError):
+    """The sim ran but left nothing to ship: no successful episode, or a dataset the validator rejects. The sim is
+    seeded, so running the same upload again gives the same result."""
+
+
+NOT_RETRIED = (ValueError, UnsupportedLayout, UnusableDataset)  # the same upload would fail the same way again
+
+
+def retryable(e: BaseException) -> bool:
+    """True when another attempt may not hit ``e`` again: an OS or I/O error, running out of memory, an unexpected
+    error in the twin compiler, renderer or sim. False for the upload's own faults, which are ``ValueError``s
+    (unreadable JSON, ``ScanBundleError`` from the scan validators, ``LimitError`` for a request over a limit), for
+    ``UnsupportedLayout`` and ``UnusableDataset``, and for Ctrl-C or SystemExit."""
+    return isinstance(e, Exception) and not isinstance(e, NOT_RETRIED)
 
 
 def room_id_for(filename: str, job_id: str) -> str:
@@ -153,13 +175,14 @@ def build_usage(status: dict, wall_seconds: float, stage_seconds: dict | None = 
 
 
 def record_usage(out_dir: Path, status: dict) -> None:
-    """Append one line for a finished job to ``out/usage/jobs.jsonl``. The ledger outlives ``arrival gc``."""
+    """Append one line for a finished attempt to ``out/usage/jobs.jsonl``: a retried job has one line per attempt,
+    told apart by ``job_attempts``. The ledger outlives ``arrival gc``."""
     usage = status.get("usage")
     if not isinstance(usage, dict):
         return
     line = {"id": status.get("id"), "room_id": status.get("room_id"), "status": status.get("status"),
-            "finished_at": status.get("finished_at"), "attempts": status.get("attempts"),
-            "successes": status.get("successes"), **usage}
+            "finished_at": status.get("finished_at"), "job_attempts": status.get("job_attempts"),
+            "attempts": status.get("attempts"), "successes": status.get("successes"), **usage}
     path = Path(out_dir).joinpath(*USAGE_LEDGER)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:  # one write per line: O_APPEND keeps concurrent workers' lines whole
@@ -274,7 +297,8 @@ class Heartbeat:
 
 def claim_next(jobs_root: Path, worker: str | None = None) -> tuple[Path, dict] | None:
     """Claim the oldest queued job by ``created_unix`` (then id): create its ``claim.lock`` exclusively, then mark it
-    running. Safe with several workers; None when nothing is claimable. The caller must ``release`` the job when done."""
+    running and count the start in ``job_attempts``. Safe with several workers; None when nothing is claimable. The
+    caller must ``release`` the job when done."""
     jobs_root = Path(jobs_root)
     worker = worker or worker_id()
     if not jobs_root.is_dir():
@@ -297,7 +321,9 @@ def claim_next(jobs_root: Path, worker: str | None = None) -> tuple[Path, dict] 
         if st is None or st.get("status") != "queued":
             _unlink(job_dir / LOCK)
             continue
-        st.update({"status": "running", "stage": None, "started_at": int(time.time()), "finished_at": None,
+        n = st.get("job_attempts")
+        st.update({"job_attempts": (n if isinstance(n, int) and n > 0 else 0) + 1,
+                   "status": "running", "stage": None, "started_at": int(time.time()), "finished_at": None,
                    "error": None, "room_id": None, "twin_dir": None, "dataset_dir": None, "zip": None,
                    "attempts": None, "successes": None, "skipped": None, "error_kind": None,
                    "error_reasons": None, "realism": None, "usage": None, "progress": None,
@@ -310,6 +336,25 @@ def claim_next(jobs_root: Path, worker: str | None = None) -> tuple[Path, dict] 
 
 def release(job_dir: Path) -> None:
     _unlink(Path(job_dir) / LOCK)
+
+
+def requeue_failed(job_dir: Path, status: dict, limits: Limits, log=print) -> bool:
+    """Turn a failed attempt's ``status`` back into ``queued`` when retries are left and no cancel was asked for: the
+    attempt's ``error`` moves to ``retry_errors``, so ``error`` stays null on a job that is not finished. The caller
+    holds ``claim.lock`` and writes the status, so the job is claimable only after ``release``. Returns False, and
+    leaves ``status`` alone, when the failure stands."""
+    errors = status.get("retry_errors") if isinstance(status.get("retry_errors"), list) else []
+    if len(errors) >= limits.job_retries:
+        if limits.job_retries:
+            log(f"[work] {status['id']}: not retried, all {limits.job_retries} retries used")
+        return False
+    if (Path(job_dir) / CANCEL).exists():
+        log(f"[work] {status['id']}: not retried, a cancel was requested")
+        return False
+    status.update({"status": "queued", "stage": None, "started_at": None, "finished_at": None, "worker": None,
+                   "error": None, "retry_errors": [*errors, status.get("error")]})
+    log(f"[work] {status['id']}: queued again, retry {len(errors) + 1} of {limits.job_retries}")
+    return True
 
 
 def reap_stale(jobs_root: Path, stale_seconds: float = 120.0, log=print, now: float | None = None) -> int:
@@ -406,10 +451,12 @@ def cancel_job(jobs_root: Path, job_id: str) -> str | None:
 
 def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, families=DEFAULT_FAMILIES,
             people: int = 1, res: int = 128, seed: int = 0, log=print, limits: Limits | None = None) -> dict:
-    """Run every stage for one claimed job. Returns the final status; never raises (except Ctrl-C and SystemExit)."""
+    """Run every stage for one claimed job, one attempt. Returns the status the attempt left: ``done``, ``failed``,
+    ``cancelled``, or ``queued`` again for a retry (``requeue_failed``); never raises (except Ctrl-C and SystemExit)."""
     out_dir, job_dir = Path(out_dir), Path(job_dir)
     limits = limits or Limits()
     meter = Meter()
+    retry = False
     status["realism"] = None
     if status.get("frames"):
         status["frames"].update(consumed=False, used_for=None)
@@ -461,12 +508,12 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
             why = [x["reason"] for x in r["skip_reasons"]][:3]
             raise UnsupportedLayout("no task can run in this room" + (": " + "; ".join(why) if why else ""), why)
         if r["successes"] == 0:
-            raise RuntimeError(f"no successful episodes in {r['attempts']} attempts")
+            raise UnusableDataset(f"no successful episodes in {r['attempts']} attempts")
 
         _stage(job_dir, status, "validate", log, meter)
         errors = validate(res_["dataset"])
         if errors:
-            raise RuntimeError("dataset invalid: " + "; ".join(errors[:5]))
+            raise UnusableDataset("dataset invalid: " + "; ".join(errors[:5]))
 
         _stage(job_dir, status, "zip", log, meter)
         zip_path = job_dir / "dataset.zip"
@@ -482,6 +529,7 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
         log(f"[work] {status['id']}: cancelled at {status.get('stage')}")
     except BaseException as e:  # noqa: BLE001 - any stage failure is the job's failure, not the worker's
         status.update({"status": "failed", "error": f"{type(e).__name__}: {e}" if str(e) else type(e).__name__})
+        retry = retryable(e)
         if isinstance(e, UnsupportedLayout):  # a typed status, not a traceback: the room, not the worker, is the problem
             status.update({"error": f"unsupported layout: {e}", "error_kind": "unsupported_layout",
                            "error_reasons": e.reasons})
@@ -499,9 +547,12 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
     status["finished_at"] = int(time.time())
     meter.enter(None)
     status["usage"] = build_usage(status, meter.wall(), meter.seconds)
+    ended = dict(status)  # the ledger line is this attempt as it ended, also when the job goes back to the queue
+    if retry:  # decided before the write: a client polling the job never sees "failed" for a job that will run again
+        requeue_failed(job_dir, status, limits, log)
     _write_status(job_dir, status)
     try:
-        record_usage(out_dir, status)
+        record_usage(out_dir, ended)
     except OSError as e:  # metering must never turn a finished job into a failure
         log(f"[work] {status['id']}: usage ledger not written: {e}")
     if status["status"] == "done":
@@ -512,8 +563,9 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
 def run_isolated(job_dir: Path, status: dict, out_dir: Path, limits: Limits, log=print, child_cmd=None,
                  tick: float = 0.1, **kw) -> dict:
     """Run ``process`` in a child process and enforce ``limits.max_job_seconds`` by killing it. The child writes its
-    own status; this function only steps in when the child timed out, was cancelled, or died without finishing
-    (killed by the OS, segfault), and then records the failure with the stage it reached."""
+    own status, retry included; this function only steps in when the child timed out, was cancelled, or died without
+    finishing (killed by the OS, segfault), and then records the failure with the stage it reached. A child that died
+    is retried like any other failure that may pass; a timeout is not, since the limit is what one job may cost."""
     job_dir, out_dir = Path(job_dir), Path(out_dir)
     payload = {k: (list(v) if k == "families" else v) for k, v in kw.items()
                if k in ("episodes", "families", "people", "res", "seed")}
@@ -544,7 +596,7 @@ def run_isolated(job_dir: Path, status: dict, out_dir: Path, limits: Limits, log
         raise
     final = _read_status(job_dir) or status
     if final.get("status") != "running" and why is None:
-        return final  # the child finished the job itself, usage and ledger included
+        return final  # the child ended the attempt itself (done, failed, cancelled or queued again), ledger included
     done = (final.get("usage") or {}).get("stage_seconds") or {}
     stage = final.get("stage")
     if why == "timeout":
@@ -560,19 +612,23 @@ def run_isolated(job_dir: Path, status: dict, out_dir: Path, limits: Limits, log
         (job_dir / "error.txt").write_text(final["error"] + "\n", encoding="utf-8")
     final["finished_at"] = int(time.time())
     final["usage"] = build_usage(final, time.monotonic() - t0, done)  # the stage in flight is not split out
+    log(f"[work] {final['id']}: {final['status']}: {final.get('error') or 'stopped'}")
+    ended = dict(final)
+    if why is None and final["status"] == "failed":  # the child died: out of memory or killed, which may not recur
+        requeue_failed(job_dir, final, limits, log)
     _write_status(job_dir, final)
     try:
-        record_usage(out_dir, final)
+        record_usage(out_dir, ended)
     except OSError as e:
         log(f"[work] {final['id']}: usage ledger not written: {e}")
-    log(f"[work] {final['id']}: {final['status']}: {final.get('error') or 'stopped'}")
     return final
 
 
 def run_once(out_dir: Path, limits: Limits | None = None, isolate: bool = False, worker: str | None = None,
              child_cmd=None, **kw) -> dict | None:
-    """Claim and process one queued job. None when nothing is queued. With ``isolate`` the job runs in a child process
-    under ``limits.max_job_seconds``; otherwise in this process (no timeout)."""
+    """Claim and process one queued job (one attempt; a failure that may pass leaves it ``queued`` for the next claim).
+    None when nothing is queued. With ``isolate`` the job runs in a child process under ``limits.max_job_seconds``;
+    otherwise in this process (no timeout)."""
     limits = limits or Limits()
     claimed = claim_next(Path(out_dir) / "jobs", worker)
     if claimed is None:
@@ -589,7 +645,7 @@ def run_once(out_dir: Path, limits: Limits | None = None, isolate: bool = False,
 
 def work(out_dir: Path, once: bool = False, poll: float = 2.0, log=print, limits: Limits | None = None,
          isolate: bool | None = None, worker: str | None = None, **kw) -> int:
-    """Poll until Ctrl-C (or one job with ``once``). Returns the number of jobs processed.
+    """Poll until Ctrl-C (or one job with ``once``). Returns the number of job attempts run (a retry counts again).
 
     ``limits`` default to ``Limits.from_env()``; sim options above them raise ``LimitError`` before any job is touched.
     ``isolate`` defaults to on when ``limits.max_job_seconds`` is set. Other workers may run on the same ``out``."""

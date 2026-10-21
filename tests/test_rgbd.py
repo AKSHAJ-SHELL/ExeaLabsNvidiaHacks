@@ -72,3 +72,27 @@ def test_non_object_frame_raises_manifest_error(tmp_path):
     with pytest.raises(rgbd.ManifestError) as e:
         rgbd.load_manifest(root)
     assert e.value.code == "frames"
+
+
+def test_frame_symlink_cannot_escape_bundle(tmp_path):
+    root = rgbd.write_synthetic_bundle(tmp_path / "bundle")
+    outside = tmp_path / "outside.png"
+    outside.write_bytes((root / "rgb" / "f000.png").read_bytes())
+    (root / "rgb" / "f000.png").unlink()
+    (root / "rgb" / "f000.png").symlink_to(outside)
+    with pytest.raises(rgbd.ManifestError) as e:
+        rgbd.load_manifest(root)
+    assert e.value.code == "bad_path"
+
+@pytest.mark.parametrize("splits", [
+    {"train": [], "heldout": ["f001"]},
+    {"train": ["f000", "unknown"], "heldout": ["f001"]},
+    {"train": ["f000", "f000"], "heldout": ["f001"]},
+    {"train": "f000", "heldout": ["f001"]},
+])
+def test_explicit_split_lists_must_match_every_frame(tmp_path, splits):
+    root = rgbd.write_synthetic_bundle(tmp_path)
+    _edit(root, lambda m: m.update(splits=splits))
+    with pytest.raises(rgbd.ManifestError) as e:
+        rgbd.load_manifest(root)
+    assert e.value.code == "split"

@@ -35,6 +35,10 @@ def _u64(*parts) -> int:
 
 def select_frames(episode_index: int, n_frames: int, seed: int, fraction: float = FRACTION) -> list[int]:
     """The round(fraction * n) frames with the smallest hash of (episode_index, frame_index, seed), sorted."""
+    if type(n_frames) is not int or n_frames < 0:
+        raise ValueError("n_frames must be a non-negative integer")
+    if type(fraction) not in (int, float) or not math.isfinite(fraction) or not 0 <= fraction <= 1:
+        raise ValueError("fraction must be finite and between 0 and 1")
     k = min(n_frames, int(round(fraction * n_frames)))
     ranked = sorted(range(n_frames), key=lambda i: (_u64(episode_index, i, seed), i))
     return sorted(ranked[:k])
@@ -74,10 +78,19 @@ def check_frame(orig: np.ndarray, var: np.ndarray, mask: np.ndarray | None = Non
     if var.shape != orig.shape:
         return {"ok": False, "reason": f"shape {list(var.shape)} != {list(orig.shape)}",
                 "edge_corr": None, "mask_change": None}
+    if var.dtype != np.uint8:
+        return {"ok": False, "reason": f"expected uint8 RGB frame, got {var.dtype}",
+                "edge_corr": None, "mask_change": None}
+    if mask is not None and (not isinstance(mask, np.ndarray) or mask.dtype != np.bool_
+                             or mask.shape != orig.shape[:2]):
+        return {"ok": False, "reason": "mask must be a boolean array matching frame height and width",
+                "edge_corr": None, "mask_change": None}
     corr = edge_correlation(orig, var)
     mc = masked_change(orig, var, mask)
     reason = None
-    if corr < edge_min:
+    if not math.isfinite(corr) or (mc is not None and not math.isfinite(mc)):
+        reason = "non-finite geometry check"
+    elif corr < edge_min:
         reason = f"edge correlation {corr:.3f} < {edge_min}"
     elif mc is not None and mc > mask_max:
         reason = f"masked region changed {mc:.3f} > {mask_max}"
@@ -155,7 +168,12 @@ class CosmosClient:
                     body = r.read()
                     self.model = r.headers.get("X-Cosmos-Model", self.model)
                     self.version = r.headers.get("X-Cosmos-Version", self.version)
-                img = np.asarray(imageio.imread(io.BytesIO(body), format="PNG"))[..., :3].astype(np.uint8)
+                img = np.asarray(imageio.imread(io.BytesIO(body), format="PNG"))
+                if (img.dtype != np.uint8 or img.ndim != 3 or img.shape[2] not in (3, 4)
+                        or img.shape[:2] != frame.shape[:2]):
+                    raise ValueError(f"expected uint8 RGB or RGBA PNG at {frame.shape[:2]}, got "
+                                     f"{img.dtype} {img.shape}")
+                img = img[..., :3]
                 return img, {"prompt": self.prompt, "attempts": attempt + 1}
             except (urllib.error.URLError, OSError, ValueError) as e:
                 last = e
@@ -178,6 +196,7 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     src, dst = Path(src), Path(dst)
     if backend not in ("cosmos", "local_stub"):
         raise ValueError(f"unknown backend {backend!r}")
+    select_frames(0, 0, seed, fraction)  # reject invalid fractions before copying the dataset
     if dst.exists():
         raise FileExistsError(f"{dst} exists; the copy directory must be new")
     shutil.copytree(src, dst)

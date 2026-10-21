@@ -1,8 +1,8 @@
 import Foundation
 
 /// Client for the Arrival web server (`python -m arrival serve --host 0.0.0.0`).
-/// `POST /jobs` takes a multipart form with the file in field `scan` and answers 202
-/// `{"status", "id", "status_url"}`; `GET /jobs/<id>` returns the job's status.json.
+/// `POST /jobs` takes a multipart form with the file in field `scan` (and optionally a CAP-2a frames zip in
+/// `frames`) and answers 202 `{"status", "id", "status_url"}`; `GET /jobs/<id>` returns the job's status.json.
 enum ArrivalAPI {
     struct QueuedJob: Decodable {
         let id: String
@@ -45,13 +45,21 @@ enum ArrivalAPI {
         try check(response, data, expect: 200)
     }
 
-    static func upload(fileURL: URL, filename: String, server: String) async throws -> QueuedJob {
+    /// Uploads the scan, and the frames zip when given. The body is written to a temporary file and streamed
+    /// from there, so a large frames bundle is never held in memory.
+    static func upload(fileURL: URL, filename: String, framesZip: URL? = nil, server: String) async throws -> QueuedJob {
         let boundary = "ArrivalBoundary-\(UUID().uuidString)"
-        var req = request(try baseURL(server).appendingPathComponent("jobs"), timeout: 120)
+        var req = request(try baseURL(server).appendingPathComponent("jobs"), timeout: framesZip == nil ? 120 : 600)
         req.httpMethod = "POST"
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        let body = multipartBody(file: try Data(contentsOf: fileURL), filename: filename, boundary: boundary)
-        let (data, response) = try await URLSession.shared.upload(for: req, from: body)
+        var parts = [Part(field: "scan", filename: filename, contentType: "application/json", file: fileURL)]
+        if let framesZip {
+            parts.append(Part(field: "frames", filename: "frames.zip", contentType: "application/zip", file: framesZip))
+        }
+        let body = FileManager.default.temporaryDirectory.appendingPathComponent("upload_\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: body) }
+        try writeMultipart(parts, boundary: boundary, to: body)
+        let (data, response) = try await URLSession.shared.upload(for: req, fromFile: body)
         try check(response, data, expect: 202)
         return try JSONDecoder().decode(QueuedJob.self, from: data)
     }
@@ -67,14 +75,28 @@ enum ArrivalAPI {
         try? baseURL(server).appendingPathComponent("jobs").appendingPathComponent(jobID).appendingPathComponent("download")
     }
 
-    static func multipartBody(file: Data, filename: String, boundary: String) -> Data {
-        var d = Data()
-        d.append(Data("--\(boundary)\r\n".utf8))
-        d.append(Data("Content-Disposition: form-data; name=\"scan\"; filename=\"\(filename)\"\r\n".utf8))
-        d.append(Data("Content-Type: application/json\r\n\r\n".utf8))
-        d.append(file)
-        d.append(Data("\r\n--\(boundary)--\r\n".utf8))
-        return d
+    struct Part {
+        let field: String
+        let filename: String
+        let contentType: String
+        let file: URL
+    }
+
+    static func writeMultipart(_ parts: [Part], boundary: String, to output: URL) throws {
+        FileManager.default.createFile(atPath: output.path, contents: nil)
+        let out = try FileHandle(forWritingTo: output)
+        defer { try? out.close() }
+        for part in parts {
+            try out.write(contentsOf: Data(("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(part.field)\"; "
+                + "filename=\"\(part.filename)\"\r\nContent-Type: \(part.contentType)\r\n\r\n").utf8))
+            let input = try FileHandle(forReadingFrom: part.file)
+            defer { try? input.close() }
+            while let chunk = try input.read(upToCount: 1 << 20), !chunk.isEmpty {
+                try out.write(contentsOf: chunk)
+            }
+            try out.write(contentsOf: Data("\r\n".utf8))
+        }
+        try out.write(contentsOf: Data("--\(boundary)--\r\n".utf8))
     }
 
     private static func request(_ url: URL, timeout: TimeInterval = 15) -> URLRequest {

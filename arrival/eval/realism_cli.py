@@ -154,6 +154,15 @@ def run_realism(scan: str | Path, out_dir: str | Path = "out", scans_dir: str | 
 
     if max_side < 16 or max_frames < 1:
         raise RealismError("--max-side must be at least 16 and --max-frames at least 1")
+    transform = None
+    if camera_transform is not None:
+        try:
+            transform = np.asarray(camera_transform, dtype=float)
+        except (TypeError, ValueError) as e:
+            raise RealismError("camera_transform must be a finite 4x4 transform") from e
+        if transform.shape != (4, 4) or not np.isfinite(transform).all() or not np.allclose(
+                transform[3], [0, 0, 0, 1]):
+            raise RealismError("camera_transform must be a finite 4x4 homogeneous transform")
     scan_dir = resolve_scan(scan, scans_dir)
     mdir = manifest_dir(scan_dir)
     try:
@@ -168,8 +177,7 @@ def run_realism(scan: str | Path, out_dir: str | Path = "out", scans_dir: str | 
                            f"training frames cannot be used as evidence")
     used = _pick(heldout, max_frames)
     frames = [load_frame(manifest, f, max_side, min_confidence) for f in used]
-    if camera_transform is not None:
-        transform = np.asarray(camera_transform, dtype=float)
+    if transform is not None:
         for frame in frames:
             frame["cam_to_room"] = transform @ frame["cam_to_room"]
     ids = [f.id for f in used]

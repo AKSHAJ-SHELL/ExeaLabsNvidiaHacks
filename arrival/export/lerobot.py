@@ -36,6 +36,7 @@ VIDEO_KEY = "observation.images.ego_view"
 SPARSE_EVERY = 125
 CHUNKS_SIZE = 1000
 SIDECAR = "arrival_cartesian.jsonl"
+QUANTILES = (0.01, 0.99)  # the q01/q99 GR00T normalises with
 DATA_PATH = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet"
 VIDEO_PATH = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4"
 
@@ -118,6 +119,22 @@ def _stats(x: np.ndarray) -> dict:
     x = x.astype(np.float64).reshape(len(x), -1)
     return {"min": x.min(0).tolist(), "max": x.max(0).tolist(), "mean": x.mean(0).tolist(),
             "std": x.std(0).tolist(), "count": [len(x)]}
+
+
+def dataset_stats(root: Path, ep_stats: list[dict], data_glob: str = "data/chunk-*/episode_*.parquet") -> dict:
+    """stats.json: the per-episode stats merged, plus q01/q99 over every frame. GR00T's loader expects both
+    quantiles and recomputes the whole file when they are missing; quantiles do not merge across episodes, so they
+    are read back from the parquet files."""
+    stats = {k: _merge_stats([s["stats"][k] for s in ep_stats]) for k in ep_stats[0]["stats"]}
+    tables = [pq.read_table(f) for f in sorted(Path(root).glob(data_glob))]
+    for k, st in stats.items():
+        cols = [t.column(k).to_pylist() for t in tables if k in t.column_names]
+        if not cols:
+            continue
+        x = np.asarray([v for c in cols for v in c], dtype=np.float64).reshape(-1, len(st["mean"]))
+        q01, q99 = np.quantile(x, QUANTILES, axis=0)
+        st.update({"q01": q01.tolist(), "q99": q99.tolist()})
+    return stats
 
 
 def _merge_stats(items: list[dict]) -> dict:
@@ -305,8 +322,7 @@ class LeRobotWriter:
             for s in self.ep_stats:
                 f.write(json.dumps(s) + "\n")
         if self.ep_stats:
-            stats = {k: _merge_stats([s["stats"][k] for s in self.ep_stats]) for k in self.ep_stats[0]["stats"]}
-            (meta / "stats.json").write_text(json.dumps(stats, indent=2))
+            (meta / "stats.json").write_text(json.dumps(dataset_stats(self.root, self.ep_stats), indent=2))
         modality = dict(self.modality)
         if self.video_policy == "all":
             modality["video"] = {name: {"original_key": video_key(name)} for name in self.video_keys}

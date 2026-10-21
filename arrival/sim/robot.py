@@ -16,8 +16,9 @@ FINGER_FORCE = 40  # N, each finger
 # hand geometry the expert's flap-door plan depends on, per arm (menagerie.HAND is the real hand's):
 # flap_bar = how far outside the bar centre the eef holds it, so the pads straddle the bar (the procedural pads sit
 # 6.6 mm below the eef, the real ones at it); flap_up = how high the hand backs off after letting the door fall, so
-# the wider real hand clears the falling panel
-HAND = {"flap_bar": 0.015, "flap_up": 0.15}
+# the wider real hand clears the falling panel; door_z / door_push = close_door push height over the bar and
+# standoff of the eef from the bar centre along the door normal
+HAND = {"flap_bar": 0.015, "flap_up": 0.15, "door_z": 0.04, "door_push": 0.03}
 ARM_JOINTS = [f"joint{i}" for i in range(1, 8)]
 BASE_JOINTS = ["base_x", "base_y", "base_yaw"]  # MAN-3: planar base on robot_base, room-frame x, y, yaw
 BASE_SPEED, BASE_TURN = 0.3, 0.5  # m/s and rad/s the expert never exceeds, so the data looks like a slow cart

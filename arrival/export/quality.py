@@ -29,7 +29,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from arrival.export.lerobot import _merge_stats, _stats
+from arrival.export.lerobot import _stats, dataset_stats
 
 LIMIT_FRAC = 0.03       # fraction of a joint's range counted as "at the limit"
 LIMIT_STEPS = 40        # consecutive steps at the limit before it is flagged (2 s at 20 fps)
@@ -248,8 +248,7 @@ def drop_flagged(root: str | Path, out: str | Path, report: dict | None = None, 
     for name, rows in (("episodes.jsonl", new_eps), ("episodes_stats.jsonl", new_stats)):
         (meta / name).write_text("".join(json.dumps(r) + "\n" for r in rows))
     if all(r["stats"] for r in new_stats):
-        (meta / "stats.json").write_text(json.dumps(
-            {k: _merge_stats([r["stats"][k] for r in new_stats]) for k in new_stats[0]["stats"]}, indent=2))
+        (meta / "stats.json").write_text(json.dumps(dataset_stats(out, new_stats), indent=2))
     side = meta / "arrival_cartesian.jsonl"
     if side.is_file():
         rows = [{**r, "episode_index": mapping[r["episode_index"]]} for r in _jsonl(side)

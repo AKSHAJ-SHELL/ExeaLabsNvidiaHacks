@@ -176,7 +176,7 @@ def test_room_page_links_sim_dataset(server):
 
 
 def test_capture_app_upload_reaches_worker(server):
-    """CAP-1: the iOS app's request (ios/ArrivalCapture/ArrivalCapture/ArrivalAPI.swift multipartBody)
+    """CAP-1: the iOS app's request (ios/ArrivalCapture/ArrivalCapture/ArrivalAPI.swift writeMultipart, scan part only)
     with a real CapturedRoom export is queued byte for byte and the worker reads it as RoomPlan."""
     from arrival.jobs.worker import load_upload, room_id_for
 
@@ -374,9 +374,58 @@ def test_public_mode_lists_only_own_jobs_and_hides_paths(make):
     assert st["owner"]
     st.update({"zip": "/srv/private/dataset.zip", "twin_dir": "/srv/private/twin", "dataset_dir": "/srv/private/ds"})
     path.write_text(json.dumps(st))
-    _, body, _ = _fetch(srv, f"/jobs/{a['id']}")
+    _, body, _ = _fetch(srv, f"/jobs/{a['id']}", {"Cookie": cookie_a})
     got = json.loads(body)
     assert got["id"] == a["id"] and "owner" not in got and "/srv/private" not in body.decode()
+
+
+def test_public_job_status_and_download_require_owner(make):
+    srv, out = make(public=True, rate_limit=0)
+    _, a, resp_a = _post(srv, [("scan", "alice.json", TINY)])
+    _, b, resp_b = _post(srv, [("scan", "bob.json", TINY)])
+    cookie_a, cookie_b = _cookie(resp_a), _cookie(resp_b)
+    job = out / "jobs" / a["id"]
+    status = json.loads((job / "status.json").read_text())
+    status["status"] = "done"
+    (job / "status.json").write_text(json.dumps(status))
+    (job / "dataset.zip").write_bytes(b"private dataset")
+
+    for path in (f"/jobs/{a['id']}", f"/jobs/{a['id']}/download"):
+        code, _, _ = _fetch(srv, path, {"Cookie": cookie_a})
+        assert code == 200
+        for headers in ({}, {"Cookie": cookie_b}, {"Cookie": "arrival_client=" + "0" * 32}):
+            code, body, _ = _fetch(srv, path, headers)
+            assert code == 404 and b"private dataset" not in body
+
+
+def test_public_uploaded_dataset_and_preview_require_owner(make):
+    srv, out = make(public=True, rate_limit=0)
+    _, a, resp_a = _post(srv, [("scan", "alice.json", TINY)])
+    _, _, resp_b = _post(srv, [("scan", "bob.json", TINY)])
+    cookie_a, cookie_b = _cookie(resp_a), _cookie(resp_b)
+    room = f"alice_{a['id']}"
+    job = out / "jobs" / a["id"]
+    status = json.loads((job / "status.json").read_text())
+    status["room_id"] = room
+    (job / "status.json").write_text(json.dumps(status))
+    dataset = out / "datasets" / f"{room}_sim"
+    dataset.mkdir(parents=True)
+    (dataset / "private.txt").write_bytes(b"private dataset")
+    preview = out / "previews" / f"{room}_sim_contact.png"
+    preview.parent.mkdir(parents=True)
+    preview.write_bytes(b"private preview")
+
+    for path, expected in ((f"/download/{room}_sim", b"private dataset"),
+                           (f"/previews/{preview.name}", b"private preview")):
+        code, body, _ = _fetch(srv, path, {"Cookie": cookie_a})
+        assert code == 200
+        if path.startswith("/download/"):
+            assert zipfile.ZipFile(io.BytesIO(body)).read(f"{room}_sim/private.txt") == expected
+        else:
+            assert expected in body
+        for headers in ({}, {"Cookie": cookie_b}):
+            code, body, _ = _fetch(srv, path, headers)
+            assert code == 404 and expected not in body
 
 
 def test_local_mode_lists_all_jobs(make):
@@ -720,6 +769,14 @@ def test_frames_not_a_zip_or_wrong_name_is_rejected(make):
     assert _post(srv, [("scan", "s.json", HERO_SCAN), ("frames", "f.tar", b"PK\x03\x04")])[0] == 415
     assert _post(srv, [("scan", "s.json", HERO_SCAN), ("frames", "f.zip", b"")])[0] == 400
     assert _job_dirs(out) == []
+
+
+def test_frames_input_left_empty_by_a_browser_is_ignored(make):
+    # an unselected <input type=file> is still sent: filename="" and no bytes. The scan alone must queue.
+    srv, out = make(rate_limit=0)
+    code, body, _ = _post(srv, [("scan", "s.json", HERO_SCAN), ("frames", "", b"")])
+    assert code == 202, body
+    assert "frames" not in json.loads((out / "jobs" / body["id"] / "status.json").read_text())
 
 
 def test_frames_zip_bomb_is_stopped_by_the_streamed_size_cap(make, monkeypatch):

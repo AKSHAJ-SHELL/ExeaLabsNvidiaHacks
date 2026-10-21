@@ -154,7 +154,7 @@ Checked-in `roomplan.json` does not have to rebuild every fixture. The authored 
 
 ## RGB-D scan frames
 
-`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. Only the format, the loader and a synthetic fixture exist; the iOS recorder that would write it is not built (needs a device). `POST /jobs` accepts a bundle as a zip in the `frames` field, validates it and stores it next to the job. The worker compares held-out frames with the compiled twin before adding synthetic objects (docs/REFERENCE.md, Uploaded-frame comparison).
+`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. The iOS app records it during a RoomPlan scan (`FrameRecorder.swift`, CAP-2; compiled and its writer round-trip tested on a Mac, never run on a phone), and tests use a synthetic fixture. `POST /jobs` accepts a bundle as a zip in the `frames` field, validates it and stores it next to the job. The worker compares held-out frames with the compiled twin before adding synthetic objects (docs/REFERENCE.md, Uploaded-frame comparison).
 
 Layout: `frames_manifest.json` plus the files it names, all relative paths inside the bundle folder (no absolute paths, no `..`).
 
@@ -234,7 +234,7 @@ Moving parts in the sim (`arrival.sim.scene.part_names(twin)`): each is a joint,
 | counter | `<id>_drawer0`, `<id>_drawer1` (slide, 0 to 0.4 m), `<id>_door` (hinge, 0 to 1.9 rad), `<id>_upper_door<k>` (hinge; one wall-cabinet door per 0.6 m of counter run, none over tables, islands or counters under 0.8 m) |
 | sink inside a counter | `<sink_id>_faucet` (hinge, 0 to 1.2 rad; the lever up is water on) |
 | stove | `<id>_oven_door` (hinge about the bottom edge, 0 to 1.5 rad; closed is held by gravity) |
-| fridge_bottom_freezer | `<id>_door` (hinge, 0 to 2.0 rad) |
+| fridge_bottom_freezer | `<id>_door` (hinge, 0 to 2.0 rad). Optional fixture field `hinge`: `"left"` (default, and what a RoomPlan scan always gets) or `"right"`, which mirrors the door in the fixture's x (hinge on the right edge, free edge on the left, opening the same way: q > 0 is open). Left output is byte-identical to before the field |
 | dishwasher | `<id>_door` (hinge about the bottom edge, 0 to 1.5 rad), `<id>_rack` (slide, 0 to 0.45 m: the upper rack rolls out over the open door; the carcass is hollow so it can); floor-standing; a counter run whose end overlaps it is trimmed back, like a fridge or stove (an appliance wholly inside a run is not cut out) |
 | microwave | `<id>_door` (hinge on the left edge, 0 to 1.9 rad); the fixture `position` is the box centre, so it sits on a counter top |
 
@@ -295,7 +295,9 @@ Counter synthesis (only when the scan has a sink or stove whose centre is more t
 
 Do not emit backing walls.
 
-The twin copies `doors`, `windows`, `openings`, `floors`, `story` and `story_count` from the bundle when present, unchanged, and a fixture flagged as an island carries `island: true`; that flag is also written on its `layout.yaml` row. Doors and windows are not written to `layout.yaml` and the sim does not draw them yet.
+The twin copies `doors`, `windows`, `openings`, `floors`, `story` and `story_count` from the bundle when present, unchanged, and a fixture flagged as an island carries `island: true`; that flag is also written on its `layout.yaml` row. Doors, windows and openings are not written to `layout.yaml`; the sim draws them, as below.
+
+In the sim (`arrival.sim.scene.portals_xml`) each door, window and opening is a set of visual-only geoms on the world body (`contype="0" conaffinity="0" group="2"`), so it shows in renders and never touches anything. They are named `door<k>_<part>`, `window<k>_<part>` and `opening<k>_<part>`, with `k` the entry's index in the twin's list. The wall is the one `wall_id` names, else the wall whose segment passes nearest the centre, within 0.25 m (exports from before iOS 17 have no `parentIdentifier`); with no such wall the entry is not drawn. The scanned rectangle (`size[0]` wide and `size[2]` tall around `position`) is put on the wall's centre line and clipped to its length and height; a door or opening whose bottom is within 5 cm of the floor starts on it, and one narrower or lower than 15 cm after that is not drawn. A 5 cm frame sits inside the rectangle: `jamb0` (at the end nearer the wall's `start`), `jamb1` and `head`, plus a `sill` under a window and under an opening that starts above the floor. Inside the frame a closed door (`is_open` false or absent) has a `leaf` and a `knob` (a bar through the wall 7 cm in from `jamb1`, 1.0 m up or at half the leaf's height if that is lower), an open door or an opening has a dark `recess` (RoomPlan gives no hinge side, so an open leaf is not drawn), and a window has a `pane` and a centre `mullion`. Every box runs through the wall, so it shows on both faces, and stands proud of each face of the drawn wall (at least 5 cm thick): 2 mm for a recess, 4 mm for a pane, 6 mm for a leaf, 1.5 cm for the frame, 3 cm for a window sill; the knob reaches 6 cm. The wall itself stays solid. A twin with no doors, windows or openings builds the same MJCF as before.
 
 ## Tasks
 
@@ -562,11 +564,14 @@ The worker (`python -m arrival work`) keeps those fields and adds these when it 
   "dataset_dir": "out/datasets/hero_kitchen_job_01587ed1_sim",
   "zip": "out/jobs/job_01587ed1/dataset.zip",
   "attempts": 2,
-  "successes": 2
+  "successes": 2,
+  "job_attempts": 1
 }
 ```
 
 `status` is one of `queued`, `running`, `done`, `failed`. `stage` is the last stage entered: `normalize`, `twin`, `realism`, `objects`, `sim`, `validate`, `zip`. `started_at` and `finished_at` are unix seconds like `created_unix`. `error` is null unless `status` is `failed`, then `"<ExceptionType>: <message>"`. `room_id` is the upload filename stem reduced to `[a-z0-9_]` plus `_<id>`. Paths are as the worker saw them (relative to its cwd when `--out` is relative). Fields not reached yet are null.
+
+`job_attempts` is how many times a worker has started this job; it is incremented when the job is claimed and is absent until then. A failed attempt that may pass is written back as `queued` (never `failed`) with `error` null, and the attempt's error is appended to `retry_errors` (a list of `"<ExceptionType>: <message>"`, oldest first). After the last allowed retry, `status` is `failed`, `error` is that last attempt, and `job_attempts` is the number of starts. `ARRIVAL_JOB_RETRIES` (or `arrival work --retries`) is how many times a failed attempt is queued again; default 2, `0` means never. A bad upload (`ValueError`, including unreadable JSON and `ScanBundleError`), a request over a limit, `unsupported_layout`, a dataset with nothing to ship, or the wall-clock timeout is not retried.
 
 The job status also has `realism`, initially null, then `{state, metrics, consumed, preview, reason}`. Scored results add `frame_count` and `association`. `metrics` is null unless the camera-offset control passes; otherwise it contains `depth_l1_m`, `rgb_mae`, `rgb_one_minus_ssim`, `n_depth`, `n_rgb` and `frames`. These fields describe the uploaded-frame comparison only, not the generated dataset. Raw reports, the comparison PNG, a pre-placement twin and the applied camera transform stay under the job's `realism/` directory. The public report route returns only the status projection. Normalized RoomPlan bundles carry `arkit_world_to_room` as a row-major 4x4 matrix, used as `bundle_world_to_room @ inverse(manifest_world_to_room)` before scoring.
 

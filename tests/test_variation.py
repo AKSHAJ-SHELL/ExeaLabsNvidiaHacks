@@ -76,6 +76,19 @@ def test_selection_deterministic_and_ten_percent():
     assert abs(sum(map(len, a)) / (2 * N) - 0.10) <= 0.02
 
 
+@pytest.mark.parametrize("fraction", [-0.1, 1.1, float("nan"), float("inf")])
+def test_bad_fraction_rejected_before_copy(tmp_path, fraction):
+    dst = tmp_path / "copy"
+    with pytest.raises(ValueError, match="fraction"):
+        variation.vary_dataset(tmp_path / "missing", dst, fraction=fraction)
+    assert not dst.exists()
+
+
+def test_bad_frame_count_is_rejected():
+    with pytest.raises(ValueError, match="n_frames"):
+        variation.select_frames(0, -1, 0)
+
+
 def test_local_stub_differs_keeps_geometry_and_source_untouched(dataset, tmp_path):
     before = digest(dataset)
     dst = tmp_path / "copy"
@@ -110,6 +123,17 @@ def test_cosmos_mock_server_pairs_ids_and_label(dataset, tmp_path):
     rs = rows(tmp_path / "c")
     assert all(r["variant_id"] == r["original_id"] + "_v" and r["model"] == "mock-cosmos" and r["latency_ms"] > 0
                for r in rs)
+
+
+def test_cosmos_client_rejects_grayscale_response():
+    srv = serve(lambda img: img[..., 0])
+    try:
+        client = variation.CosmosClient(f"http://127.0.0.1:{srv.server_port}/", timeout=5, retries=0)
+        with pytest.raises(RuntimeError, match="expected uint8 RGB or RGBA PNG"):
+            client(np.zeros((8, 8, 3), np.uint8), 0, 0)
+    finally:
+        srv.shutdown()
+        srv.server_close()
 
 
 def test_server_down_falls_back_cleanly(dataset, tmp_path):
@@ -154,3 +178,27 @@ def test_mask_check_flags_repainted_region():
     bad[mask] = bad[mask][::-1]
     chk = variation.check_frame(img, bad, mask)
     assert not chk["ok"] and chk["mask_change"] > variation.MASK_CHANGE_MAX
+
+
+def test_non_image_backend_output_is_rejected():
+    orig = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
+    bad = orig.astype(float)
+    bad[0, 0, 0] = float("nan")
+    chk = variation.check_frame(orig, bad)
+    assert not chk["ok"] and "uint8" in chk["reason"]
+    assert chk["edge_corr"] is None
+
+@pytest.mark.parametrize("mask", [np.ones((2, 3), bool), np.ones((4, 4), np.uint8), [[True] * 4] * 4])
+def test_malformed_mask_rejects_frame_without_crashing(mask):
+    orig = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
+    chk = variation.check_frame(orig, orig.copy(), mask)
+    assert not chk["ok"] and "mask" in chk["reason"]
+    assert chk["edge_corr"] is None
+
+
+def test_dataset_with_bad_mask_keeps_original_videos(dataset, tmp_path):
+    dst = tmp_path / "masked"
+    summary = variation.vary_dataset(dataset, dst, mask=np.ones((2, 3), bool))
+    assert summary["rejected"] == summary["requests"] == 16
+    assert summary["ok"] == 0 and not (dst / variation.VIDEO_DIR).exists()
+    assert validate(dst) == []

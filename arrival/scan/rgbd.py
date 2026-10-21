@@ -1,5 +1,6 @@
 """CAP-2a: RGB-D scan-frame manifest (frames_manifest.json), strict loader, depth unprojection and a
-synthetic bundle generator for tests. The iOS recorder that would write these bundles is not built here.
+synthetic bundle generator for tests. The iOS app's recorder (ios/ArrivalCapture/ArrivalCapture/FrameRecorder.swift)
+writes these bundles; it compiles and its writer is tested on a Mac, but it has not run on a phone.
 
 Axes: an ARKit camera is x right, y up, z backward (it looks down -z). Image pixel (u, v) is column,
 row with v growing downward, so a pixel at depth d (metres along the optical axis) is the camera point
@@ -85,6 +86,7 @@ def _size(value, what: str) -> tuple[int, int]:
 
 def load_manifest(directory) -> Manifest:
     root = Path(directory)
+    resolved_root = root.resolve()
     path = root / MANIFEST_NAME
     if not path.is_file():
         _fail("missing_manifest", f"{path} not found")
@@ -153,6 +155,8 @@ def load_manifest(directory) -> Manifest:
                 continue
             if not isinstance(rel, str) or not rel or Path(rel).is_absolute() or ".." in Path(rel).parts:
                 _fail("bad_path", f"frame {fid} {key} must be a relative path inside the bundle")
+            if not (root / rel).resolve().is_relative_to(resolved_root):
+                _fail("bad_path", f"frame {fid} {key} resolves outside the bundle")
             if not (root / rel).is_file():
                 _fail("missing_file", f"frame {fid} {key} file {rel} does not exist")
             paths[key] = root / rel
@@ -166,13 +170,21 @@ def load_manifest(directory) -> Manifest:
     if split_ids is not None and not isinstance(split_ids, dict):
         _fail("split", "splits must be an object with train and heldout id lists")
     if split_ids is not None:  # optional explicit lists must agree with the per-frame field
-        both = set(split_ids.get("train", [])) & set(split_ids.get("heldout", []))
+        for name in SPLITS:
+            ids = split_ids.get(name)
+            if not isinstance(ids, list) or not all(isinstance(fid, str) for fid in ids):
+                _fail("split", f"splits.{name} must be a list of frame ids")
+            if len(ids) != len(set(ids)):
+                _fail("split", f"splits.{name} contains duplicate frame ids")
+        both = set(split_ids["train"]) & set(split_ids["heldout"])
         if both:
             _fail("frame_in_both_splits", f"frames in both train and heldout: {sorted(both)}")
         for name in SPLITS:
-            wrong = [f.id for f in frames if f.id in split_ids.get(name, []) and f.split != name]
-            if wrong:
-                _fail("frame_in_both_splits", f"frames listed in {name} but marked otherwise: {wrong}")
+            expected = {f.id for f in frames if f.split == name}
+            listed = set(split_ids[name])
+            if listed != expected:
+                _fail("split", f"splits.{name} disagrees with frame entries: missing {sorted(expected - listed)}, "
+                      f"unknown or mislabelled {sorted(listed - expected)}")
     return Manifest(room_id, root, rgb_size, depth_size, unit, world, frames)
 
 

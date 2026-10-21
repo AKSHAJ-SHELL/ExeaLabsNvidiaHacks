@@ -1,9 +1,11 @@
 """The /act + /health contract of arrival.policy_server.protocol wrapped around Isaac-GR00T's Gr00tPolicy.
 
-UNTESTED AGAINST REAL GR00T: it needs a GPU, the Isaac-GR00T package and a fine-tuned checkpoint, none of which exist on
-the laptop it was written on. The request/response side is covered by the mock-server tests; the calls into `gr00t`
-below follow Isaac-GR00T's N1.x policy API from memory and may need small changes (module path, `get_action`
-signature, whether relative arm actions come back already absolute) on first contact.
+Run against real Isaac-GR00T (commit dac54b3, N1.7-3B, torch 2.9 / CUDA 12.8) on a 96 GB NVIDIA Blackwell GPU, with a
+checkpoint from a 100-step fine-tune on hero_kitchen_sim: the imports, the `Gr00tPolicy` constructor and `get_action`
+worked as written, and `/act` returned [16,7] and [16,1] chunks. On 13 frames from the training data the first step
+sat 0.08 rad (mean) from the current joint state while its magnitude was about 0.73, so relative arm actions come back
+already absolute, as the client assumes. Small sample, one checkpoint, fixed-base 8-float schema only; the mobile
+(11-float) schema has not been run. See docs/ref/POL-3.md and docs/ref/GPU-RUN.md.
 
     python -m arrival.policy_server.gr00t_shim --model-path <checkpoint dir> --port 8000 \
         --modality-config-path configs/gr00t/arrival_panda_config.py

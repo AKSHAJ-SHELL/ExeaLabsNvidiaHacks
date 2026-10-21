@@ -2,7 +2,8 @@ import Foundation
 import RoomPlan
 
 /// One saved capture: `Documents/scans/<id>/` holds `roomplan.json` (CapturedRoom via JSONEncoder,
-/// the format `arrival/scan/roomplan.py` reads), `room.usdz` and this record as `scan_meta.json`.
+/// the format `arrival/scan/roomplan.py` reads), `room.usdz`, optionally `frames/` (a CAP-2a RGB-D bundle from
+/// `FrameRecorder`) and this record as `scan_meta.json`.
 struct Scan: Identifiable, Codable, Equatable {
     var id: String
     var roomName: String
@@ -12,6 +13,9 @@ struct Scan: Identifiable, Codable, Equatable {
     var jobStage: String?
     var jobError: String?
     var uploadedTo: String?
+    var frameCount: Int?
+    var heldoutCount: Int?
+    var framesNote: String?  // why no frames were kept, when recording was on
 
     var isJobFinished: Bool { jobStatus == "done" || jobStatus == "failed" }
 }
@@ -59,10 +63,27 @@ final class ScanStore: ObservableObject {
     func folder(_ scan: Scan) -> URL { root.appendingPathComponent(scan.id, isDirectory: true) }
     func jsonURL(_ scan: Scan) -> URL { folder(scan).appendingPathComponent("roomplan.json") }
     func usdzURL(_ scan: Scan) -> URL { folder(scan).appendingPathComponent("room.usdz") }
+    func framesURL(_ scan: Scan) -> URL { folder(scan).appendingPathComponent("frames", isDirectory: true) }
+    func framesZipURL(_ scan: Scan) -> URL { folder(scan).appendingPathComponent("frames.zip") }
 
-    /// Files that exist on disk for this scan, for the share sheet.
+    func hasFrames(_ scan: Scan) -> Bool {
+        FileManager.default.fileExists(atPath: framesURL(scan).appendingPathComponent("frames_manifest.json").path)
+    }
+
+    /// Files that exist on disk for this scan, for the share sheet (the frames as a zip, made on demand).
     func files(_ scan: Scan) -> [URL] {
-        [jsonURL(scan), usdzURL(scan)].filter { FileManager.default.fileExists(atPath: $0.path) }
+        [jsonURL(scan), usdzURL(scan), framesZipURL(scan)].filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// Zips `frames/` to `frames.zip` with the manifest at the archive root, the layout `POST /jobs` takes.
+    /// Returns nil when the scan has no frames. The zip is rebuilt only when missing.
+    func framesZip(_ scan: Scan) throws -> URL? {
+        guard hasFrames(scan) else { return nil }
+        let zip = framesZipURL(scan)
+        if !FileManager.default.fileExists(atPath: zip.path) {
+            try ZipWriter.zip(folder: framesURL(scan), to: zip)
+        }
+        return zip
     }
 
     func reload() {
@@ -76,12 +97,19 @@ final class ScanStore: ObservableObject {
 
     /// Writes the JSON first; a USDZ export failure is returned as a warning, not thrown, because the
     /// pipeline only needs the JSON.
-    func save(_ room: CapturedRoom, roomName: String) throws -> (Scan, usdzError: Error?) {
+    /// `frames` is a finished bundle folder from `FrameRecorder`; it is moved into the scan as `frames/`.
+    func save(_ room: CapturedRoom, roomName: String, frames: URL? = nil, framesNote: String? = nil) throws
+        -> (Scan, usdzError: Error?) {
         let name = Self.roomID(roomName)
         let stamp = Int(Date().timeIntervalSince1970)
-        let scan = Scan(id: "\(name)_\(stamp)", roomName: name, created: Date())
+        var scan = Scan(id: "\(name)_\(stamp)", roomName: name, created: Date())
         try FileManager.default.createDirectory(at: folder(scan), withIntermediateDirectories: true)
         try Self.encoder.encode(room).write(to: jsonURL(scan), options: .atomic)
+        if let frames {
+            try FileManager.default.moveItem(at: frames, to: framesURL(scan))
+            (scan.frameCount, scan.heldoutCount) = Self.countFrames(framesURL(scan))
+        }
+        scan.framesNote = framesNote
         var usdzError: Error?
         do {
             try room.export(to: usdzURL(scan))
@@ -103,6 +131,14 @@ final class ScanStore: ObservableObject {
     func delete(_ scan: Scan) {
         try? FileManager.default.removeItem(at: folder(scan))
         scans.removeAll { $0.id == scan.id }
+    }
+
+    /// (frames, held-out frames) in a bundle's manifest.
+    static func countFrames(_ folder: URL) -> (Int?, Int?) {
+        guard let data = try? Data(contentsOf: folder.appendingPathComponent("frames_manifest.json")),
+              let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let frames = manifest["frames"] as? [[String: Any]] else { return (nil, nil) }
+        return (frames.count, frames.filter { $0["split"] as? String == "heldout" }.count)
     }
 
     private func write(_ scan: Scan) throws {

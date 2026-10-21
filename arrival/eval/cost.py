@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import yaml
@@ -38,7 +39,7 @@ def _load(path: str | Path, what: str) -> dict:
 
 
 def _num(v) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+    return type(v) is int or (type(v) is float and math.isfinite(v))
 
 
 def load_baseline(path: str | Path) -> dict:
@@ -76,6 +77,11 @@ def load_pricing(path: str | Path) -> dict:
 def load_usage(path: str | Path) -> dict:
     u = _load(path, "usage")
     for k, v in u.items():
+        if k == "scope":
+            if (not isinstance(v, dict) or set(v) != {"room", "task"} or
+                    any(not isinstance(v[name], str) or not v[name].strip() for name in ("room", "task"))):
+                raise CostError(f"usage {path}: scope must name a room and task")
+            continue
         if k not in PRODUCT_KEYS.values():
             raise CostError(f"usage {path}: unknown product {k!r} (known: {', '.join(PRODUCT_KEYS.values())})")
         if not _num(v) or v < 0:
@@ -85,11 +91,11 @@ def load_usage(path: str | Path) -> dict:
 
 def _row(source: str, room: str, family: str | None, attempts, successes, seconds, human_contacts=None,
          frames=None) -> dict:
-    ok = isinstance(attempts, int) and isinstance(successes, int)
+    ok = type(attempts) is int and type(successes) is int and 0 <= successes <= attempts
     secs = seconds if _num(seconds) and seconds > 0 else None
     return {"source": source, "room": room, "family": family, "attempts": attempts if ok else None,
             "successes": successes if ok else None, "seconds": secs, "human_contacts": human_contacts,
-            "frames": frames if isinstance(frames, int) and not isinstance(frames, bool) else None}
+            "frames": frames if type(frames) is int and frames >= 0 else None}
 
 
 METER_KEYS = ("wall_seconds", "episodes_attempted", "episodes_succeeded", "frames", "upload_bytes", "zip_bytes",
@@ -212,25 +218,26 @@ def teleop_block(baseline: dict | None) -> dict | None:
             "usd_per_success": round(baseline["cost_basis_usd"] / n, 4)}
 
 
-def compare(rows: list[dict], dol: dict, tele: dict | None) -> dict:
+def compare(rows: list[dict], dol: dict, tele: dict | None, usage_scope: dict | None = None) -> dict:
     """Generated-vs-teleop. Only with a baseline, only for runs in the baseline's room, and always with both n."""
     if tele is None:
         return {"measured": False, "reason": "no teleop baseline"}
     reps = [r for r in rows if r["source"] == "report" and r["room"] == tele["room"]]
     fam = [r for r in reps if r["family"] == tele["task"]]
+    if not fam and tele["task"] != "all_tasks":
+        return {"measured": False, "reason": f"no generated reports for task {tele['task']!r} in room {tele['room']!r}"}
     gen = fam or [r for r in reps if r["family"] is None]
     n = sum(r["successes"] or 0 for r in gen)
     if n == 0:
         return {"measured": False, "reason": f"no generated successes for room {tele['room']!r}"}
     secs = [r["seconds"] for r in gen]
     gen_s = round(sum(secs) / n, 3) if all(s is not None for s in secs) else None
-    # dollars cover every run in out/, so they are per demo over all report rows, not for the baseline's task alone
-    all_n = sum(r["successes"] or 0 for r in rows if r["source"] == "report" and r["family"] is None)
     priced = [v for k, v in dol.items() if v["usd"] is not None and k != "local_cpu"]
-    gen_usd = round(sum(v["usd"] for v in priced) / all_n, 4) if all_n and priced else None
+    scoped = usage_scope == {"room": tele["room"], "task": tele["task"]}
+    gen_usd = round(sum(v["usd"] for v in priced) / n, 4) if scoped and priced else None
     return {"measured": True, "task": tele["task"], "room": tele["room"],
             "generated": {"n_success": n, "scope": "task" if fam else "room", "seconds_per_success": gen_s,
-                          "usd_per_success": gen_usd, "usd_measured": bool(priced) and all(v["measured"] for v in priced)},
+                          "usd_per_success": gen_usd, "usd_measured": bool(gen_usd is not None) and all(v["measured"] for v in priced)},
             "teleop": {"n_success": tele["n_success"], "seconds_per_success": tele["seconds_per_success"],
                        "usd_per_success": tele["usd_per_success"]},
             "seconds_ratio_teleop_over_generated": round(tele["seconds_per_success"] / gen_s, 2) if gen_s else None,
@@ -246,7 +253,8 @@ def build(out_dir, usage_path=None, pricing_path="configs/pricing.example.yaml",
     pricing = load_pricing(pricing_path) if usage else None
     rows = collect_rows(out)
     dol = dollars(usage, pricing)
-    return {"rows": rows, "dollars": dol, "teleop_baseline": tele, "comparison": compare(rows, dol, tele),
+    return {"rows": rows, "dollars": dol, "teleop_baseline": tele,
+            "comparison": compare(rows, dol, tele, usage.get("scope") if usage else None),
             "metering": metering_totals(out)}
 
 

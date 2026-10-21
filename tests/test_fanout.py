@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("mujoco")
 
 from arrival.export.validate import validate  # noqa: E402
-from arrival.jobs.fanout import FanoutConfig, LocalBackend, NebiusBackendStub, run_fanout  # noqa: E402
+from arrival.jobs.fanout import FanoutConfig, LocalBackend, NebiusBackendStub, marker_key, run_fanout  # noqa: E402
 from arrival.jobs.shards import ShardError  # noqa: E402
 from conftest import SCANS  # noqa: E402
 
@@ -71,3 +71,50 @@ def test_gives_up_after_max_attempts_and_refuses_other_settings(tmp_path):
 def test_nebius_stub_is_not_a_backend():
     with pytest.raises(NotImplementedError):
         NebiusBackendStub().submit(CFG, 0)
+
+
+@pytest.mark.parametrize("run_id", ["", "..", "../escape", "a/b", "/tmp/escape", "a" * 65])
+def test_run_id_cannot_escape_scratch_or_storage(run_id):
+    with pytest.raises(ShardError, match="run_id"):
+        FanoutConfig(run_id, 2)
+
+@pytest.mark.parametrize("controls", [
+    {"parallel": 0}, {"parallel": -1}, {"parallel": True},
+    {"max_attempts": 0}, {"max_attempts": -1},
+    {"poll_seconds": -0.1}, {"poll_seconds": float("nan")}, {"poll_seconds": float("inf")},
+])
+def test_bad_fanout_controls_fail_before_submitting(controls, tmp_path):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch")
+    with pytest.raises(ShardError):
+        run_fanout(be, CFG, tmp_path / "out", **controls, log=quiet)
+    assert be.submissions == []
+    assert not be.exists("r1/run.json")
+
+def test_unknown_backend_state_does_not_count_as_a_failed_attempt(tmp_path):
+    class UnknownBackend(LocalBackend):
+        def poll(self, job_id):
+            return "queued"
+
+    be = UnknownBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    with pytest.raises(ShardError, match="unknown state 'queued'"):
+        run_fanout(be, CFG, tmp_path / "out", poll_seconds=0, log=quiet)
+    assert be.submissions == [(0, 1), (1, 1)]
+
+@pytest.mark.parametrize("marker", [b"{broken", b'{"shard": 1, "attempts": 1}',
+                                    b'{"shard": 0, "attempts": 0}'])
+def test_invalid_done_marker_cannot_skip_a_shard(tmp_path, marker):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    be.put_object(marker_key(CFG, 0), marker)
+    with pytest.raises(ShardError, match="invalid done marker"):
+        run_fanout(be, CFG, tmp_path / "out", log=quiet)
+    assert be.submissions == []
+
+def test_local_backend_refuses_another_shards_output(tmp_path):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    job = be.submit(CFG, 0)
+    wrong = tmp_path / "scratch" / CFG.run_id / "0of2" / "shards" / "1of2"
+    wrong.mkdir(parents=True)
+    (wrong / "result.txt").write_text("wrong shard")
+    with pytest.raises(ShardError, match="expected shard folder"):
+        be.fetch_result(job, f"{CFG.run_id}/shards/0of2")
+    assert be.list_objects(f"{CFG.run_id}/shards/0of2") == []

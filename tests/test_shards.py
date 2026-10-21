@@ -57,6 +57,17 @@ def test_journal_resume_cuts_a_torn_line_and_refuses_other_settings(tmp_path):
     assert Journal(tmp_path / "none.jsonl").start(FP, resume=True) == []  # no journal: nothing to resume
 
 
+def test_journal_resume_rejects_out_of_order_task_records(tmp_path):
+    j = Journal(tmp_path / "progress.jsonl")
+    j.start(FP, resume=False)
+    j.append({"task_id": "t1", "family": "a", "outcome": "miss"})
+    expected = [{"task_id": "t0", "family": "a"}, {"task_id": "t1", "family": "a"}]
+    before = j.path.read_bytes()
+    with pytest.raises(ShardError, match="does not match the task sequence"):
+        j.start(FP, resume=True, expected_tasks=expected)
+    assert j.path.read_bytes() == before
+
+
 # ---- merge, on synthetic episodes (no MuJoCo) ----
 
 def _episode(n, seed):
@@ -159,6 +170,16 @@ def test_merge_refuses_incomplete_or_mixed_sets(tmp_path):
         merge_shards([plain], tmp_path / "m")
     with pytest.raises(ShardError, match="would overwrite"):
         merge_shards(sorted((_fake_run(tmp_path / "again") / "shards").iterdir()), tmp_path / "again" / "shards" / "0of3")
+
+
+def test_merge_refuses_episode_owned_by_another_shard(tmp_path):
+    src = tmp_path / "src"
+    _write_shard(src, 0, 2, 4, [2])  # task 2 belongs to shard 1
+    _write_shard(src, 1, 2, 4, [2, 3])
+    out = tmp_path / "merged"
+    with pytest.raises(ShardError, match="out-of-range task"):
+        merge_shards([src / "shards"], out)
+    assert not out.exists()
 
 
 def test_merge_shards_cli_exit_codes(tmp_path, capsys):

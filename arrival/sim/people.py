@@ -267,8 +267,9 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
     yaw, L, front = fr.get("yaw", 0.0), g["length"], g["front"]
     centre = np.array(fr["position"][:2], dtype=float)
     hinge = centre + _rot(yaw, g["hinge"])
-    s1 = centre + _rot(yaw, (L / 2 + r, front + r + 0.20))  # 0.2 out: the shoulder stays on the bar's side longer
-    s2 = centre + _rot(yaw, (L / 2 - 0.15, front + r + 0.05))
+    m = g["mirror"]  # +1 left-hinged; -1 right-hinged: every x across the fixture is mirrored
+    s1 = centre + _rot(yaw, (m * (L / 2 + r), front + r + 0.20))  # 0.2 out: the shoulder stays on the bar's side longer
+    s2 = centre + _rot(yaw, (m * (L / 2 - 0.15), front + r + 0.05))
     toe = _rot(yaw, (0.0, -toe_reach(spec, 0.0)))  # the standing toe tip, facing the fridge
     stride = toe_reach(spec, SLOW)
     x0, _, x1, y1 = floor  # the stand points are in the work strip in front of the floor rectangle, like the counter stop
@@ -284,7 +285,7 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
             return None
 
     def panel_dist(p, q):  # distance from a stand point to the door panel at angle q
-        return _seg_dist(hinge, hinge + L * _rot(yaw + q, (1.0, 0.0)), p)
+        return _seg_dist(hinge, hinge + L * _rot(yaw + m * q, (float(m), 0.0)), p)
 
     swing = np.linspace(0.0, OPEN_ANGLE[1], 40)
     if (min(panel_dist(s1, q) for q in swing) < r + 0.02
@@ -302,12 +303,12 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
     sector = {"position": [*(centre + _rot(yaw, (0.0, front + L / 2))), 0.0], "size": [L + 0.7, L + 0.7, 0.0],
               "yaw": yaw}  # the quarter disc the door sweeps, grown for toes: the other walkers route round it
     return {"fixture": fr["id"], "hinge": hinge, "yaw": yaw, "length": L, "handle": g["handle"], "centre": centre,
-            "face": yaw - math.pi / 2, "s1": s1, "s2": s2, "q_open": q_open, "look": float(rng.uniform(*LOOK_T)),
+            "face": yaw - math.pi / 2, "mirror": m, "s1": s1, "s2": s2, "q_open": q_open, "look": float(rng.uniform(*LOOK_T)),
             "sector": sector}
 
 
 def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = None, r: float = 0.0,
-                      base_to=None):
+                      base_to=None, keep=()):
     """Free point -> approach from behind -> walk a lane behind the base (crossing the robot's work strip)
     -> stop at the counter on the far side -> free point. Free points are resampled until no segment comes
     within CLEAR of the base; after 50 misses the point directly behind the stop or the lane is used.
@@ -325,12 +326,19 @@ def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = 
     lane = [np.array([np.clip(far - side, x0, x1), lane_y]), np.array([np.clip(near + side, x0, x1), lane_y])]
     approach = np.array([lane[0][0], y1 - 0.2])
     stop = np.array([near + side * rng.uniform(0.8, min(1.3, room[side])), front_y + 0.35])
+    if any(np.linalg.norm(stop - c) < k for c, k in keep):  # the stop is in the door's swing: step on along the counter
+        for _ in range(20):
+            cand = np.array([near + side * rng.uniform(0.8, room[side]), front_y + 0.35])
+            if not any(np.linalg.norm(cand - c) < k for c, k in keep):
+                stop = cand
+                break
 
     def free(prev, nxt, fallback):
         for _ in range(50):
             p = rng.uniform([x0, y0], [x1, y1])
             if (all(np.linalg.norm(p - q) >= CLEAR and _seg_dist(prev, p, q) >= CLEAR
-                    and _seg_dist(p, nxt, q) >= CLEAR for q in drive) and not (prints and prints.blocked(p, r))):
+                    and _seg_dist(p, nxt, q) >= CLEAR for q in drive) and not (prints and prints.blocked(p, r))
+                    and not any(np.linalg.norm(p - c) < k for c, k in keep)):
                 return p
         return fallback
 
@@ -367,9 +375,12 @@ class Walkers:
 
     def __init__(self, n: int, floor: tuple[float, float, float, float], seed: int = 0, speed: float = 0.8,
                  base_xy=None, front_y: float | None = None, fixtures=None, fridge_visit: bool | None = None,
-                 yaw: float = 0.0, base_to=None):
+                 yaw: float = 0.0, base_to=None, keep=None):
         rng = np.random.default_rng(seed)
         self.M, self.work_yaw = frame(yaw), yaw
+        # `keep`: (world xy, radius) discs the robot works in, e.g. the swing of the door it opens. No counter stop,
+        # free point or leg of the loop of a person other than the fridge visitor comes inside one.
+        keep = [(self.M @ np.asarray(c, dtype=float), float(k)) for c, k in keep or []]
         fixtures = [_in_frame(f, self.M, yaw) for f in fixtures or []]
         self.specs = [person_spec(seed, i) for i in range(n)]
         self.visit = None
@@ -380,7 +391,8 @@ class Walkers:
                 plan = plan_fridge_visit(fixtures, floor, self.specs[who], vrng, base_xy)
                 self.visit = {**plan, "person": who} if plan else None
         prints = Footprints(fixtures)
-        avoid = Footprints(list(fixtures or []) + [self.visit["sector"]]) if self.visit else prints
+        avoid = Footprints(list(fixtures or []) + ([self.visit["sector"]] if self.visit else [])
+                           + [{"position": [*c, 0.0], "size": [1.7 * k, 1.7 * k, 0.0], "yaw": 0.0} for c, k in keep])
         self.paths, self.pauses, self.faces, self.slow = [], [], [], []
         for i, s in enumerate(self.specs):
             visiting = self.visit is not None and i == self.visit["person"]
@@ -389,7 +401,8 @@ class Walkers:
                 pts = free_path(rng, floor, pr, s["radius"])
                 pause = [0.0] * len(pts)
             else:
-                pts, pause = _interaction_loop(rng, floor, base_xy, front_y, pr, s["radius"], base_to)
+                pts, pause = _interaction_loop(rng, floor, base_xy, front_y, pr, s["radius"], base_to,
+                                              [] if visiting else keep)
             faces, slow = [None] * len(pts), [False] * len(pts)
             if visiting:
                 pts, pause, faces, slow = self._splice_visit(pts, pause, s["radius"], floor, fixtures, base_xy)
@@ -463,7 +476,7 @@ class Walkers:
         """A point of the door at angle q, from its frame: x along the panel from the hinge, y out of the front face
         (negative is the inner face), at the handle's height."""
         v = self.visit
-        xy = v["hinge"] + _rot(v["yaw"] + q, (lx, ly))
+        xy = v["hinge"] + _rot(v["yaw"] + v["mirror"] * q, (lx, ly))
         return np.array([xy[0], xy[1], v["handle"][2]])
 
     def _visit_step(self, i: int, tag: str) -> None:
@@ -482,7 +495,7 @@ class Walkers:
             target = self.door_point(q, hx, hy + off)
         else:
             hold = _smooth((q - CATCH) / 0.2)
-            target = self.door_point(q, v["length"] - 0.05, -off - 0.065)  # 0.065 keeps the forearm capsule above the panel's top edge
+            target = self.door_point(q, v["mirror"] * (v["length"] - 0.05), -off - 0.065)  # 0.065 keeps the forearm capsule above the panel's top edge
         w = min(_smooth(t / REACH_T), _smooth((self.total[i] - t) / REACH_T)) * hold
         self.reach[i] = (w, target) if w > 0.0 else None
 
