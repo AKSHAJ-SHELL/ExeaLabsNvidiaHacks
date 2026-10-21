@@ -19,6 +19,7 @@ VIDEO_KEYS = ("ego_view", "wrist")
 TASK_KEY = "annotation.human.task_description"
 ARM_DOF = 7
 ACTION_KEYS = ("action.single_arm", "action.gripper")
+ARM_SCHEMA_DIM = ARM_DOF + 1  # the only schema on the wire: 7 joint targets + 1 gripper = 8 floats per state and per action step
 
 
 class ProtocolError(ValueError):
@@ -45,6 +46,12 @@ def decode_image(s: str) -> np.ndarray:
 def encode_request(obs: dict, instruction: str) -> dict:
     """obs has 'state' [8] and one frame per camera; the wrist frame is sent whenever the env has that camera."""
     state = np.asarray(obs["state"], dtype=float)
+    _check_dim("state", state.shape, ARM_SCHEMA_DIM)
+    if not np.isfinite(state).all():
+        raise ProtocolError("state has non-finite values")
+    for k in VIDEO_KEYS:
+        if k in obs and (np.ndim(obs[k]) != 3 or np.shape(obs[k])[-1] != 3):
+            raise ProtocolError(f"{k} frame must be HxWx3, got shape {list(np.shape(obs[k]))}")
     body = {f"video.{k}": encode_image(obs[k]) for k in VIDEO_KEYS if k in obs}
     if "video.ego_view" not in body:
         raise ProtocolError("obs has no ego_view frame")
@@ -52,6 +59,12 @@ def encode_request(obs: dict, instruction: str) -> dict:
     body["state.gripper"] = state[ARM_DOF:ARM_DOF + 1].tolist()
     body[TASK_KEY] = instruction
     return body
+
+
+def _check_dim(what: str, shape: tuple, n: int) -> None:
+    if len(shape) != 1 or shape[0] != n:
+        raise ProtocolError(f"{what} must be the {n}-float arm schema (7 joints + gripper), got shape {list(shape)}; "
+                            "no other schema (such as an 11-float mobile-base one) is defined")
 
 
 def decode_request(body: dict) -> dict:
@@ -84,6 +97,9 @@ def _vec(body: dict, key: str, n: int) -> np.ndarray:
 def encode_response(chunk: np.ndarray) -> dict:
     """chunk [T,8] (7 arm targets + gripper) -> response body."""
     chunk = np.asarray(chunk, dtype=float)
+    if chunk.ndim != 2:
+        raise ProtocolError(f"chunk must be [T,{ARM_SCHEMA_DIM}], got shape {list(chunk.shape)}")
+    _check_dim("chunk row", chunk.shape[1:], ARM_SCHEMA_DIM)
     return {"action.single_arm": chunk[:, :ARM_DOF].tolist(), "action.gripper": chunk[:, ARM_DOF:ARM_DOF + 1].tolist()}
 
 

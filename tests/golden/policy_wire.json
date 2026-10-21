@@ -1,0 +1,62 @@
+{
+ "_note": "Written by this repo from its own protocol.py; NOT captured from a real Isaac-GR00T server.",
+ "request": {
+  "video.ego_view": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAADUlEQVR4nGP4z4AA/wEOAAH/OF9wGgAAAABJRU5ErkJggg==",
+  "video.wrist": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGM8ceIEAwMDEwMYAAAcSgJc/fMbEQAAAABJRU5ErkJggg==",
+  "state.single_arm": [
+   0.1,
+   -0.2,
+   0.3,
+   -1.5,
+   0.0,
+   1.2,
+   0.4
+  ],
+  "state.gripper": [
+   0.04
+  ],
+  "annotation.human.task_description": "open the drawer"
+ },
+ "response": {
+  "action.single_arm": [
+   [
+    0.1,
+    -0.2,
+    0.3,
+    -1.5,
+    0.0,
+    1.2,
+    0.4
+   ],
+   [
+    0.11,
+    -0.2,
+    0.3,
+    -1.5,
+    0.0,
+    1.2,
+    0.4
+   ],
+   [
+    0.12000000000000001,
+    -0.2,
+    0.3,
+    -1.5,
+    0.0,
+    1.2,
+    0.4
+   ]
+  ],
+  "action.gripper": [
+   [
+    0.04
+   ],
+   [
+    0.04
+   ],
+   [
+    0.04
+   ]
+  ]
+ }
+}
