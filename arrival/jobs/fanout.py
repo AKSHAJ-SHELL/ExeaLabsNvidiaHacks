@@ -11,6 +11,7 @@ Only `LocalBackend` exists and is tested: shards are local subprocesses and a di
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -159,6 +160,12 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
     when a shard fails every attempt (finished shards keep their markers, so a rerun resumes)."""
     if cfg.shards < 1:
         raise ShardError("shards must be at least 1")
+    if type(parallel) is not int or parallel < 1:
+        raise ShardError("parallel must be a positive integer")
+    if type(max_attempts) is not int or max_attempts < 1:
+        raise ShardError("max_attempts must be a positive integer")
+    if type(poll_seconds) not in (int, float) or not math.isfinite(poll_seconds) or poll_seconds < 0:
+        raise ShardError("poll_seconds must be a finite, nonnegative number")
     manifest = {"config": cfg.__dict__}
     mkey = f"{cfg.run_id}/run.json"
     if backend.exists(mkey):
