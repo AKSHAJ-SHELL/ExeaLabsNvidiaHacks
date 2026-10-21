@@ -187,3 +187,18 @@ def test_non_image_backend_output_is_rejected():
     chk = variation.check_frame(orig, bad)
     assert not chk["ok"] and "uint8" in chk["reason"]
     assert chk["edge_corr"] is None
+
+@pytest.mark.parametrize("mask", [np.ones((2, 3), bool), np.ones((4, 4), np.uint8), [[True] * 4] * 4])
+def test_malformed_mask_rejects_frame_without_crashing(mask):
+    orig = np.arange(4 * 4 * 3, dtype=np.uint8).reshape(4, 4, 3)
+    chk = variation.check_frame(orig, orig.copy(), mask)
+    assert not chk["ok"] and "mask" in chk["reason"]
+    assert chk["edge_corr"] is None
+
+
+def test_dataset_with_bad_mask_keeps_original_videos(dataset, tmp_path):
+    dst = tmp_path / "masked"
+    summary = variation.vary_dataset(dataset, dst, mask=np.ones((2, 3), bool))
+    assert summary["rejected"] == summary["requests"] == 16
+    assert summary["ok"] == 0 and not (dst / variation.VIDEO_DIR).exists()
+    assert validate(dst) == []
