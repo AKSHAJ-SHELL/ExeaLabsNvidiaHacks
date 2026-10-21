@@ -125,6 +125,19 @@ def test_cosmos_mock_server_pairs_ids_and_label(dataset, tmp_path):
                for r in rs)
 
 
+def test_unchanged_cosmos_frames_are_not_claimed_as_variation(dataset, tmp_path):
+    srv = serve(lambda img: img)
+    try:
+        client = variation.CosmosClient(f"http://127.0.0.1:{srv.server_port}/", timeout=5, retries=0)
+        summary = variation.vary_dataset(dataset, tmp_path / "copy", "cosmos", client=client)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert summary["arrival_appearance_variation"] == "none"
+    assert summary["rejected"] == summary["requests"] == 16
+    assert all("unchanged" in row["reason"] for row in rows(tmp_path / "copy"))
+
+
 def test_cosmos_client_rejects_grayscale_response():
     srv = serve(lambda img: img[..., 0])
     try:
