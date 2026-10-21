@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import numpy as np
 
+YIELD = (0.25, 0.50)  # walkers: clearance (m) to the robot hand or base at which they stand still, and above which they walk freely
+YIELD_BODIES = ("robot_base", "hand", "finger_l", "finger_r")
 ROBOT_BODIES = ("robot_base",) + tuple(f"link{i}" for i in range(1, 8)) + ("hand", "finger_l", "finger_r")
 
 
@@ -19,6 +21,11 @@ def _seg_point_dist(a: np.ndarray, b: np.ndarray, p: np.ndarray) -> float:
     n = float(ab @ ab)
     t = 0.0 if n < 1e-12 else float(np.clip((p - a) @ ab / n, 0.0, 1.0))
     return float(np.linalg.norm(a + t * ab - p))
+
+
+def yield_factor(clearance: float) -> float:
+    """Walking speed share for a person `clearance` metres from the hand or base: 0 at YIELD[0] or less, 1 at YIELD[1] or more."""
+    return float(np.clip((clearance - YIELD[0]) / (YIELD[1] - YIELD[0]), 0.0, 1.0))
 
 
 class SafetyMonitor:
@@ -33,6 +40,8 @@ class SafetyMonitor:
                        if model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX else float(model.geom_size[g][0])
                        for g in self.geoms}
         self.half = {g: float(model.geom_size[g][1]) for g in self.geoms}
+        yb = {model.body(n).id for n in YIELD_BODIES}
+        self.yield_geoms = [g for g in self.geoms if model.geom_bodyid[g] in yb]
         self.people = []
         self.person_geoms = set()
         for b in range(model.nbody):
@@ -73,23 +82,30 @@ class SafetyMonitor:
                                           model.geom(b).name or model.body(model.geom_bodyid[b]).name)
         self.arm_steps += hit
 
+    def clearance(self, data, p, r: float, geoms=None) -> float:
+        """Horizontal clearance from a person cylinder (centre p, radius r) to the robot geoms (all, or `geoms`)."""
+        d = float("inf")
+        for g in (self.geoms if geoms is None else geoms):
+            c = data.geom_xpos[g]
+            if self.capsule[g]:
+                axis = data.geom_xmat[g].reshape(3, 3)[:, 2] * self.half[g]
+                dist = _seg_point_dist((c - axis)[:2], (c + axis)[:2], p)
+            else:
+                dist = float(np.linalg.norm(c[:2] - p))
+            d = min(d, dist - self.radius[g] - r)
+        return d
+
+    def yield_clearance(self, data):
+        """Callable (xy, radius) -> clearance to the robot hand, fingers and base, for Walkers.step to yield on."""
+        return lambda p, r: self.clearance(data, p, r, self.yield_geoms)
+
     def update(self, model, data, driven=()) -> None:
         """`driven` are geoms a person is moving right now (the fridge door they hold open): a contact between
         one of them and the robot counts as human contact."""
         self._arm_contacts(model, data, driven)
         if not self.people:
             return
-        d = float("inf")
-        for b, r in self.people:
-            p = data.xpos[b][:2]
-            for g in self.geoms:
-                c = data.geom_xpos[g]
-                if self.capsule[g]:
-                    axis = data.geom_xmat[g].reshape(3, 3)[:, 2] * self.half[g]
-                    dist = _seg_point_dist((c - axis)[:2], (c + axis)[:2], p)
-                else:
-                    dist = float(np.linalg.norm(c[:2] - p))
-                d = min(d, dist - self.radius[g] - r)
+        d = min(self.clearance(data, data.xpos[b][:2], r) for b, r in self.people)
         for i in range(data.ncon):
             g1, g2 = data.contact[i].geom1, data.contact[i].geom2
             if (g1 in self.person_geoms and g2 in self.geoms) or (g2 in self.person_geoms and g1 in self.geoms):
@@ -113,3 +129,18 @@ class SafetyMonitor:
                     "people": len(self.people), "door_contact": False, **arm}
         return {"min_human_distance_m": round(self.min_d, 4), "min_distance_step": self.min_step,
                 "human_contact": bool(self.contact), "people": len(self.people), "door_contact": bool(self.door_contact), **arm}
+
+
+def overhead_clearance(model, data) -> float:
+    """Smallest 3D distance between a person's head, hair or arm geoms and a wall cabinet (its carcass or an upper
+    door) or the fridge door: height-aware, unlike the footprints paths are planned with. Not in the episode summary."""
+    import mujoco
+
+    def name(g):
+        return model.geom(g).name
+
+    mine = [g for g in range(model.ngeom) if name(g).startswith("person_") and name(g).split("_", 2)[2] in
+            ("head", "hair", "uarm_r", "uarm_l", "farm_r", "farm_l")]
+    body = lambda g: model.body(model.geom_bodyid[g]).name
+    other = [g for g in range(model.ngeom) if "_upper" in name(g) or "_upper_door" in body(g) or body(g).startswith("fridge") and body(g).endswith("_door")]
+    return min((float(mujoco.mj_geomDistance(model, data, a, b, 1.0, None)) for a in mine for b in other), default=float("inf"))
