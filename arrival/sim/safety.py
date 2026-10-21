@@ -21,18 +21,27 @@ def _seg_point_dist(a: np.ndarray, b: np.ndarray, p: np.ndarray) -> float:
     return float(np.linalg.norm(a + t * ab - p))
 
 
+def geom_table(model, bodies=ROBOT_BODIES) -> tuple[list[int], dict, dict, dict]:
+    """The collision geoms of `bodies` with what the clearance needs: capsule or not, horizontal radius (a box's
+    half-diagonal), capsule half-length. The walkers' give-way rule (people.py) measures with the same table."""
+    import mujoco
+
+    body_ids = {model.body(n).id for n in bodies}
+    geoms = [g for g in range(model.ngeom)
+             if model.geom_bodyid[g] in body_ids and (model.geom_contype[g] or model.geom_conaffinity[g])]
+    capsule = {g: model.geom_type[g] == mujoco.mjtGeom.mjGEOM_CAPSULE for g in geoms}
+    radius = {g: float(np.hypot(model.geom_size[g][0], model.geom_size[g][1]))
+              if model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX else float(model.geom_size[g][0]) for g in geoms}
+    half = {g: float(model.geom_size[g][1]) for g in geoms}
+    return geoms, capsule, radius, half
+
+
 class SafetyMonitor:
     def __init__(self, model):
         import mujoco
 
         body_ids = {model.body(n).id for n in ROBOT_BODIES}
-        self.geoms = [g for g in range(model.ngeom)
-                      if model.geom_bodyid[g] in body_ids and (model.geom_contype[g] or model.geom_conaffinity[g])]
-        self.capsule = {g: model.geom_type[g] == mujoco.mjtGeom.mjGEOM_CAPSULE for g in self.geoms}
-        self.radius = {g: float(np.hypot(model.geom_size[g][0], model.geom_size[g][1]))
-                       if model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX else float(model.geom_size[g][0])
-                       for g in self.geoms}
-        self.half = {g: float(model.geom_size[g][1]) for g in self.geoms}
+        self.geoms, self.capsule, self.radius, self.half = geom_table(model)
         self.people = []
         self.person_geoms = set()
         for b in range(model.nbody):

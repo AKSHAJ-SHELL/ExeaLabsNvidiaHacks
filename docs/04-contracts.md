@@ -52,6 +52,7 @@ Rules:
 - `geometry_source` is one of `authored_sample`, `roomplan`, `four_photo_unmeasured`.
 - `blocks_claims` is a list of strings. Four-photo bundles set it to `["geometry", "realism"]`. Others use `[]`.
 - Optional keys, written by the RoomPlan normalizer and absent from authored scans; loaders accept their absence. `doors`, `windows` and `openings` are lists of `{"id", "wall_id", "size", "position", "yaw"}` (doors also carry `"is_open"`); `wall_id` is the id of the wall the surface sits in, or `null` when the export's parent is not one of the walls; `size` is `[width, 0, height]` as scanned. `floors` is a list of `{"id", "z", "corners"}` with `corners` a list of `[x, y]` floor-polygon points in the room frame and `z` the floor's height above z = 0. `story` and `story_count` are integers (which story this bundle holds, and how many the export had).
+- A fixture may carry `"hinge": "left"` or `"right"`, the side its door hangs on as seen by a person standing in front of it, facing it. The fixture faces local +y, so that person's right is local -x. Only the fridge reads it, and the default is `"right"`, which is where every fridge door has hung so far. It is authored, never scanned, and the twin copies it to the fixture.
 - Reject files with `schema_version` other than `"1"`, or `units` other than `"meters"`, or `frame` other than `"z_up"`.
 
 ### Hero kitchen that must be committed
@@ -234,7 +235,7 @@ Moving parts in the sim (`arrival.sim.scene.part_names(twin)`): each is a joint,
 | counter | `<id>_drawer0`, `<id>_drawer1` (slide, 0 to 0.4 m), `<id>_door` (hinge, 0 to 1.9 rad), `<id>_upper_door<k>` (hinge; one wall-cabinet door per 0.6 m of counter run, none over tables, islands or counters under 0.8 m) |
 | sink inside a counter | `<sink_id>_faucet` (hinge, 0 to 1.2 rad; the lever up is water on) |
 | stove | `<id>_oven_door` (hinge about the bottom edge, 0 to 1.5 rad; closed is held by gravity) |
-| fridge_bottom_freezer | `<id>_door` (hinge, 0 to 2.0 rad) |
+| fridge_bottom_freezer | `<id>_door` (hinge, 0 to 2.0 rad; on the right edge seen from the front (local -x), or the left edge (local +x) with the optional `"hinge": "left"`; RoomPlan does not report a hinge side, so only an authored scan sets it) |
 | dishwasher | `<id>_door` (hinge about the bottom edge, 0 to 1.5 rad), `<id>_rack` (slide, 0 to 0.45 m: the upper rack rolls out over the open door; the carcass is hollow so it can); floor-standing; a counter run whose end overlaps it is trimmed back, like a fridge or stove (an appliance wholly inside a run is not cut out) |
 | microwave | `<id>_door` (hinge on the left edge, 0 to 1.9 rad); the fixture `position` is the box centre, so it sits on a counter top |
 

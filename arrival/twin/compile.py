@@ -116,6 +116,8 @@ def compile_twin(bundle: dict) -> dict:
             "yaw": float(f.get("yaw", 0.0)),
             "source_category": f["category"],
         }
+        if "hinge" in f:
+            fx["hinge"] = f["hinge"]
         if is_island(fx, walls):
             fx["type"] = "counter"
             fx["island"] = True

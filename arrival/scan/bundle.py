@@ -33,6 +33,9 @@ def validate(bundle: dict) -> dict:
         for item in bundle.get(key, []):
             if len(item.get("size", [])) != 3 or len(item.get("position", [])) != 3:
                 raise ScanBundleError(f"{item.get('id')}: size and position must have 3 values")
+    for item in bundle.get("fixtures", []):
+        if item.get("hinge", "right") not in ("left", "right"):
+            raise ScanBundleError(f"{item.get('id')}: hinge must be 'left' or 'right', got {item['hinge']!r}")
     for fl in bundle.get("floors", []):
         if len(fl.get("corners", [])) < 3 or any(len(c) != 2 for c in fl["corners"]):
             raise ScanBundleError(f"{fl.get('id')}: floor corners must be 3 or more [x, y] points")

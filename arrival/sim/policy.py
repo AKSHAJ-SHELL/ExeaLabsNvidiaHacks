@@ -221,16 +221,23 @@ class ScriptedExpert(Policy):
             # follow the bar's arc only to about 40 deg, so the plan has two parts: the fingers close round the
             # vertical bar from beyond the free edge and pull to 40 deg, then slide off the bar's free side, round
             # the free edge to the inside face and push the door on with the closed fingertips.
+            # A left-hinged fridge is the mirror image: sg is -1, the door turns clockwise and the base stands on the
+            # other side. `shut` is the closed panel's world angle from the hinge, so q below is the door's own angle.
+            from arrival.sim.scene import fridge_door_frame
+
+            fr = env.fx[task["fixture"]]
+            sg = fridge_door_frame(fr)["sign"]
+            shut = fr.get("yaw", 0.0) + (0.0 if sg > 0 else np.pi)
             hinge, h, _ = env.door_geometry(task)
             r = np.linalg.norm((h - hinge)[:2])
             a0 = np.arctan2(*(h - hinge)[[1, 0]])
             s, up = self.seg_steps, np.array([0, 0, 1.0])
 
-            def along(a):  # from the hinge toward the free edge at door angle a
+            def along(a):  # from the hinge toward the free edge at world angle a
                 return np.array([np.cos(a), np.sin(a), 0.0])
 
-            def nrm(a):  # outward normal of the panel (the door swings counter-clockwise from above)
-                return np.array([-np.sin(a), np.cos(a), 0.0])
+            def nrm(a):  # outward normal of the panel
+                return sg * np.array([-np.sin(a), np.cos(a), 0.0])
 
             def pt(a):
                 return hinge + (r + FRIDGE_HOOK_ALONG) * along(a) + FRIDGE_HOOK_OUT * nrm(a) + (h[2] - hinge[2]) * up
@@ -239,27 +246,29 @@ class ScriptedExpert(Policy):
                 return ik.facing(-along(a0 + FRIDGE_TURN * (a - a0))[:2]) @ FRIDGE_FLIP
 
             def push(q):  # eef with the closed fingertips on the inside face at door angle q
-                return hinge + FRIDGE_PUSH_AT * along(q) - FRIDGE_PUSH_GAP * nrm(q) + (h[2] - hinge[2]) * up
+                a = shut + sg * q
+                return hinge + FRIDGE_PUSH_AT * along(a) - FRIDGE_PUSH_GAP * nrm(a) + (h[2] - hinge[2]) * up
 
             def pori(q):
-                return ik.facing(nrm(q)[:2]) @ FRIDGE_PUSH_ROLL
+                return ik.facing(nrm(shut + sg * q)[:2]) @ FRIDGE_PUSH_ROLL
 
             d0, g = along(a0), pt(a0)
             out = [(g + 0.25 * d0 + 0.15 * up, ori(a0), o, s), (g + 0.25 * d0, ori(a0), o, s),
                    (g + 0.08 * d0, ori(a0), o, s, True), (g, ori(a0), o, s), (g, ori(a0), c, self.hold_steps)]
             for k in range(1, 5):
-                a = a0 + FRIDGE_HOOK * k / 4
+                a = a0 + sg * FRIDGE_HOOK * k / 4
                 out.append((pt(a), ori(a), c, FRIDGE_PULL_STEPS, k < 4))
-            a, q1 = a0 + FRIDGE_HOOK, FRIDGE_HOOK
-            far = hinge + FRIDGE_FAR * along(q1) + (h[2] - hinge[2]) * up  # clear of the free edge
+            a, q1 = a0 + sg * FRIDGE_HOOK, FRIDGE_HOOK
+            far = hinge + FRIDGE_FAR * along(shut + sg * q1) + (h[2] - hinge[2]) * up  # clear of the free edge
             out += [(pt(a) + FRIDGE_CLEAR * along(a), ori(a), c, s, True),
-                    (far - FRIDGE_BACK * nrm(q1), pori(q1), c, s, True),
-                    (push(q1) - FRIDGE_BACK * nrm(q1), pori(q1), c, s)]
+                    (far - FRIDGE_BACK * nrm(shut + sg * q1), pori(q1), c, s, True),
+                    (push(q1) - FRIDGE_BACK * nrm(shut + sg * q1), pori(q1), c, s)]
             for k in range(7):
                 q = q1 - np.radians(3) + (FRIDGE_PUSH_END - q1 + np.radians(3)) * k / 6
                 out.append((push(q), pori(q), c, FRIDGE_PULL_STEPS, k < 6))
             q = FRIDGE_PUSH_END
-            out += [(push(q) - 0.12 * nrm(q), pori(q), c, s), (push(q) - 0.12 * nrm(q) + 0.1 * up, pori(q), c, s)]
+            n = nrm(shut + sg * q)
+            out += [(push(q) - 0.12 * n, pori(q), c, s), (push(q) - 0.12 * n + 0.1 * up, pori(q), c, s)]
             return out
         if fam in ("open_oven", "open_dishwasher"):
             # The bar sits on the outside of a bottom-hinged door, so a top-down grasp would put the hand body in

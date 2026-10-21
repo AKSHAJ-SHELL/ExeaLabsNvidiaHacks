@@ -157,11 +157,12 @@ def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: st
         src = fx[task["fixture"]]
         base = park(src, math.copysign(DISHWASHER_SIDE, to_local(obj_xy[:2], src)[0]), 0.28)
     elif fam == "open_fridge":
-        # beside the door's free edge and out of its swing (the hinge is on the fixture's left edge), facing the
-        # front like the cabinet door tasks
+        # beside the door's free edge and out of its swing (the side away from the hinge, which is on the right
+        # seen from the front unless the fixture says "hinge": "left"), facing the front like the cabinet door tasks
         src = fx[task["fixture"]]
-        base = park(src, src["size"][0] / 2 + FRIDGE_BASE_ALONG, FRIDGE_BASE_OUT)
-        yaw_off = -FRIDGE_BASE_YAW
+        sg = -1.0 if src.get("hinge") == "left" else 1.0
+        base = park(src, sg * (src["size"][0] / 2 + FRIDGE_BASE_ALONG), FRIDGE_BASE_OUT)
+        yaw_off = -sg * FRIDGE_BASE_YAW
     else:
         src = fx[task["fixture"]]
         base = park(src, *front_stand(src, fam, fixtures))

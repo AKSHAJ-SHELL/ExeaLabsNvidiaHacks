@@ -49,6 +49,33 @@ SLOW = 0.45  # the two short steps into and out of the doorway, as a share of wa
 LET_GO = 0.30  # radians: the hand pulls the bar this far, then lets go and the door swings on; past about 20 deg the
 # person is on the inner side of the panel while the bar is on the outer face, so an arm still on the bar would cross it
 CATCH = 0.25  # radians: closing, the hand pushes the inner face at the free edge down to here, then the door shuts itself
+GIVE_WAY = (0.05, 0.40)  # metres between the arm and the part of the body at its height: a person walking toward the
+# arm stops below the first, and below the second slows in proportion while the arm is moving at them. Measured like
+# the safety metric (torso cylinder to robot geom, horizontal), less how far that body part reaches ahead of the torso
+# at the current stride
+MOVING = 0.02  # m/s: an arm coming at a person slower than this counts as still
+CRAWL = 0.15  # the slowest a person giving way walks, as a share of their speed, before they stop
+RESUME = 0.25  # a stopped person walks on once the room at full stride is back to this
+WAIT_MAX = 4.0  # seconds a person may go without real progress (PROGRESS) before they walk away from the arm
+PROGRESS = 0.10  # metres from where the progress clock last reset that counts as having got somewhere
+BACK_OFF = 0.05  # a waiting person walks away at once when the arm comes this far inside the stop distance
+CLOSING = 0.15  # m/s: inside the slow distance, an arm coming at the person this fast sends them away at once
+# (walking speed is 0.8 m/s, the door pull's elbow comes at about 0.3)
+APPROACH = 0.005  # metres the room must shrink over a 5 cm step, outside the stop line, to count as walking toward the arm
+CONTACT = 0.0  # walking away, the only room that stops a person: the arm actually touching
+AWAY = (0.4, 16)  # walking away, besides the waypoints either way along the path: up to this far in this many headings
+FALLBACK = (120, 0.01)  # headings and step-length spacing (m) tried when no walk-away goal qualifies: 3 deg, 1 cm
+EDGE = 0.2  # metres a person walking away may go past their floor (the walls are 0.3 to 0.4 m further out)
+ARM_BODIES = tuple(f"link{i}" for i in range(2, 8)) + ("hand", "finger_l", "finger_r")  # the parts that swing out;
+# the pedestal and link1 turn in place, and the paths already keep CLEAR of the column. With a mobile base nobody
+# gives way: the base waits for people itself (policy.STOP_CLEAR), the tucked arm rides on it, and people waiting
+# for it as well stalled the counter_to_counter drive past its step budget
+COLUMN = 0.25  # metres from the pedestal axis: an arm geom wholly inside this is over the column, which the loop's
+# lane passes 0.5 to 0.75 m from on purpose; counting it made every lane crossing a crawl
+USE_IN, USE_SIDE = 0.08, 0.15  # at a counter stop the hand works this far onto the top and right of the body centre
+USE_SWEEP, USE_HZ = 0.06, 0.8  # metres either way along the counter and cycles per second while using it
+AMPS = np.linspace(0.0, 1.0, 5)  # stride amplitudes the forward reach of each body band is tabulated at
+VISIT = ("open", "look", "close")
 
 
 def person_spec(seed: int, i: int) -> dict:
@@ -111,6 +138,23 @@ def toe_reach(s: dict, amp: float) -> float:
     """How far ahead of the body centre the toe gets at swing amplitude amp, including the foot's radius. Standing,
     the foot still points 0.13 h forward."""
     return max(limb_segments(s, ph, amp)["foot_r"][1][0] for ph in np.linspace(0.0, 2 * math.pi, 36)) + 0.8 * s["limb_r"]
+
+
+def body_bands(s: dict) -> list[tuple[float, float, np.ndarray]]:
+    """(z low, z high, forward reach past the torso at each of AMPS) for feet, thighs, arms and head. A robot geom
+    only counts against the bands its height overlaps, so an arm over a short person's head is not in their way,
+    and a swinging foot only matters to a gripper down at shin height."""
+    phases = np.linspace(0.0, 2 * math.pi, 36)
+
+    def ahead(seg: str, end: int, r: float) -> np.ndarray:
+        return np.array([max(max(limb_segments(s, ph, a)[f"{seg}_{k}"][end][0] for k in "rl") for ph in phases) + r
+                         for a in AMPS]) - s["torso_r"]
+
+    knee_z = s["hip_z"] - s["thigh"]
+    return [(0.0, knee_z, np.maximum(np.array([toe_reach(s, a) for a in AMPS]) - s["torso_r"], 0.0)),
+            (knee_z, s["hip_z"], np.maximum(ahead("thigh", 1, 1.25 * s["limb_r"]), 0.0)),
+            (s["hip_z"], s["shoulder_z"], np.maximum(ahead("farm", 1, 0.8 * s["limb_r"]), 0.0)),
+            (s["shoulder_z"], s["height"], np.zeros(len(AMPS)))]
 
 
 def _cap(name: str, r: float, a, b, rgba: str) -> str:
@@ -262,11 +306,11 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
         return None
     g = fridge_door_frame(fr)
     r = spec["radius"]
-    yaw, L, front = fr.get("yaw", 0.0), g["length"], g["front"]
+    yaw, L, front, sg = fr.get("yaw", 0.0), g["length"], g["front"], g["sign"]
     centre = np.array(fr["position"][:2], dtype=float)
     hinge = centre + _rot(yaw, g["hinge"])
-    s1 = centre + _rot(yaw, (L / 2 + r, front + r + 0.20))  # 0.2 out: the shoulder stays on the bar's side longer
-    s2 = centre + _rot(yaw, (L / 2 - 0.15, front + r + 0.05))
+    s1 = centre + _rot(yaw, (sg * (L / 2 + r), front + r + 0.20))  # 0.2 out: the shoulder stays on the bar's side longer
+    s2 = centre + _rot(yaw, (sg * (L / 2 - 0.15), front + r + 0.05))
     toe = _rot(yaw, (0.0, -toe_reach(spec, 0.0)))  # the standing toe tip, facing the fridge
     stride = toe_reach(spec, SLOW)
     x0, _, x1, y1 = floor  # the stand points are in the work strip in front of the floor rectangle, like the counter stop
@@ -282,7 +326,7 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
             return None
 
     def panel_dist(p, q):  # distance from a stand point to the door panel at angle q
-        return _seg_dist(hinge, hinge + L * _rot(yaw + q, (1.0, 0.0)), p)
+        return _seg_dist(hinge, hinge + L * _rot(yaw + sg * q, (sg, 0.0)), p)
 
     swing = np.linspace(0.0, OPEN_ANGLE[1], 40)
     if (min(panel_dist(s1, q) for q in swing) < r + 0.02
@@ -301,7 +345,7 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
               "yaw": yaw}  # the quarter disc the door sweeps, grown for toes: the other walkers route round it
     return {"fixture": fr["id"], "hinge": hinge, "yaw": yaw, "length": L, "handle": g["handle"], "centre": centre,
             "face": yaw - math.pi / 2, "s1": s1, "s2": s2, "q_open": q_open, "look": float(rng.uniform(*LOOK_T)),
-            "sector": sector}
+            "sector": sector, "sign": sg, "hand": "r" if sg > 0 else "l"}  # the hand on the door's side of the body
 
 
 def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = None, r: float = 0.0,
@@ -379,7 +423,8 @@ class Walkers:
                 self.visit = {**plan, "person": who} if plan else None
         prints = Footprints(fixtures)
         avoid = Footprints(list(fixtures or []) + [self.visit["sector"]]) if self.visit else prints
-        self.paths, self.pauses, self.faces, self.slow = [], [], [], []
+        self.paths, self.pauses, self.faces, self.slow, self.use = [], [], [], [], []
+        self.zones = []  # each person's footprints (work frame), the ones their path was routed round
         for i, s in enumerate(self.specs):
             visiting = self.visit is not None and i == self.visit["person"]
             pr = prints if visiting else avoid
@@ -391,10 +436,21 @@ class Walkers:
             faces, slow = [None] * len(pts), [False] * len(pts)
             if visiting:
                 pts, pause, faces, slow = self._splice_visit(pts, pause, s["radius"], floor, fixtures, base_xy)
+            use = {}
+            if front_y is not None:
+                for k, p in enumerate(pts):
+                    hand = None if faces[k] or pause[k] <= 0 else self._use_point(p, front_y, fixtures, s)
+                    if hand is not None:
+                        faces[k], use[k] = "use", hand
+            self.zones.append(pr)
             self.paths.append(pts)
             self.pauses.append(pause)
             self.faces.append(faces)
             self.slow.append(slow)
+            self.use.append(use)
+        self.box = [(min(floor[0], *(p[0] for p in path)) - EDGE, min(floor[1], *(p[1] for p in path)) - EDGE,
+                     max(floor[2], *(p[0] for p in path)) + EDGE, max(floor[3], *(p[1] for p in path)) + EDGE)
+                    for path in self.paths]  # where a person walking away may go, work frame
         self._to_world(yaw)
         self.pos = [p[0].copy() for p in self.paths]
         self.idx = [1] * n
@@ -404,8 +460,19 @@ class Walkers:
         self.phase = [0.0] * n
         self.amp = [0.0] * n
         self.yaw = [0.0] * n
-        self.reach = [None] * n  # (weight 0..1, world point) the right hand is going for
+        self.reach = [None] * n  # (weight 0..1, world point, "r" or "l"): what that hand is going for
         self.speed = speed
+        self.bands = [body_bands(s) for s in self.specs]
+        self.held = [0.0] * n  # seconds stopped for the arm so far
+        self.last_room = [None] * n  # (position, stride amplitude, room to the arm) at the last walking step
+        self.backing = [False] * n  # walking away from the arm (`_walk_away`); cleared at the next path waypoint
+        self.detour = [[] for _ in range(n)]  # world points walked before the path target while walking away
+        self.dir = [1] * n  # +1 along the loop, -1 after walking away back the way they came
+        self.anchor = [p.copy() for p in self.pos]  # where the progress clock last reset
+        self.stuck = [0.0] * n  # seconds since then
+        self.stats = {"slowed_s": 0.0, "stopped_s": 0.0, "stops": 0, "walk_aways": 0, "turn_rounds": 0,
+                      "fallbacks": 0, "cornered_steps": 0}
+        self._arm = None  # (geoms, capsule, radius, half) the walkers give way to; bound with the model
         self.door_q, self.door_max = 0.0, 0.0
         self.driven_geoms: set[int] = set()  # the door's geoms while a person holds it open
         self._gids: list[dict[str, int]] | None = None
@@ -418,6 +485,8 @@ class Walkers:
         """Turn the paths and the planned visit from the work frame back into the world."""
         back = self.M.T
         self.paths = [[back @ p for p in path] for path in self.paths]
+        self.use = [{k: np.array([*(back @ h[:2]), h[2]]) for k, h in use.items()} for use in self.use]
+        self.use_axis = back @ np.array([1.0, 0.0])  # along the counter
         if self.visit:
             v = self.visit
             for k in ("hinge", "centre", "s1", "s2"):
@@ -443,9 +512,29 @@ class Walkers:
         slow = [False, True, True] + [False] * (len(out) + len(pts) + len(back))
         return path, waits, faces, slow
 
+    @staticmethod
+    def _use_point(p, front_y: float, fixtures, s: dict) -> np.ndarray | None:
+        """Work-frame point on the counter top the right hand works at from the stop p (the person faces -y, so
+        their right is -x), the forearm's radius above the top. None when that point is over no fixture."""
+        xy = np.array([p[0] - USE_SIDE, front_y - USE_IN])
+        under = [f for f in fixtures or [] if Footprints([f]).blocked(xy, 0.0)]
+        if not under:
+            return None
+        top = max(f["position"][2] + f["size"][2] / 2 for f in under)
+        return np.array([xy[0], xy[1], top + 0.8 * s["limb_r"] + 0.02])
+
     def _bind(self, model) -> None:
+        from arrival.sim.safety import geom_table
+
         self._gids = [{k: model.geom(f"person_{i}_{k}").id for k in limb_segments(s, 0.0, 0.0)}
                       for i, s in enumerate(self.specs)]
+        try:
+            self._arm = geom_table(model, ARM_BODIES)
+            self._column = model.body("robot_base").id
+            if any(model.joint(j).name == "base_x" for j in range(model.njnt)):
+                self._arm = None  # mobile base: see ARM_BODIES
+        except KeyError:
+            self._arm = None  # a scene without the robot: nothing to give way to
         if self.visit:
             jn = f"{self.visit['fixture']}_door"
             try:
@@ -461,7 +550,7 @@ class Walkers:
         """A point of the door at angle q, from its frame: x along the panel from the hinge, y out of the front face
         (negative is the inner face), at the handle's height."""
         v = self.visit
-        xy = v["hinge"] + _rot(v["yaw"] + q, (lx, ly))
+        xy = v["hinge"] + _rot(v["yaw"] + v["sign"] * q, (lx, ly))
         return np.array([xy[0], xy[1], v["handle"][2]])
 
     def _visit_step(self, i: int, tag: str) -> None:
@@ -480,9 +569,205 @@ class Walkers:
             target = self.door_point(q, hx, hy + off)
         else:
             hold = _smooth((q - CATCH) / 0.2)
-            target = self.door_point(q, v["length"] - 0.05, -off - 0.065)  # 0.065 keeps the forearm capsule above the panel's top edge
+            target = self.door_point(q, v["sign"] * (v["length"] - 0.05), -off - 0.065)  # 0.065 keeps the forearm capsule above the panel's top edge
         w = min(_smooth(t / REACH_T), _smooth((self.total[i] - t) / REACH_T)) * hold
-        self.reach[i] = (w, target) if w > 0.0 else None
+        self.reach[i] = (w, target, v["hand"]) if w > 0.0 else None
+
+    def _use_step(self, i: int) -> None:
+        """At a counter stop the right hand goes to the top and works it back and forth along the counter."""
+        t = self.total[i] - self.wait[i]
+        w = min(_smooth(t / REACH_T), _smooth(self.wait[i] / REACH_T))
+        sweep = USE_SWEEP * math.sin(2 * math.pi * USE_HZ * t)
+        hand = self.use[i][self.at[i]]
+        self.reach[i] = (w, hand + np.array([*(sweep * self.use_axis), 0.0]), "r") if w > 0.0 else None
+
+    def _on_visit(self, i: int) -> bool:
+        """Person i is on a leg of the fridge trip, which plan_fridge_visit already keeps clear of the base, and where
+        stepping back would replay a door swing."""
+        if not self.visit or i != self.visit["person"]:
+            return False
+        n = len(self.paths[i])
+        k = self.idx[i] % n
+        return self.faces[i][k] in VISIT or self.faces[i][(k - self.dir[i]) % n] in VISIT
+
+    def arm_clearance(self, data, i: int, p, amp: float | None = None) -> float:
+        """Horizontal room (m) between person i standing at p and the arm, measured as the safety metric does
+        (torso cylinder to each robot geom), less the forward reach of the body band at each geom's height at
+        stride amplitude `amp` (the current one by default). inf when no arm geom is at a height the person
+        occupies."""
+        geoms, capsule, radius, half = self._arm
+        amp = self.amp[i] if amp is None else amp
+        col = data.xpos[self._column][:2]
+        best = math.inf
+        for g in geoms:
+            c = data.geom_xpos[g]
+            axis = data.geom_xmat[g].reshape(3, 3)[:, 2] * half[g] if capsule[g] else np.zeros(3)
+            if max(np.linalg.norm((c - axis)[:2] - col), np.linalg.norm((c + axis)[:2] - col)) + radius[g] < COLUMN:
+                continue
+            if capsule[g]:
+                d = _seg_dist((c - axis)[:2], (c + axis)[:2], p)
+                zl, zh = min(c[2] - axis[2], c[2] + axis[2]), max(c[2] - axis[2], c[2] + axis[2])
+            else:
+                d, zl, zh = float(np.linalg.norm(c[:2] - p)), c[2], c[2]
+            zl, zh = zl - radius[g], zh + radius[g]  # a box's half-diagonal stands in for its half-height
+            reach = [float(np.interp(amp, AMPS, r)) for lo, hi, r in self.bands[i] if zl < hi and zh > lo]
+            if reach:
+                best = min(best, d - radius[g] - self.specs[i]["torso_r"] - max(reach))
+        return best
+
+    def _give_way(self, data, i: int, u: np.ndarray, dt: float) -> float:
+        """Speed factor for person i walking along unit u: 1 unless the room to the arm shrinks along u by more
+        than APPROACH per 5 cm and is under GIVE_WAY[1]; 0 while stopped. -1 means they have started walking away
+        (`_walk_away`): when the arm itself comes at them faster than CLOSING inside the slow distance, when it comes
+        BACK_OFF past the stop distance, or when they have gone WAIT_MAX without PROGRESS."""
+        if self._arm is None or not self._arm[0] or self._on_visit(i) or self.backing[i]:
+            self.last_room[i] = None
+            return 1.0
+        stop, slow = GIVE_WAY
+        c = self.arm_clearance(data, i, self.pos[i])
+        if self.stuck[i] >= WAIT_MAX - 1e-9:
+            return self._walk_away(data, i)
+        last, self.last_room[i] = self.last_room[i], (self.pos[i].copy(), self.amp[i], c)
+        # outside the stop line a step only counts as toward the arm when it loses APPROACH (walking nearly side-on is
+        # not); inside it any loss does, so nobody slides in at a grazing angle
+        toward = self.arm_clearance(data, i, self.pos[i] + 0.05 * u) < c - (APPROACH if c > stop else 1e-9)
+        coming = 0.0  # m/s the arm itself comes at the person
+        if last is not None and c < slow:
+            # the room at last step's spot and stride, then and now (a stride growing back after a stop shrinks the
+            # room too, and is not the arm coming)
+            coming = (last[2] - self.arm_clearance(data, i, last[0], last[1])) / dt
+            if toward and coming > CLOSING:
+                return self._walk_away(data, i)
+        # once stopped, wait for room at full stride, not for the arm to twitch away or the legs to come to rest
+        if self.held[i] == 0.0 or self.arm_clearance(data, i, self.pos[i], 1.0) >= RESUME:
+            self.held[i] = 0.0
+            if c >= slow or not toward or (c > stop and coming <= MOVING):  # a still arm is walked past like a
+                return 1.0  # fixture, up to the stop line; the loop's lane passes under the parked elbow
+            if c > stop:  # the crawl floor brings them to the stop line
+                self.stats["slowed_s"] += dt
+                return max((c - stop) / (slow - stop), CRAWL)
+            self.stats["stops"] += 1
+        self.held[i] += dt
+        self.stats["stopped_s"] += dt
+        if c < stop - BACK_OFF:
+            return self._walk_away(data, i)
+        return 0.0
+
+    def _walk_away(self, data, i: int) -> float:
+        """Send person i away from the arm. The goals tried are the path waypoints ahead and behind (the first ones
+        at least PROGRESS away, so a walk away always gets somewhere) and points up to AWAY round them, cut short at
+        EDGE past the floor and kept off the fixtures their path was routed round. The one whose first 0.4 m keeps the most room
+        to the arm wins. A goal off the path is followed by a route back to whichever neighbouring waypoint has more
+        room along the way. Every goal ends PROGRESS or more from here and from where the progress clock started, so
+        each walk away is real progress. When none of those qualifies (cut short by EDGE, or leading through the arm)
+        they take the step that gains most room among FALLBACK[0] headings, each tried at every FALLBACK[1] of length
+        from one walking step out to AWAY[0] and at most EDGE past the floor, clear of the fixtures and never into the
+        arm on the way (never deeper, if already touching). Walking away the give-way stop
+        does not apply; a step that would touch the
+        arm (CONTACT), or go deeper when already touching, ends the walk away there, and the give-way rules and the
+        progress clock take over again. They stay put only when none of those sampled steps gains room."""
+        n, path, r = len(self.paths[i]), self.paths[i], 0.8 * self.specs[i]["radius"]
+        prints, box, p = self.zones[i], self.box[i], self.pos[i]
+
+        def local(q):
+            return self.M @ np.asarray(q, dtype=float)
+
+        def ok(g):
+            a, b = local(p), local(g)
+            return not prints.segment_blocked(a + 0.1 * (b - a), b, r)
+
+        def out_to_box(h):  # how far along world heading h the box lets them go, up to AWAY
+            a, v = local(p), self.M @ h
+            t = AWAY[0]
+            for k_, lo, hi in ((0, box[0], box[2]), (1, box[1], box[3])):
+                if v[k_] > 1e-9:
+                    t = min(t, (hi - a[k_]) / v[k_])
+                elif v[k_] < -1e-9:
+                    t = min(t, (lo - a[k_]) / v[k_])
+            return t
+
+        def room(g):
+            u, dist = g - p, float(np.linalg.norm(g - p))
+            if dist < 1e-6:
+                return -math.inf
+            ts = np.arange(0.05, min(0.4, dist) + 1e-9, 0.05)
+            return min(self.arm_clearance(data, i, p + u / dist * t) for t in (ts if len(ts) else [dist]))
+
+        anchor = self.anchor[i]
+
+        def far(g):  # far enough from here and from where the progress clock started to count as getting somewhere
+            return min(np.linalg.norm(g - p), np.linalg.norm(g - anchor)) >= PROGRESS + 0.02
+
+        def waypoint(k, step):  # the first waypoint from k in direction step that is far enough
+            for _ in range(n):
+                if far(path[k % n]):
+                    return k
+                k += step
+            return None
+
+        ahead, behind = waypoint(self.idx[i], self.dir[i]), waypoint(self.idx[i] - self.dir[i], -self.dir[i])
+        goals = [(path[k % n], ("path", k, d)) for k, d in ((ahead, self.dir[i]), (behind, -self.dir[i])) if k is not None]
+        for a in np.linspace(0.0, 2 * math.pi, AWAY[1], endpoint=False):
+            h = np.array([math.cos(a), math.sin(a)])
+            g = p + out_to_box(h) * h
+            if far(g):
+                goals.append((g, ("free", None, None)))
+        here = self.arm_clearance(data, i, p)
+        floor_room = min(CONTACT, here)  # already touching: just never go deeper
+        scored = [(room(g), j, g, tag) for j, (g, tag) in enumerate(goals) if ok(g)]
+        scored = [x for x in scored if x[0] > floor_room]
+        self.held[i], self.last_room[i] = 0.0, None  # the progress clock runs on: only moving resets it
+        if not scored:  # every full goal cut short or leading through the arm: the step, along any of FALLBACK[0]
+            # headings and FALLBACK[1] long or longer up to AWAY[0] and the box, that gains most room without going deeper on the way
+            step, best = self.speed * 0.05, None
+            for a in np.linspace(0.0, 2 * math.pi, FALLBACK[0], endpoint=False):
+                h = np.array([math.cos(a), math.sin(a)])
+                ts = np.arange(FALLBACK[1], out_to_box(h) + 1e-9, FALLBACK[1])
+                if not len(ts) or ts[-1] < step - 1e-9:
+                    continue
+                q = p + ts[:, None] * h
+                rooms = np.array([self.arm_clearance(data, i, x) for x in q])
+                lq = [local(x) for x in q]
+                fixed = np.array([prints.blocked(x, r) for x in lq])
+                deeper = np.minimum.accumulate(rooms) < floor_room
+                for j, t in enumerate(ts):
+                    if deeper[j]:
+                        break
+                    if t < step - 1e-9 or fixed[(ts >= 0.1 * t - 1e-9) & (ts <= t + 1e-9)].any():
+                        continue  # the fixture test of the full goals: clear from a tenth of the way out
+                    gain = rooms[j] - here
+                    if gain > 1e-6 and (best is None or gain > best[0]):
+                        best = (gain, q[j])
+            if best is None:
+                self.backing[i] = False  # no sampled step gains room: the progress clock tries again next step
+                self.stats["cornered_steps"] += 1
+                return 0.0
+            scored = [(0.0, 0, best[1], ("free", None, None))]
+            self.stats["fallbacks"] += 1
+        _, _, g, (kind, k, d) = max(scored, key=lambda x: (round(x[0], 3), -x[1]))  # ties go to the path
+        self.backing[i] = True
+        self.stats["walk_aways"] += 1
+        if kind == "free":  # back to the path by whichever neighbouring waypoint the way to keeps more room
+            def along(kd):
+                q = path[kd[0] % n]
+                u, dist = q - g, float(np.linalg.norm(q - g))
+                return min(self.arm_clearance(data, i, g + u / max(dist, 1e-9) * t)
+                           for t in np.arange(0.05, min(1.0, dist) + 1e-9, 0.05)) if dist > 0.05 else math.inf
+
+            back = [(self.idx[i], self.dir[i]), (self.idx[i] - self.dir[i], -self.dir[i])]
+            k, d = max(back, key=along)
+            via = route(local(g), local(path[k % n]), prints, r, box) or []
+            self.detour[i] = [g] + [self.M.T @ v for v in via]
+        if d != self.dir[i]:
+            self.stats["turn_rounds"] += 1
+        self.idx[i], self.dir[i] = k, d
+        return -1.0
+
+    def _heading(self, i: int) -> tuple[np.ndarray, float]:
+        """Vector and distance from person i to where they are walking: the next detour point, else the path target."""
+        target = self.detour[i][0] if self.detour[i] else self.paths[i][self.idx[i] % len(self.paths[i])]
+        d = target - self.pos[i]
+        return d, float(np.linalg.norm(d))
 
     def pose_limbs(self, model, i: int) -> None:
         """Write the limb capsules' body-frame pose for person i's current gait phase into the model."""
@@ -491,13 +776,14 @@ class Walkers:
         q = np.zeros(4)
         limbs = limb_segments(self.specs[i], self.phase[i], self.amp[i])
         if self.reach[i] is not None:
-            w, target = self.reach[i]
+            w, target, k = self.reach[i]
             b = _rot(-self.yaw[i], target[:2] - self.pos[i])
-            elbow, wrist = reach_arm(self.specs[i], np.array([b[0], b[1], target[2]]))
-            sh, e0 = limbs["uarm_r"]
-            _, w0 = limbs["farm_r"]
+            m = np.array([1.0, 1.0 if k == "r" else -1.0, 1.0])  # the left arm is the right one mirrored in the body's y
+            elbow, wrist = (m * p for p in reach_arm(self.specs[i], m * np.array([b[0], b[1], target[2]])))
+            sh, e0 = limbs[f"uarm_{k}"]
+            _, w0 = limbs[f"farm_{k}"]
             e1 = (1 - w) * e0 + w * elbow
-            limbs["uarm_r"], limbs["farm_r"] = (sh, e1), (e1, (1 - w) * w0 + w * wrist)
+            limbs[f"uarm_{k}"], limbs[f"farm_{k}"] = (sh, e1), (e1, (1 - w) * w0 + w * wrist)
         for k, (a, b) in limbs.items():
             g = self._gids[i][k]
             model.geom_pos[g] = (a + b) / 2
@@ -517,29 +803,50 @@ class Walkers:
             moved = 0.0
             self.reach[i] = None
             if self.wait[i] > 0:
+                self.last_room[i] = None
                 self.wait[i] -= dt
                 tag = self.faces[i][self.at[i]]
                 if tag in ("open", "look", "close") and self.visit and tag != "look":
                     self._visit_step(i, tag)
+                elif tag == "use":
+                    self._use_step(i)
                 yaw = self._pause_yaw(i)
             else:
-                k = self.idx[i] % len(path)
-                d = path[k] - self.pos[i]
-                dist = float(np.linalg.norm(d))
+                d, dist = self._heading(i)
+                if dist < 0.05 and self.detour[i]:
+                    self.detour[i].pop(0)
+                    d, dist = self._heading(i)
                 if dist < 0.05:  # at a waypoint: pause there, or turn to the next one without breaking stride
-                    self.wait[i] = self.total[i] = self.pauses[i][k]
+                    k = self.idx[i] % len(path)
+                    self.backing[i] = False
+                    forward = self.dir[i] > 0 or self.faces[i][k] not in VISIT  # no fridge trip walked backwards
+                    self.wait[i] = self.total[i] = self.pauses[i][k] if forward else 0.0
                     self.at[i] = k
-                    self.idx[i] += 1
-                    d = path[self.idx[i] % len(path)] - self.pos[i]
-                    dist = float(np.linalg.norm(d))
+                    self.idx[i] += self.dir[i]
+                    d, dist = self._heading(i)
                 if self.wait[i] <= 0 and dist > 1e-9:
                     nk = self.idx[i] % len(path)
                     v = self.speed * (SLOW if self.slow[i][nk] else 1.0)
                     if self.pauses[i][nk] > 0 and not self.slow[i][nk]:  # the slow fridge steps are planned for SLOW
                         v *= float(np.clip(dist / BRAKE[0], BRAKE[1], 1.0))
-                    moved = min(dist, v * dt)
-                    self.pos[i] += d / dist * moved
+                    give = self._give_way(data, i, d / dist, dt)
+                    if give < 0:  # walking away
+                        d, dist = self._heading(i)
+                        give = 1.0
+                    if self.backing[i]:  # at full speed, as far as it does not touch the arm
+                        v = self.speed
+                    if self.backing[i] and dist > 1e-9 and self._arm is not None and self._arm[0]:
+                        nxt = self.arm_clearance(data, i, self.pos[i] + d / dist * min(dist, v * dt))
+                        if nxt <= CONTACT and nxt < self.arm_clearance(data, i, self.pos[i]):
+                            self.backing[i], self.detour[i], give = False, [], 0.0  # the give-way rules take over
+                    moved = min(dist, v * give * dt)
+                    if dist > 1e-9:
+                        self.pos[i] += d / dist * moved
                 yaw = self._pause_yaw(i) if self.wait[i] > 0 else np.arctan2(d[1], d[0])  # no one-frame spin on arrival
+            if self.wait[i] > 0 or self._on_visit(i) or np.linalg.norm(self.pos[i] - self.anchor[i]) >= PROGRESS:
+                self.anchor[i], self.stuck[i] = self.pos[i].copy(), 0.0
+            else:
+                self.stuck[i] += dt
             self.yaw[i] = float(yaw)
             self.phase[i] += 2 * math.pi * moved / STRIDE
             target = min(1.0, moved / (self.speed * dt)) if moved > 0 else 0.0  # stride scaled to speed: a full stride at 45% speed puts the toe in the door swing
