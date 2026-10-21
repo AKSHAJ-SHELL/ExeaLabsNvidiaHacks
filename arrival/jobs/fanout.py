@@ -44,6 +44,19 @@ class FanoutConfig:
         # The run id becomes both a scratch-directory component and an object-storage prefix.
         if not isinstance(self.run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", self.run_id):
             raise ShardError("run_id must be 1-64 letters, digits, underscores or hyphens, starting with a letter or digit")
+        for name, minimum in (("shards", 1), ("episodes", 1), ("people", 0), ("res", 1)):
+            value = getattr(self, name)
+            if type(value) is not int or value < minimum:
+                raise ShardError(f"{name} must be an integer >= {minimum}")
+        if type(self.seed) is not int:
+            raise ShardError("seed must be an integer")
+        if not isinstance(self.room, str) or not self.room.strip():
+            raise ShardError("room must be a non-empty name")
+        if (not isinstance(self.families, str) or not self.families.strip() or
+                any(not part.strip() for part in self.families.split(","))):
+            raise ShardError("families must be comma-separated non-empty names")
+        if not isinstance(self.scans, str) or not self.scans.strip():
+            raise ShardError("scans must be a non-empty path")
 
     def sim_args(self, i: int) -> list[str]:
         return ["sim", "--room", self.room, "--families", self.families, "--episodes", str(self.episodes),
