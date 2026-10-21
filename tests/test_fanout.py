@@ -108,3 +108,13 @@ def test_invalid_done_marker_cannot_skip_a_shard(tmp_path, marker):
     with pytest.raises(ShardError, match="invalid done marker"):
         run_fanout(be, CFG, tmp_path / "out", log=quiet)
     assert be.submissions == []
+
+def test_local_backend_refuses_another_shards_output(tmp_path):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    job = be.submit(CFG, 0)
+    wrong = tmp_path / "scratch" / CFG.run_id / "0of2" / "shards" / "1of2"
+    wrong.mkdir(parents=True)
+    (wrong / "result.txt").write_text("wrong shard")
+    with pytest.raises(ShardError, match="expected shard folder"):
+        be.fetch_result(job, f"{CFG.run_id}/shards/0of2")
+    assert be.list_objects(f"{CFG.run_id}/shards/0of2") == []

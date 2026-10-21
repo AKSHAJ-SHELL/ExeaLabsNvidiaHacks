@@ -110,9 +110,10 @@ class LocalBackend:
 
     def fetch_result(self, job_id: str, prefix: str) -> None:
         _, i, out, _ = self._jobs[job_id]
-        src = next(iter((out / "shards").glob("*of*")), None)
-        if src is None:
-            raise ShardError(f"job {job_id} reported success but wrote no shard folder under {out}")
+        expected = Path(prefix).name
+        src = out / "shards" / expected
+        if expected.split("of", 1)[0] != str(i) or not src.is_dir():
+            raise ShardError(f"job {job_id} reported success but wrote no expected shard folder {src}")
         for f in sorted(p for p in src.rglob("*") if p.is_file()):
             self.put_object(f"{prefix}/{f.relative_to(src).as_posix()}", f.read_bytes())
 
