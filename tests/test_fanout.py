@@ -68,6 +68,15 @@ def test_gives_up_after_max_attempts_and_refuses_other_settings(tmp_path):
         run_fanout(be, FanoutConfig("r1", 3), tmp_path / "out", log=quiet)
 
 
+@pytest.mark.parametrize("content", [b"{broken", b"\xff"])
+def test_corrupt_run_manifest_refuses_resume_before_submitting(tmp_path, content):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch")
+    be.put_object("r1/run.json", content)
+    with pytest.raises(ShardError, match="invalid run manifest r1/run.json"):
+        run_fanout(be, CFG, tmp_path / "out", log=quiet)
+    assert be.submissions == []
+
+
 def test_nebius_stub_is_not_a_backend():
     with pytest.raises(NotImplementedError):
         NebiusBackendStub().submit(CFG, 0)

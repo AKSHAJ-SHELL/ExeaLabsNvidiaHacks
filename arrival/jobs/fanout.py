@@ -177,7 +177,11 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
     manifest = {"config": cfg.__dict__}
     mkey = f"{cfg.run_id}/run.json"
     if backend.exists(mkey):
-        if json.loads(backend.get_object(mkey)) != manifest:
+        try:
+            saved_manifest = json.loads(backend.get_object(mkey))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ShardError(f"invalid run manifest {mkey}: {exc}") from exc
+        if saved_manifest != manifest:
             raise ShardError(f"run {cfg.run_id!r} in storage was started with different settings; use a new run id")
     else:
         backend.put_object(mkey, json.dumps(manifest, sort_keys=True).encode())
