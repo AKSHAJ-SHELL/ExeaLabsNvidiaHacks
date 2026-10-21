@@ -147,6 +147,19 @@ def test_u_shape_runs_end_to_end_with_people(ushape, tmp_path):
     assert res["info"]["arrival_physically_valid"] is True and res["info"]["total_episodes"] == 3
 
 
+def test_u_shape_sink_cabinet_door_closes(ushape):
+    """storage_sink's door opens toward storage_b in the corner of the U. On main the push from in front meets the
+    open panel with the hand on the way in and throws the door to 1.887 rad, by its 1.9 rad stop, on every seed tried.
+    The push from the side to 40 deg first (#152) shuts it."""
+    from arrival.sim.collect import run_episode
+    from arrival.sim.tasks import finish_task
+
+    task = finish_task({"family": "close_door", "fixture": "storage_sink", "lighting": "neutral", "people": 0,
+                        "seed": 0})
+    ep = run_episode(SimEnv(ushape, task, res=32), ScriptedExpert(), task)
+    assert ep["success"] and ep["detail"]["qpos"] < np.radians(5), ep["detail"]
+
+
 def test_rotated_kitchen_runs_end_to_end_on_every_wall(rotated, tmp_path):
     fams = ["open_drawer", "open_door", "put_in_drawer", "counter_to_sink", "wipe_counter"]
     res = collect(rotated, fams, 5, tmp_path, people=1, res=32, seed=3, log=QUIET)
