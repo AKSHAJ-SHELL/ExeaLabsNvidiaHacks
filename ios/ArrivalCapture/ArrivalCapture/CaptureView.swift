@@ -82,8 +82,12 @@ final class RoomCaptureController: UIViewController, RoomCaptureViewDelegate {
 
 private struct RoomCaptureRepresentable: UIViewControllerRepresentable {
     let controller: RoomCaptureController
+    let framesRoomID: String?
 
-    func makeUIViewController(context: Context) -> RoomCaptureController { controller }
+    func makeUIViewController(context: Context) -> RoomCaptureController {
+        controller.framesRoomID = framesRoomID  // before viewDidAppear starts the session and the recorder
+        return controller
+    }
     func updateUIViewController(_ uiViewController: RoomCaptureController, context: Context) {}
 }
 
@@ -103,7 +107,7 @@ struct CaptureScreen: View {
 
     var body: some View {
         NavigationStack {
-            RoomCaptureRepresentable(controller: controller)
+            RoomCaptureRepresentable(controller: controller, framesRoomID: recordFrames ? roomName : nil)
                 .ignoresSafeArea()
                 .overlay(alignment: .bottom) {
                     if recordFrames && phase == .scanning {
@@ -146,7 +150,6 @@ struct CaptureScreen: View {
             if !saved { controller.discardFrames() }
         }
         .onAppear {
-            controller.framesRoomID = recordFrames ? roomName : nil
             controller.onResult = { room in
                 result = room
                 phase = .review
