@@ -167,6 +167,20 @@ def test_menagerie_hand_runs_the_appliance_plans(twin, family, joint, floor):
 
 
 @needs_asset
+def test_menagerie_hand_closes_the_counter_b_door(twin):
+    """The closed real fingertips reach 15 mm less than the procedural ones: with the procedural push standoff
+    (0.03) the counter_b door stalled at 0.45 rad (seed 5); the Menagerie standoff shuts it."""
+    from arrival.sim.tasks import finish_task, make_tasks
+
+    tasks = [finish_task(t) for t in make_tasks(twin, ["close_door"], 4, seed=5, people=0, log=lambda *_: None)]
+    task = next(t for t in tasks if "counter_b" in str(t))
+    env = SimEnv(twin, dict(task), res=32, arm="menagerie")
+    ep = run_episode(env, ScriptedExpert(), dict(task))
+    assert ep["success"] and ep["detail"]["joint"] == "counter_b_door" and ep["detail"]["qpos"] < 0.05, ep["detail"]
+    assert menagerie.HAND["door_push"] < robot.HAND["door_push"]
+
+
+@needs_asset
 def test_menagerie_dataset_says_which_arm_made_it(twin, tmp_path):
     from arrival.sim.collect import collect
 

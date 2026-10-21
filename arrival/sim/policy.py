@@ -165,7 +165,8 @@ class ScriptedExpert(Policy):
             r = np.linalg.norm((h - hinge)[:2])
             a_open = np.arctan2(*(h - hinge)[[1, 0]])
             s, up = self.seg_steps, np.array([0, 0, 1.0])
-            grasp = np.array([0, 0, 0.04])
+            hand = getattr(env, "hand", HAND)
+            grasp = np.array([0, 0, hand["door_z"]])
 
             def pt(a):
                 return hinge + np.array([r * np.cos(a), r * np.sin(a), h[2] - hinge[2]]) + grasp
@@ -184,11 +185,11 @@ class ScriptedExpert(Policy):
                 return ik.tilted(nrm(a)[:2], ax, np.radians(10))
 
             sweep = float(self.open_at) + np.radians(3)  # a little past closed so the latch gap closes
-            out = [(pt(a_open) + 0.03 * nrm(a_open) + 0.15 * up, ori(a_open), c, s),
-                   (pt(a_open) + 0.03 * nrm(a_open), ori(a_open), c, s)]
+            out = [(pt(a_open) + hand["door_push"] * nrm(a_open) + 0.15 * up, ori(a_open), c, s),
+                   (pt(a_open) + hand["door_push"] * nrm(a_open), ori(a_open), c, s)]
             for k in range(1, 9):
                 a = a_open + sweep * k / 8
-                out.append((pt(a) + 0.03 * nrm(a), ori(a), c, s // 2, k < 8))
+                out.append((pt(a) + hand["door_push"] * nrm(a), ori(a), c, s // 2, k < 8))
             out.append((out[-1][0] + 0.15 * up, out[-1][1], o, s))
             return out
         if fam == "open_door":
