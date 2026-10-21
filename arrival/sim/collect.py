@@ -459,7 +459,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
                    "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res,
                    "shard": list(shard) if shard else None}
     journal = Journal(out_dir / "progress" / f"{room}_sim.jsonl")
-    done = journal.start(fingerprint, resume)
+    done = journal.start(fingerprint, resume, tasks[lo:hi])
     writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"), provenance=prov,
                               base=base, resume=bool(done), arm=arm)
     per: dict = {}

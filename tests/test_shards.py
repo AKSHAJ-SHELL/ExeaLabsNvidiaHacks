@@ -57,6 +57,17 @@ def test_journal_resume_cuts_a_torn_line_and_refuses_other_settings(tmp_path):
     assert Journal(tmp_path / "none.jsonl").start(FP, resume=True) == []  # no journal: nothing to resume
 
 
+def test_journal_resume_rejects_out_of_order_task_records(tmp_path):
+    j = Journal(tmp_path / "progress.jsonl")
+    j.start(FP, resume=False)
+    j.append({"task_id": "t1", "family": "a", "outcome": "miss"})
+    expected = [{"task_id": "t0", "family": "a"}, {"task_id": "t1", "family": "a"}]
+    before = j.path.read_bytes()
+    with pytest.raises(ShardError, match="does not match the task sequence"):
+        j.start(FP, resume=True, expected_tasks=expected)
+    assert j.path.read_bytes() == before
+
+
 # ---- merge, on synthetic episodes (no MuJoCo) ----
 
 def _episode(n, seed):
