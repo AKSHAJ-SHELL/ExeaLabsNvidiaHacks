@@ -32,6 +32,7 @@ def reference(tmp_path_factory):
     return run_fanout(be, CFG, root / "out", log=quiet)
 
 
+@pytest.mark.render  # the sim renders in a child process, where --no-render's patch does not reach
 def test_failed_shard_is_retried_and_dataset_is_valid(reference, tmp_path):
     be = LocalBackend(tmp_path / "store", tmp_path / "scratch", fail_first={1})
     res = run_fanout(be, CFG, tmp_path / "out", log=quiet)
@@ -41,6 +42,7 @@ def test_failed_shard_is_retried_and_dataset_is_valid(reference, tmp_path):
     assert _frames(res["dataset"]) == _frames(reference["dataset"])
 
 
+@pytest.mark.render  # the sim renders in a child process, where --no-render's patch does not reach
 def test_killed_run_resumes_skipping_done_shards(reference, tmp_path):
     be = LocalBackend(tmp_path / "store", tmp_path / "scratch")
 
