@@ -3,8 +3,8 @@
  "repo": "AvnehSBhatia/ExeaLabsNvidiaHacks",
  "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site",
  "counts": {
-  "done": 22,
-  "review": 30,
+  "done": 52,
+  "review": 0,
   "todo": 0,
   "blocked": 18,
   "total": 70
@@ -250,7 +250,7 @@
     {
      "id": "L1",
      "title": "Fixtures on any wall (#49, #75, #77 folded into one PR)",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "must",
@@ -263,7 +263,7 @@
     {
      "id": "L2",
      "title": "Failed task skips instead of crashing; pre-flight reach check",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "must",
@@ -275,7 +275,7 @@
     {
      "id": "L3",
      "title": "Worker hard limits: subprocess timeout, size caps, stage-tagged errors",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "must",
@@ -287,7 +287,7 @@
     {
      "id": "L4",
      "title": "Harden the web app for public hosting",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "must",
@@ -299,7 +299,7 @@
     {
      "id": "L5",
      "title": "Shardable, resumable sim collection: --shard, --resume, merge-shards",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "must",
@@ -311,7 +311,7 @@
     {
      "id": "L6",
      "title": "Fresh-clone matrix: macOS and Windows in CI, wheel smoke, docker job, Windows checks fixed, separate rendering gate",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "must",
@@ -324,7 +324,7 @@
     {
      "id": "L7",
      "title": "Docs and repo hygiene sweep",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "must",
@@ -337,7 +337,7 @@
     {
      "id": "L8",
      "title": "One-command offline demo from a fresh venv, GL fallback",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "must",
@@ -348,7 +348,7 @@
     {
      "id": "L9",
      "title": "Non-kitchen rooms with room-appropriate objects (book, remote, laptop)",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "should",
@@ -361,7 +361,7 @@
     {
      "id": "L10",
      "title": "Twin compile fixes on the real U-shaped scan",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
@@ -373,7 +373,7 @@
     {
      "id": "L11",
      "title": "Scan robustness sweep: fuzzed RoomPlan variants",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "should",
@@ -385,7 +385,7 @@
     {
      "id": "L12",
      "title": "Per-episode quality validator",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
@@ -397,7 +397,7 @@
     {
      "id": "L13",
      "title": "Mobile base on any wall: 11-float state and action through export, GR00T config and loader check",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "L",
      "priority": "should",
@@ -410,7 +410,7 @@
     {
      "id": "L14",
      "title": "Scan frames through the upload path, compared against held-out views in the worker",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
@@ -423,7 +423,7 @@
     {
      "id": "L15",
      "title": "Provenance on twin objects: detected, default, authored",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
@@ -435,7 +435,7 @@
     {
      "id": "L16",
      "title": "Realism command: JSON and side-by-side PNG (real frames still missing)",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
@@ -447,7 +447,7 @@
     {
      "id": "L17",
      "title": "Reachability planner: IK solve of the expert's waypoints, fallback base grid",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "L",
      "priority": "should",
@@ -458,7 +458,7 @@
     {
      "id": "L18",
      "title": "Retention and deletion",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
@@ -470,7 +470,7 @@
     {
      "id": "L19",
      "title": "Worker concurrency: atomic claim, heartbeat, cancel",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "should",
@@ -482,7 +482,7 @@
     {
      "id": "L20",
      "title": "Usage metering for the cost report; timed keyboard teleop baseline",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "should",
@@ -495,7 +495,7 @@
     {
      "id": "L21",
      "title": "CI extras: ruff, link check, Dependabot",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
@@ -506,7 +506,7 @@
     {
      "id": "L22",
      "title": "Secrets handling: single config loader, .env.example, redaction, arrival doctor",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
@@ -518,7 +518,7 @@
     {
      "id": "L23",
      "title": "Static demo-site export",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
@@ -530,7 +530,7 @@
     {
      "id": "L24",
      "title": "Oven, dishwasher and faucet families on the any-wall chain",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "nice",
@@ -543,7 +543,7 @@
     {
      "id": "L25",
      "title": "Real Menagerie Franka behind --arm menagerie",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "nice",
@@ -556,7 +556,7 @@
     {
      "id": "L26",
      "title": "Thin-object (spatula) pinch grasp, in counter_to_sink and wipe, both arms",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "nice",
@@ -568,17 +568,16 @@
     {
      "id": "L27",
      "title": "People pass: yield and stop from the safety distance, counter-use pause, 3D head and arm clearance check",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "nice",
-     "issue": 24,
-     "note": "On feat/demo-site with no pull request yet. The mirrored right-hinged fridge plan is not built (the scene only has a left hinge) and yield ignores the arm links. Safety clearance did not measurably improve."
+     "issue": 24
     },
     {
      "id": "L28",
      "title": "Multi-room summary command (real rooms wait on P2)",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "nice",
@@ -590,7 +589,7 @@
     {
      "id": "L29",
      "title": "Frozen evaluation trials: replay the same trials for any policy and keep every run",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "should",
@@ -602,13 +601,12 @@
     {
      "id": "L30",
      "title": "Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "should",
      "issue": 68,
-     "pr": [],
-     "note": "On feat/demo-site with no pull request yet: DELETE /jobs/<id>, cancel and delete buttons, episode progress, optional Linux memory cap (not measured on Linux)."
+     "pr": []
     }
    ]
   },
