@@ -76,6 +76,12 @@ def test_merged_shards_keep_the_noise_level_and_refuse_a_mix(twin, tmp_path):
     info = json.loads((out["dataset"] / "meta" / "info.json").read_text())
     assert info["arrival_exec_noise_rad"] == 0.02
     assert info["arrival_provenance"]["run"]["exec_noise"] == 0.02  # the shards' provenance survives the merge
+    for f in (tmp_path / "a" / "shards").glob("*/datasets/*/meta/info.json"):  # shards written before the info key existed
+        d = json.loads(f.read_text())
+        d.pop("arrival_exec_noise_rad")
+        f.write_text(json.dumps(d))
+    legacy = merge_shards([str(tmp_path / "a")], tmp_path / "merged_legacy")
+    assert legacy["info"]["arrival_exec_noise_rad"] == 0.02  # recovered from the provenance block
     shards(tmp_path / "b", lambda i: 0.02 if i == 0 else 0.0)
     with pytest.raises(ShardError, match="arrival_exec_noise_rad"):
         merge_shards([str(tmp_path / "b")], tmp_path / "merged_b")

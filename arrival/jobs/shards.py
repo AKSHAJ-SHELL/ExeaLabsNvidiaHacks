@@ -145,6 +145,11 @@ def _load(path: Path) -> dict:
             "report": json.loads(report.read_text()) if report.is_file() else None}
 
 
+def _exec_noise(info: dict) -> float:
+    """The DART level of a shard: the info key, or (shards written before it existed) the provenance block's."""
+    return float(info.get("arrival_exec_noise_rad") or ((info.get("arrival_provenance") or {}).get("run") or {}).get("exec_noise") or 0.0)
+
+
 def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=print) -> dict:
     """Join finished shard datasets into out_dir/datasets/<room>_sim. Refuses an incomplete or mixed set (a missing
     shard, shards of different runs, an unfinished shard with no info.json) instead of writing a short dataset.
@@ -167,9 +172,12 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
             if s["shard"].get(k) != first["shard"].get(k):
                 raise ShardError(f"shard {s['shard']['index']} differs from shard 0 in {k}: "
                                  f"{s['shard'].get(k)!r} vs {first['shard'].get(k)!r}; they are not from one run")
-        for k in ("arrival_room_id", "fps", "features", "arrival_exec_noise_rad"):
+        for k in ("arrival_room_id", "fps", "features"):
             if s["info"].get(k) != first["info"].get(k):
                 raise ShardError(f"shard {s['shard']['index']} differs from shard 0 in info.{k}")
+        if _exec_noise(s["info"]) != _exec_noise(first["info"]):
+            raise ShardError(f"shard {s['shard']['index']} differs from shard 0 in arrival_exec_noise_rad: "
+                             f"{_exec_noise(s['info'])!r} vs {_exec_noise(first['info'])!r}; they are not from one run")
         if s["modality"] != first["modality"] or s["embodiment"] != first["embodiment"]:
             raise ShardError(f"shard {s['shard']['index']} has a different modality or embodiment than shard 0")
     cursor = 0
@@ -217,8 +225,8 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
                "skip_reasons": reasons[:SKIP_REASONS_KEPT]}
     attempts = sum(i.get("arrival_attempts", 0) for i in infos)
     merged = {"merged_shards": n, "merged_total_tasks": first["shard"]["total_tasks"]}
-    if info0.get("arrival_exec_noise_rad"):  # DART shards (they agree, checked above): the merged set is just as perturbed
-        merged["exec_noise_rad"] = info0["arrival_exec_noise_rad"]
+    if _exec_noise(info0):  # DART shards (they agree, checked above): the merged set is just as perturbed
+        merged["exec_noise_rad"] = _exec_noise(info0)
     out_info = w.finish(attempts, skipped, merged)
     log(f"[merge] {n} shards -> {root}: {out_info['total_episodes']} episodes, {out_info['total_frames']} frames")
     rp = _merged_report(shards, out_info, skipped, Path(out_dir) / "reports" / f"{room}_sim.json", n)
