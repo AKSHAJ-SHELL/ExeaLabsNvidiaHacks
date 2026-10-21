@@ -399,9 +399,33 @@ def robot_drawer_z() -> float:
     return CARCASS_H - 0.01
 
 
-def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: list | None = None) -> dict:
+EXEC_NOISE_TAU = 10.0  # steps (0.5 s): how long a joint-noise excursion lasts
+EXEC_NOISE_SPREAD = (0.4, 1.6)  # each episode draws its noise level from this range times --dart, for a spread of off-plan states
+EXEC_NOISE_NEAR_GRIP = 0.25  # noise scale within 12 steps of a gripper command: a grasp needs a steady arm
+GRIP_WINDOW = 12
+
+
+def _grip_events(plan) -> np.ndarray:
+    """Steps at which a scripted plan opens or closes the gripper (empty for a policy without a plan)."""
+    if not plan:
+        return np.zeros(0, dtype=int)
+    return np.where(np.abs(np.diff([float(p[7]) for p in plan])) > 1e-6)[0]
+
+
+def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: list | None = None,
+                exec_noise: float = 0.0) -> dict:
+    """exec_noise > 0 (rad, the typical std of smooth noise on the 7 arm joint targets; each episode uses 0.4 to 1.6
+    times it) is DART: the arm is driven by
+    target + noise, but the dataset keeps the clean target as the action, so a trained policy sees states that are
+    slightly off the plan, each labelled with the move back onto it. The noise is seeded from the task, shrinks
+    near gripper commands, and the physics check still has to pass, so a perturbation that spoils a grasp drops
+    the episode like any other failure."""
+    rng = np.random.default_rng(int(task.get("seed", 0)) + 1) if exec_noise > 0 else None
+    level = exec_noise * rng.uniform(EXEC_NOISE_SPREAD[0], EXEC_NOISE_SPREAD[1]) if rng is not None else 0.0  # per episode
+    rho, drift, events = float(np.exp(-1.0 / EXEC_NOISE_TAU)), np.zeros(7), None
     try:
         policy.reset(env, task)
+        events = _grip_events(getattr(policy, "plan", None)) if exec_noise > 0 else None
         env.safety.reset()
         states, actions, frames, people = [], [], {c: [] for c in env.cameras}, []
         tail = 0
@@ -417,7 +441,14 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
                 frames[c].append(obs[c])
             if preview is not None:
                 preview.append(env.render("overview", big=True))
-            env.step(a)
+            if rng is not None:
+                near = len(events) > 0 and np.min(np.abs(events - t)) < GRIP_WINDOW
+                drift = rho * drift + np.sqrt(1 - rho * rho) * level * (EXEC_NOISE_NEAR_GRIP if near else 1.0) * rng.standard_normal(7)
+                driven = a.copy()
+                driven[:7] += drift
+                env.step(driven)
+            else:
+                env.step(a)
             people.append(env.people_xy)
             if getattr(policy, "done", lambda: False)():
                 tail += 1
@@ -436,7 +467,8 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             policy_name: str = "scripted", res: int = 128, seed: int = 0, save_preview: bool = False,
             planner_name: str = "rule", cache_path: str | Path | None = None,
             split: str = "train", use_generated_instructions: bool = False, base: str = "fixed",
-            shard: tuple[int, int] | None = None, resume: bool = False, arm: str = "procedural", log=print) -> dict:
+            shard: tuple[int, int] | None = None, resume: bool = False, arm: str = "procedural",
+            exec_noise: float = 0.0, log=print) -> dict:
     """Collect `episodes` attempts; failed attempts are dropped and counted. A task whose stand spot or reach the
     pre-flight rejects never runs (`skipped_unreachable`, counted per rejected variation), and one whose env build
     or rollout raises is logged with its reason, counted as `skipped_error` and never written, so a bad geometry
@@ -470,11 +502,12 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     from arrival.export.provenance import run_record
 
     prov = run_record(twin, seed=seed, generator="mujoco_scripted_ik", policy=policy_name, planner=planner_name,
-                      episodes=episodes, families=list(families), people=people, res=res, split=split)
+                      episodes=episodes, families=list(families), people=people, res=res, split=split,
+                      exec_noise=exec_noise)
     fingerprint = {"room": room, "families": list(families), "episodes": episodes, "seed": seed, "people": people,
                    "policy": policy_name, "planner": planner_name, "split": split,
                    "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res,
-                   "shard": list(shard) if shard else None}
+                   "shard": list(shard) if shard else None, "exec_noise": exec_noise}
     journal = Journal(out_dir / "progress" / f"{room}_sim.jsonl")
     done = journal.start(fingerprint, resume, tasks[lo:hi])
     writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"), provenance=prov,
@@ -535,7 +568,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             try:
                 if env.people_note:
                     log(f"[sim] {task['task_id']}: {env.people_note}")
-                ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
+                ep = run_episode(env, policy, task, preview=preview if i == 0 else None, exec_noise=exec_noise)
             finally:
                 env.close()  # idempotent; frees both GL renderers when the policy or the episode raises
         except VLANotConfigured:
@@ -579,7 +612,10 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
                    "episodes": episodes, "seed": seed, "families": list(families), "people": people,
                    "policy": policy_name, "planner": planner_name, "split": split,
                    "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res}) if shard else None
-    info = writer.finish(attempts, skipped, {"shard": shard_info} if shard else None)
+    extra = {"shard": shard_info} if shard else {}
+    if exec_noise > 0:  # DART: say so in info.json, next to arrival_generator, not only in the provenance block
+        extra["exec_noise_rad"] = exec_noise
+    info = writer.finish(attempts, skipped, extra or None)
     succ = sum(f["successes"] for f in per.values())
     report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name,
               "planner": planner_name, "attempts": attempts, **skipped,

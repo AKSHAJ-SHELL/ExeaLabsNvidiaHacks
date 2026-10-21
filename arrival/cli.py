@@ -221,7 +221,8 @@ def cmd_sim(a) -> int:
                       seed=a.seed, save_preview=a.save_preview,
                       planner_name=a.planner, split=a.split,
                       use_generated_instructions=(a.instructions == "nemotron"), base=getattr(a, "base", "fixed"),
-                      shard=shard, resume=getattr(a, "resume", False), arm=getattr(a, "arm", "procedural"))
+                      shard=shard, resume=getattr(a, "resume", False), arm=getattr(a, "arm", "procedural"),
+                      exec_noise=getattr(a, "dart", 0.0))
     except ShardError as e:
         print(e, file=sys.stderr)
         return EXIT_USAGE
@@ -579,6 +580,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "join with merge-shards")
     m.add_argument("--resume", action="store_true",
                    help="continue a killed run from its progress journal instead of starting over (same settings)")
+    m.add_argument("--dart", type=float, default=0.0, metavar="RAD",
+                   help="DART: drive the arm with smooth noise, typical std RAD (each episode uses 0.4x to 1.6x), on the joint targets while the dataset "
+                        "keeps the clean targets, so a policy sees off-plan states labelled with the way back; "
+                        "0 (default) is off, 0.02 to 0.05 is a useful range. Recorded in the dataset provenance")
     m.add_argument("--tavily", action="store_true", help="Enrich digital twin and VLM planning with Tavily appliance research")
     m.set_defaults(fn=cmd_sim)
     f = sub.add_parser("fanout", help="run sim shards on a job backend, resumable, then merge (local by default)")
