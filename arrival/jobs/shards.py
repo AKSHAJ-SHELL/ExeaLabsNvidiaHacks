@@ -117,7 +117,27 @@ class Journal:
 # ---- merge ----
 
 def _jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows = []
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        if line.strip():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ShardError(f"{path}: line {number} is not JSON: {exc.msg}") from exc
+            if not isinstance(row, dict):
+                raise ShardError(f"{path}: line {number} must be a JSON object")
+            rows.append(row)
+    return rows
+
+
+def _json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ShardError(f"{path}: invalid JSON: {exc.msg}") from exc
+    if not isinstance(value, dict):
+        raise ShardError(f"{path}: expected a JSON object")
+    return value
 
 
 def _find_dataset(path: Path) -> Path:
@@ -145,16 +165,16 @@ def expand_sources(paths: list[str | Path]) -> list[Path]:
 
 def _load(path: Path) -> dict:
     root = _find_dataset(path)
-    info = json.loads((root / "meta" / "info.json").read_text())
+    info = _json(root / "meta" / "info.json")
     shard = info.get("arrival_shard")
     if not isinstance(shard, dict):
         raise ShardError(f"{root} is not a shard dataset (no arrival_shard in info.json); "
                          f"produce it with arrival sim --shard i/n")
     report = root.parent.parent / "reports" / f"{info.get('arrival_room_id')}_sim.json"
     return {"root": root, "info": info, "shard": shard, "episodes": _jsonl(root / "meta" / "episodes.jsonl"),
-            "modality": json.loads((root / "meta" / "modality.json").read_text()),
-            "embodiment": json.loads((root / "meta" / "embodiment.json").read_text()),
-            "report": json.loads(report.read_text()) if report.is_file() else None}
+            "modality": _json(root / "meta" / "modality.json"),
+            "embodiment": _json(root / "meta" / "embodiment.json"),
+            "report": _json(report) if report.is_file() else None}
 
 
 def _exec_noise(info: dict) -> float:
