@@ -120,6 +120,21 @@ def test_shim_observation_and_chunk_mapping():
     assert chunk.shape == (6, 8) and chunk[0, 7] == 1.0
 
 
+def test_shim_batches_the_observation_and_reduces_samples():
+    req = decode_request(encode_request(_obs(res=16), "task"))
+    obs = gr00t_shim.to_observation(req, batch=5)
+    assert obs["video"]["ego_view"].shape == (5, 1, 16, 16, 3) and obs["state"]["single_arm"].shape == (5, 1, 7)
+    assert obs["language"]["annotation.human.task_description"] == [["task"]] * 5
+    one = gr00t_shim.to_observation(req)
+    assert np.array_equal(obs["state"]["gripper"][2], one["state"]["gripper"][0])
+    arm = np.stack([np.full((4, 7), v) for v in (0.0, 1.0, 5.0)])  # [B=3, T=4, 7]
+    act = {"single_arm": arm, "gripper": np.ones((3, 4, 1))}
+    assert np.allclose(gr00t_shim.to_chunk(act)[:, :7], 2.0)  # mean
+    assert np.allclose(gr00t_shim.to_chunk(act, "median")[:, :7], 1.0)
+    with pytest.raises(ValueError):
+        gr00t_shim.to_chunk(act, "mode")
+
+
 def test_shim_exits_without_gr00t(monkeypatch):
     import sys
     monkeypatch.setitem(sys.modules, "gr00t", None)
