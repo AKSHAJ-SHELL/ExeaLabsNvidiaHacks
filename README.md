@@ -144,7 +144,7 @@ Cloud accounts, billing or deploy access.
 | id | what | size | priority | status | PRs or issue |
 |---|---|---|---|---|---|
 | C1 | Nebius Serverless Jobs fan-out with resume, then one real small run | L | must | Blocked | issue #66 |
-| C2 | Hosted HTTPS demo with a pre-seeded room The smoke test for a running server is in review (#115). The deployment itself is still blocked. | M | must | Blocked | #115 |
+| C2 | Hosted HTTPS demo with a pre-seeded room Smoke test (#115), /healthz, docker-compose.yml and docs/DEPLOY.md are written and tested on a laptop. TLS, the domain, a real seeded room and a run on a host are still blocked. | M | must | Blocked | #115 |
 | C3 | Measured time and cost per demo against the teleop baseline | S | should | Blocked | issue #67 |
 | C4 | Detect small objects from posed frames with a VLM | M | should | Blocked | issue #60 |
 | C5 | Real Cosmos variation on a tenth of validated frames | M | nice | Blocked | issue #70 |

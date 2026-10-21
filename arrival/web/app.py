@@ -428,6 +428,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
         if path == "/":
             return self._index()
+        if path == "/healthz":  # liveness for a proxy or container healthcheck: no disk, no job data
+            return self._json(200, {"status": "ok"})
         parts = path.strip("/").split("/")
         if len(parts) == 2 and parts[0] == "previews":
             return self._preview_file(parts[1])

@@ -720,7 +720,7 @@
      "pr": [
       115
      ],
-     "note": "The smoke test for a running server is in review (#115). The deployment itself is still blocked."
+     "note": "Smoke test (#115), /healthz, docker-compose.yml and docs/DEPLOY.md are written and tested on a laptop. TLS, the domain, a real seeded room and a run on a host are still blocked."
     },
     {
      "id": "C3",

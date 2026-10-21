@@ -41,6 +41,12 @@ def test_index_lists_hero_kitchen(server):
     assert b"hero_kitchen" in body
 
 
+def test_healthz_is_ok_and_leaks_nothing(server):
+    srv, _ = server
+    status, body = _get(srv, "/healthz")
+    assert status == 200 and json.loads(body) == {"status": "ok"}
+
+
 def test_room_page_shows_flag(server):
     srv, _ = server
     status, body = _get(srv, "/rooms/hero_kitchen")
