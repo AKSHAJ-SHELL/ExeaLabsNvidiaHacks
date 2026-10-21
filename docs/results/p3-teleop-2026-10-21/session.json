@@ -1,0 +1,24 @@
+{
+  "revision": "db26a01ce16dd848a900aa5cf145296ee03e4a3e",
+  "started_utc": "2026-10-21T04:24:59.0452202Z",
+  "arguments": [
+    "--out",
+    "out/p3/measured/20261021-042458-8828084",
+    "--operator-usd-per-hour",
+    "2",
+    "--successes",
+    20,
+    "--room",
+    "hero_kitchen",
+    "--seed",
+    "0",
+    "--people",
+    "0",
+    "--res",
+    "128",
+    "--assumption",
+    "Human keyboard input. Hourly rate is an operator-supplied assumption, not an invoiced cost.",
+    "--record"
+  ],
+  "mode": "measured"
+}

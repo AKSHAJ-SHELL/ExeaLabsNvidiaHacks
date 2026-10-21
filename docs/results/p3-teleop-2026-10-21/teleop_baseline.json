@@ -1,0 +1,18 @@
+{
+  "task": "counter_to_sink",
+  "room": "hero_kitchen",
+  "n_success": 20,
+  "n_attempts": 26,
+  "operator_seconds_total": 1230.359,
+  "cost_basis_usd": 0.6835,
+  "operator_usd_per_hour": 2.0,
+  "setup_usd": 0.0,
+  "setup_assumptions": [
+    "Human keyboard input. Hourly rate is an operator-supplied assumption, not an invoiced cost.",
+    "keyboard teleop in the MuJoCo twin of hero_kitchen, 0 walking people, success by the sim oracle",
+    "operator time per attempt runs from scene ready to judgement and includes failed attempts"
+  ],
+  "measured": true,
+  "created_unix": 1792557942,
+  "attempts_log": "reports/hero_kitchen_teleop_attempts.jsonl"
+}

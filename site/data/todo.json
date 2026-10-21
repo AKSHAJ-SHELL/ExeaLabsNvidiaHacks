@@ -3,10 +3,10 @@
  "repo": "AvnehSBhatia/ExeaLabsNvidiaHacks",
  "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site",
  "counts": {
-  "done": 52,
+  "done": 53,
   "review": 0,
   "todo": 0,
-  "blocked": 18,
+  "blocked": 17,
   "total": 70
  },
  "prs": {
@@ -781,12 +781,12 @@
     {
      "id": "P3",
      "title": "Twenty timed teleoperated counter_to_sink demos",
-     "status": "blocked",
+     "status": "done",
      "owner_kind": "people",
      "size": "S",
      "priority": "should",
      "issue": 67,
-     "note": "The timer tool is in review as part of L20 (#113); the demos need a person."
+     "note": "20 successes in 26 attempts; 1230.359 operator seconds including failures. Basic validation passes; one long episode is retained. Evidence: docs/results/p3-teleop-2026-10-21/. C3 still needs the cloud comparison."
     },
     {
      "id": "P4",
