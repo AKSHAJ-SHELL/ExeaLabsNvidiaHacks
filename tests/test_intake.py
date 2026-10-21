@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 from arrival.scan import intake as it
+from arrival.twin.accuracy import load_measurements
 
 from conftest import REPO
 
@@ -76,8 +77,8 @@ def test_intake_lands_a_valid_folder_without_exif(tmp_path, photos, clean_plan):
         assert im.size == (1600, 1200)
     with Image.open(d / "reference_2.jpg") as im:
         assert im.size == (800, 600)  # never upscaled
-    assert json.loads((d / "measurements.json").read_text()) == {
-        "units": "meters", "source": "tape_measure", "counter_length": 3.2, "counter_height": 0.92, "sink_width": 0.55}
+    assert load_measurements(d / "measurements.json") == {
+        "counter_length_m": 3.2, "counter_height_m": 0.92, "sink_width_m": 0.55}
     assert not list((tmp_path / "scans").glob(".*"))
 
 
@@ -147,6 +148,18 @@ def test_validate_names_each_missing_or_bad_notes_field(tmp_path, photos):
     assert any("Counter height" in p and "'92'" in p for p in it.validate_scan_dir(d))
     notes.unlink()
     assert "notes.md is missing" in it.validate_scan_dir(d)
+
+
+def test_intake_requires_accuracy_file_and_matching_tape_notes(tmp_path, photos, clean_plan):
+    d = _run(tmp_path, photos, plan=clean_plan)["dir"]
+    measures = d / "measurements.json"
+    good = measures.read_text()
+    measures.unlink()
+    assert any("measurements.json is missing" in p for p in it.validate_scan_dir(d))
+    measures.write_text(good.replace('"sink_width_m": 0.55', '"sink_width_m": 0.65'))
+    assert any("sink_width does not match" in p for p in it.validate_scan_dir(d))
+    measures.write_text('{"counter_length": 3.2}')
+    assert any("measurements.json is invalid" in p for p in it.validate_scan_dir(d))
 
 
 def test_validate_flags_gps_photo_and_bad_roomplan(tmp_path, photos):

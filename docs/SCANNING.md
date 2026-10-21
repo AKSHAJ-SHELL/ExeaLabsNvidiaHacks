@@ -26,6 +26,7 @@ scans/<room_id>/
   roomplan.json       # CapturedRoom JSON, as exported
   room.usdz           # optional; do not commit large files without review
   notes.md
+  measurements.json   # counter_length_m, counter_height_m, sink_width_m; tape values in metres
   reference_1.jpg
   reference_2.jpg
 ```
@@ -53,6 +54,11 @@ Use this `notes.md` template:
 ```
 
 Use fixture IDs from the JSON in the last column. If a feature is not recognized by RoomPlan, write `missing`; do not substitute a guessed dimension. Keep the signed consent record outside this public repo.
+
+The intake command writes `measurements.json` from `--measure` using the keys
+`counter_length_m`, `counter_height_m` and `sink_width_m` expected by
+`scripts/scan_accuracy.py`. Intake reports NO-GO if a tape value is absent or
+its value in `notes.md` differs from the JSON.
 
 ## Review before committing
 
