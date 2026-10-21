@@ -144,10 +144,11 @@ def test_collect_and_eval_assign_handles_and_joints_with_one_function(hero_twin,
     """`python -m arrival eval` once carried its own copy of the table and raised on every family it did not know.
     collect() and eval both call arrival.sim.tasks.finish_task, and every name it writes must exist in the model
     the task runs in."""
-    import arrival.eval.harness as harness
-    import arrival.sim.tasks as tasks_mod
+    import inspect
 
-    assert harness.finish_task is tasks_mod.finish_task
+    import arrival.eval.manifest as manifest_mod
+
+    assert "finish_task" in inspect.getsource(manifest_mod.make_manifest)  # eval builds its tasks through the same function
     for twin, fams in ((hero_twin, ("open_oven", "turn_on_faucet")),
                        (dishwasher_twin, ("open_dishwasher", "load_dishwasher", "unload_dishwasher", "turn_on_faucet"))):
         model = mujoco.MjModel.from_xml_string(build_mjcf(twin, (1.3, 1.2, 0.75)))

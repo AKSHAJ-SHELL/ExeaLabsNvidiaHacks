@@ -182,7 +182,7 @@ mujoco = pytest.importorskip("mujoco")
 from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim import collect as collect_mod  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
-from tests.conftest import SCANS  # noqa: E402
+from conftest import SCANS  # noqa: E402
 
 RUN = dict(families=["counter_to_sink", "open_drawer"], episodes=4, people=0, res=32, seed=3, log=lambda *_: None)
 

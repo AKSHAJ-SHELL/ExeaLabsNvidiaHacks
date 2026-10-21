@@ -14,7 +14,7 @@ def rollouts(monkeypatch):
     seen = []
 
     class Env:
-        def __init__(self, twin, task, res):
+        def __init__(self, twin, task, res, base="fixed", arm="procedural"):
             seen.append((copy.deepcopy(twin), copy.deepcopy(task), res))
 
         def __enter__(self):
@@ -148,7 +148,7 @@ def test_invalid_manifest_fails_before_rollout(hero_twin, tmp_path, rollouts, ch
     elif change == "duplicate":
         frozen["tasks"][1]["task_id"] = frozen["tasks"][0]["task_id"]
     elif change == "base":
-        frozen["settings"]["base"] = "mobile"
+        frozen["settings"]["base"] = "sideways"
     elif change == "omitted":
         frozen["omitted_families"] = ["open_drawer"]
     elif change == "missing":

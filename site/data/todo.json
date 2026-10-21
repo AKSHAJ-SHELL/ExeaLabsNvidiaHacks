@@ -1,17 +1,17 @@
 {
- "as_of": "2026-10-19",
+ "as_of": "2026-10-20",
  "repo": "AvnehSBhatia/ExeaLabsNvidiaHacks",
- "source": "README \"Code to-do before submission\" on docs/code-todo (PR #95), gh pr list and gh issue list on 2026-10-19",
+ "source": "README to-do, gh pr list and gh issue list on 2026-10-20, with PRs #96 to #100, #102 to #110 merged into feat/demo-site",
  "counts": {
   "done": 22,
-  "review": 20,
-  "todo": 7,
+  "review": 26,
+  "todo": 4,
   "blocked": 18,
-  "total": 67
+  "total": 70
  },
  "prs": {
   "merged": 44,
-  "open": 15,
+  "open": 23,
   "closed_unmerged": 4
  },
  "groups": [
@@ -245,11 +245,11 @@
   {
    "id": "review",
    "title": "In review",
-   "blurb": "Open PRs against main. Not merged, so not counted as done.",
+   "blurb": "Pull requests against main. All are merged into feat/demo-site and none is on main yet, so none counts as done.",
    "items": [
     {
      "id": "L1",
-     "title": "Fixtures on any wall (#49, #75, #77 together)",
+     "title": "Fixtures on any wall (#49, #75, #77 folded into one PR)",
      "status": "review",
      "owner_kind": "laptop",
      "size": "M",
@@ -257,7 +257,8 @@
      "pr": [
       99
      ],
-     "issue": 42
+     "issue": 42,
+     "note": "Replaces #49, #75 and #77."
     },
     {
      "id": "L2",
@@ -296,14 +297,27 @@
      "issue": 68
     },
     {
+     "id": "L5",
+     "title": "Shardable, resumable sim collection: --shard, --resume, merge-shards",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "must",
+     "issue": 66,
+     "pr": [
+      104
+     ]
+    },
+    {
      "id": "L6",
-     "title": "Fresh-clone matrix: macOS and Windows in CI, wheel smoke, docker job",
+     "title": "Fresh-clone matrix: macOS and Windows in CI, wheel smoke, docker job, Windows checks fixed, separate rendering gate",
      "status": "review",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "must",
      "pr": [
-      98
+      98,
+      108
      ],
      "issue": 72
     },
@@ -329,6 +343,19 @@
      "pr": [
       98
      ]
+    },
+    {
+     "id": "L9",
+     "title": "Non-kitchen rooms with room-appropriate objects (book, remote, laptop)",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "pr": [
+      105
+     ],
+     "issue": 56,
+     "note": "Replaces #57."
     },
     {
      "id": "L10",
@@ -367,14 +394,28 @@
      "issue": 72
     },
     {
+     "id": "L13",
+     "title": "Mobile base on any wall: 11-float state and action through export, GR00T config and loader check",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "L",
+     "priority": "should",
+     "pr": [
+      103
+     ],
+     "issue": 34,
+     "note": "Replaces #33 and #36. The fixed base stays the default; run the fixed-base GR00T check (G1) before training on the 11-float schema."
+    },
+    {
      "id": "L14",
-     "title": "Scan frames through the upload path",
+     "title": "Scan frames through the upload path, compared against held-out views in the worker",
      "status": "review",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
      "pr": [
-      97
+      97,
+      110
      ],
      "issue": 58
     },
@@ -473,6 +514,32 @@
      "issue": 68
     },
     {
+     "id": "L24",
+     "title": "Oven, dishwasher and faucet families on the any-wall chain",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "nice",
+     "pr": [
+      106
+     ],
+     "issue": 28,
+     "note": "Replaces #27."
+    },
+    {
+     "id": "L25",
+     "title": "Real Menagerie Franka behind --arm menagerie",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "nice",
+     "pr": [
+      107
+     ],
+     "issue": 26,
+     "note": "Replaces #25. The 34 MB meshes are fetched by script and stay out of git."
+    },
+    {
      "id": "L28",
      "title": "Multi-room summary command (real rooms wait on P2)",
      "status": "review",
@@ -483,6 +550,18 @@
       102
      ],
      "issue": 59
+    },
+    {
+     "id": "L29",
+     "title": "Frozen evaluation trials: replay the same trials for any policy and keep every run",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "issue": 64,
+     "pr": [
+      109
+     ]
     }
    ]
   },
@@ -492,33 +571,6 @@
    "blurb": "Can be done on a laptop with no extra access.",
    "items": [
     {
-     "id": "L9",
-     "title": "Non-kitchen rooms: rebase the office PR after L1",
-     "status": "todo",
-     "owner_kind": "laptop",
-     "size": "M",
-     "priority": "should",
-     "pr": [
-      57
-     ],
-     "issue": 56,
-     "note": "Needs a rebase on L1"
-    },
-    {
-     "id": "L13",
-     "title": "Mobile base: pick #33 or #36, close the other, update the 11-float schema",
-     "status": "todo",
-     "owner_kind": "laptop",
-     "size": "L",
-     "priority": "should",
-     "pr": [
-      33,
-      36
-     ],
-     "issue": 34,
-     "note": "Do it after the fixed-base GR00T run"
-    },
-    {
      "id": "L17",
      "title": "Reachability planner (only the pre-flight is in review)",
      "status": "todo",
@@ -527,31 +579,8 @@
      "priority": "should",
      "pr": [
       99
-     ]
-    },
-    {
-     "id": "L24",
-     "title": "Appliance families: rebase oven, dishwasher, faucet onto the family registry",
-     "status": "todo",
-     "owner_kind": "laptop",
-     "size": "M",
-     "priority": "nice",
-     "pr": [
-      27
      ],
-     "issue": 28
-    },
-    {
-     "id": "L25",
-     "title": "Real Menagerie Franka behind --arm menagerie",
-     "status": "todo",
-     "owner_kind": "laptop",
-     "size": "M",
-     "priority": "nice",
-     "pr": [
-      25
-     ],
-     "issue": 26
+     "note": "Only the pre-flight reach check exists, in L2."
     },
     {
      "id": "L26",
@@ -570,6 +599,17 @@
      "size": "M",
      "priority": "nice",
      "issue": 24
+    },
+    {
+     "id": "L30",
+     "title": "Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress, teleop timer",
+     "status": "todo",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "issue": 68,
+     "pr": [],
+     "note": "Left out of L3, L18, L19 and L20 and listed in the build log as not done."
     }
    ]
   },
@@ -753,5 +793,24 @@
     }
    ]
   }
- ]
+ ],
+ "superseded": {
+  "prs": [
+   25,
+   27,
+   33,
+   36,
+   49,
+   57,
+   75,
+   77
+  ],
+  "note": "Rebased into #96 to #110. Close them once those merge."
+ },
+ "not_merged": {
+  "prs": [
+   101
+  ],
+  "note": "#101 ignores site/, which this branch tracks. Left out on purpose."
+ }
 }

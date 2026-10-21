@@ -50,7 +50,7 @@ def _family_summary(rows: list[dict]) -> dict:
 def evaluate(twin: dict | None = None, families: list[str] | None = None, episodes: int = 4,
              policy_name: str = "scripted", seed: int = 0, people: int = 2, holdout: bool = False,
              res: int = 128, out_dir: str | Path = "out", log=print, *, manifest: dict | None = None,
-             checkpoint_id: str | None = None) -> dict:
+             checkpoint_id: str | None = None, base: str = "fixed", arm: str = "procedural") -> dict:
     from arrival.sim.policy import ScriptedExpert, VLAClient
 
     if policy_name not in ("scripted", "vla"):

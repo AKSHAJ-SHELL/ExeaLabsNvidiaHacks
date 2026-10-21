@@ -20,8 +20,9 @@ def trace(n=64, phase=0.0):
     """A smooth in-range arm motion plus a gripper column; the command leads the state by one small step."""
     t = np.linspace(0, 2 * np.pi, n)[:, None]
     q = MID + 0.3 * np.sin(t + phase + np.arange(7) * 0.4)
-    s = np.concatenate([q, 0.02 + 0.01 * np.sin(t)], 1)
-    a = np.concatenate([q + 0.01, 0.02 + 0.01 * np.sin(t)], 1)
+    base = np.zeros((n, 3))  # base x, y, yaw: the dataset schema carries them even for a fixed base
+    s = np.concatenate([q, 0.02 + 0.01 * np.sin(t), base], 1)
+    a = np.concatenate([q + 0.01, 0.02 + 0.01 * np.sin(t), base], 1)
     return s.astype(np.float32), a.astype(np.float32)
 
 

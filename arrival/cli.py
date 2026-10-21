@@ -336,23 +336,24 @@ def cmd_eval(a) -> int:
     defaults = dict(room="hero_kitchen", families="counter_to_sink,open_drawer,move_on_table", episodes=4, seed=0,
                     people=2, holdout=False, res=128, scans="scans")
     try:
-        if a.manifest:
-            conflicts = ["--" + key for key in defaults if getattr(a, key) is not None]
+        if getattr(a, "manifest", None):
+            conflicts = ["--" + key for key in defaults if getattr(a, key, None) is not None]
             if conflicts:
                 raise ValueError("--manifest cannot be combined with " + ", ".join(conflicts))
             frozen = load_manifest(a.manifest)
-            rep = evaluate(manifest=frozen, policy_name=a.policy, checkpoint_id=a.checkpoint_id, out_dir=a.out)
+            rep = evaluate(manifest=frozen, policy_name=a.policy, checkpoint_id=getattr(a, "checkpoint_id", None), out_dir=a.out)
         else:
             for key, value in defaults.items():
-                if getattr(a, key) is None:
+                if getattr(a, key, None) is None:
                     setattr(a, key, value)
             args = _sim_args(a)
             if isinstance(args, str):
                 raise ValueError(args)
             fams, twin = args
             rep = evaluate(twin, fams, a.episodes, policy_name=a.policy, seed=a.seed, people=a.people,
-                           holdout=a.holdout, res=a.res, out_dir=a.out, base=a.base, arm=a.arm,
-                           checkpoint_id=a.checkpoint_id)
+                           holdout=a.holdout, res=a.res, out_dir=a.out, base=getattr(a, "base", "fixed"),
+                           arm=getattr(a, "arm", "procedural"),
+                           checkpoint_id=getattr(a, "checkpoint_id", None))
     except VLANotConfigured as e:
         print(f"policy vla: {e}", file=sys.stderr)
         return EXIT_USAGE

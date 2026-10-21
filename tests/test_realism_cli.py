@@ -138,7 +138,7 @@ def test_a_control_that_does_not_raise_the_error_invalidates_the_run(scan_dir, t
 def test_side_by_side_png_is_written(scan_dir, tmp_path):
     _, rep = _run(scan_dir, tmp_path)
     assert Image.open(rep["png"]).size == (W * 4, H * 2)  # reference | twin | depth | depth, one row per frame
-    assert (tmp_path / "out" / "eval" / "hero_kitchen_realism_held_0.png").is_file()
+    assert (tmp_path / "out" / "eval" / "hero_kitchen_realism_000.png").is_file()
     _, one = _run(scan_dir, tmp_path / "one", "--png-frames", "1")
     assert Image.open(one["png"]).size == (W * 4, H)
 

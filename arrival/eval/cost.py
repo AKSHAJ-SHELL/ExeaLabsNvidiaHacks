@@ -269,7 +269,7 @@ def markdown(rep: dict) -> str:
         note = f"{v['units']} {v['unit']} at {v['usd_per_unit']} ({v['rate_basis']})" if "units" in v else (
             "local run" if k == "local_cpu" else "not measured")
         L.append(f"| {k} | {_f(v['usd'])} | {str(v['measured']).lower()} | {note} |")
-    m = rep["metering"]
+    m = rep.get("metering") or {"jobs": 0}
     if m["jobs"]:
         L += ["", f"Worker metering over {m['jobs']} job(s): " + ", ".join(f"{k} {_f(m[k])}" for k in METER_KEYS) + "."]
     runs = {r["run_id"]: r.get("checkpoint_id") for r in rep["rows"] if r.get("run_id")}
