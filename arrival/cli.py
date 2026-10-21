@@ -1,4 +1,4 @@
-"""python -m arrival demo | validate | serve | sim | merge-shards | eval | realism | work | gc | doctor | summary | export-site"""
+"""python -m arrival demo | validate | serve | sim | merge-shards | subset | eval | realism | work | gc | doctor | summary | export-site"""
 
 from __future__ import annotations
 
@@ -288,6 +288,24 @@ def cmd_fanout(a) -> int:
     problems = validate(res["dataset"])
     print(f"dataset: {res['dataset']} (ran shards {res['ran']}, skipped {res['skipped']})")
     return EXIT_OK if not problems else EXIT_USAGE
+
+
+def cmd_subset(a) -> int:
+    """Keep the episodes of a sim dataset that pass a rule (family, drawer opening) as a new validated dataset."""
+    from arrival.export.subset import SubsetError, subset_dataset
+    from arrival.export.validate import validate
+
+    try:
+        res = subset_dataset(a.src, a.out, families=[f for f in a.families.split(",") if f] if a.families else None,
+                             min_drawer_opening=a.min_drawer_opening)
+    except SubsetError as e:
+        print(f"subset: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    errors = validate(res["dataset"])
+    for e in errors:
+        print(f"INVALID: {e}", file=sys.stderr)
+    print(f"dataset: {res['dataset']}")
+    return EXIT_INVALID if errors else EXIT_OK
 
 
 def cmd_merge_shards(a) -> int:
@@ -609,6 +627,13 @@ def build_parser() -> argparse.ArgumentParser:
                                              "or the one folder that holds them")
     g.add_argument("--out", default="out", help="the merged dataset goes to <out>/datasets/<room>_sim")
     g.set_defaults(fn=cmd_merge_shards)
+    u = sub.add_parser("subset", help="keep the episodes of a sim dataset that pass a rule (family, drawer opening)")
+    u.add_argument("src", help="a sim dataset folder (or the folder that holds datasets/<room>_sim)")
+    u.add_argument("--out", default="out", help="the subset goes to <out>/datasets/<room>_sim")
+    u.add_argument("--families", default="", help="comma list of families to keep (default: all)")
+    u.add_argument("--min-drawer-opening", type=float, default=None, metavar="M",
+                   help="drop open_drawer episodes whose final drawer opening is under M metres (the clean expert ends at 0.300)")
+    u.set_defaults(fn=cmd_subset)
     r = sub.add_parser("research", help="Tavily AI research on kitchen appliances and safety guidelines")
     r.add_argument("--room", default="hero_kitchen")
     r.add_argument("--query", default=None, help="direct query string to search via Tavily")
