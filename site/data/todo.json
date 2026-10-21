@@ -4,8 +4,8 @@
  "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site",
  "counts": {
   "done": 22,
-  "review": 29,
-  "todo": 1,
+  "review": 30,
+  "todo": 0,
   "blocked": 18,
   "total": 70
  },
@@ -566,6 +566,16 @@
      ]
     },
     {
+     "id": "L27",
+     "title": "People pass: yield and stop from the safety distance, counter-use pause, 3D head and arm clearance check",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "nice",
+     "issue": 24,
+     "note": "On feat/demo-site with no pull request yet. The mirrored right-hinged fridge plan is not built (the scene only has a left hinge) and yield ignores the arm links. Safety clearance did not measurably improve."
+    },
+    {
      "id": "L28",
      "title": "Multi-room summary command (real rooms wait on P2)",
      "status": "review",
@@ -606,17 +616,7 @@
    "id": "laptop",
    "title": "Laptop: next",
    "blurb": "Can be done on a laptop with no extra access.",
-   "items": [
-    {
-     "id": "L27",
-     "title": "People pass: yield and stop behaviour, mirrored fridge plan",
-     "status": "todo",
-     "owner_kind": "laptop",
-     "size": "M",
-     "priority": "nice",
-     "issue": 24
-    }
-   ]
+   "items": []
   },
   {
    "id": "gpu",
