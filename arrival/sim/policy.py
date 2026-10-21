@@ -260,7 +260,11 @@ class ScriptedExpert(Policy):
                 out.append((pt(a), ori(a), c, FRIDGE_PULL_STEPS, k < 4))
             a, q1 = a0 + sg * FRIDGE_HOOK, FRIDGE_HOOK
             far = hinge + FRIDGE_FAR * along(shut + sg * q1) + (h[2] - hinge[2]) * up  # clear of the free edge
-            out += [(pt(a) + FRIDGE_CLEAR * along(a), ori(a), c, s, True),
+            # let go of the bar before sliding off it: closed fingers drag it and knock the door back about 10 deg,
+            # and the edge rounding below is planned for a door that stays at FRIDGE_HOOK (left-hinged it ended
+            # 66.8 deg instead of 79.8, the hand arriving in front of the panel and pushing the free edge)
+            out += [(pt(a), ori(a), o, self.hold_steps),
+                    (pt(a) + FRIDGE_CLEAR * along(a), ori(a), o, s, True),
                     (far - FRIDGE_BACK * nrm(shut + sg * q1), pori(q1), c, s, True),
                     (push(q1) - FRIDGE_BACK * nrm(shut + sg * q1), pori(q1), c, s)]
             for k in range(7):
