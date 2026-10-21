@@ -162,8 +162,8 @@ def validate(root: Path) -> dict:
                 raise FramesError("bad_depth", f"depth {f.depth.name} is not a plain .npy array: {type(e).__name__}") from None
             shape, dtype = head.shape, head.dtype
             del head
-            if shape != depth_hw or dtype.kind != "f":
-                raise FramesError("depth_shape", f"depth {f.depth.name} must be float {depth_hw}, got {dtype} {shape}")
+            if shape != depth_hw or dtype != np.dtype("float32"):
+                raise FramesError("depth_shape", f"depth {f.depth.name} must be float32 {depth_hw}, got {dtype} {shape}")
         else:
             mode = open_image(f.depth, m.depth_size, "depth")
             if mode not in ("I;16", "I"):
