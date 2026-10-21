@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import yaml
@@ -38,7 +39,7 @@ def _load(path: str | Path, what: str) -> dict:
 
 
 def _num(v) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+    return type(v) is int or (type(v) is float and math.isfinite(v))
 
 
 def load_baseline(path: str | Path) -> dict:
