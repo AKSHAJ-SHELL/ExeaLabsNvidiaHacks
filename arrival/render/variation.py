@@ -229,6 +229,11 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
             t0 = time.perf_counter()
             try:
                 out, params = cli(orig, ep, fi)
+                if not isinstance(out, np.ndarray):
+                    raise ValueError("backend frame must be a numpy array")
+                if not isinstance(params, dict):
+                    raise ValueError("backend parameters must be a JSON object")
+                json.dumps(params)  # sidecar parameters must be serializable
             except Exception as e:  # noqa: BLE001 - any backend error leaves the frame original
                 row.update(latency_ms=round((time.perf_counter() - t0) * 1000, 2), reason=str(e))
                 counts["failed"] += 1
