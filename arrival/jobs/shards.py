@@ -167,7 +167,7 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
             if s["shard"].get(k) != first["shard"].get(k):
                 raise ShardError(f"shard {s['shard']['index']} differs from shard 0 in {k}: "
                                  f"{s['shard'].get(k)!r} vs {first['shard'].get(k)!r}; they are not from one run")
-        for k in ("arrival_room_id", "fps", "features"):
+        for k in ("arrival_room_id", "fps", "features", "arrival_exec_noise_rad"):
             if s["info"].get(k) != first["info"].get(k):
                 raise ShardError(f"shard {s['shard']['index']} differs from shard 0 in info.{k}")
         if s["modality"] != first["modality"] or s["embodiment"] != first["embodiment"]:
@@ -196,7 +196,7 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
         if root.resolve() in (s["root"].resolve(), *s["root"].resolve().parents):
             raise ShardError(f"the output {root} would overwrite shard {s['root']}; pick another --out")
     w = SimDatasetWriter(root, room, fps, res, tuple(cams), base="mobile" if first["embodiment"].get("base_actuated") else "fixed",
-                        arm=first["embodiment"].get("arm", "procedural"))
+                        arm=first["embodiment"].get("arm", "procedural"), provenance=info0.get("arrival_provenance"))
     for s in shards:
         size = s["info"].get("chunks_size", 1000)
         for row in s["episodes"]:
@@ -216,7 +216,10 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
     skipped = {"skipped_unreachable": unreachable, "skipped_error": errored, "skipped": unreachable + errored,
                "skip_reasons": reasons[:SKIP_REASONS_KEPT]}
     attempts = sum(i.get("arrival_attempts", 0) for i in infos)
-    out_info = w.finish(attempts, skipped, {"merged_shards": n, "merged_total_tasks": first["shard"]["total_tasks"]})
+    merged = {"merged_shards": n, "merged_total_tasks": first["shard"]["total_tasks"]}
+    if info0.get("arrival_exec_noise_rad"):  # DART shards (they agree, checked above): the merged set is just as perturbed
+        merged["exec_noise_rad"] = info0["arrival_exec_noise_rad"]
+    out_info = w.finish(attempts, skipped, merged)
     log(f"[merge] {n} shards -> {root}: {out_info['total_episodes']} episodes, {out_info['total_frames']} frames")
     rp = _merged_report(shards, out_info, skipped, Path(out_dir) / "reports" / f"{room}_sim.json", n)
     return {"dataset": root, "report": rp, "info": out_info}

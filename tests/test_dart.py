@@ -58,3 +58,27 @@ def test_journal_resumes_old_runs_as_no_noise_and_refuses_another_level(tmp_path
     assert Journal(path).start({**now, "exec_noise": 0.0}, resume=True) == []
     with pytest.raises(ShardError, match="exec_noise"):
         Journal(path).start({**now, "exec_noise": 0.04}, resume=True)
+
+
+def test_merged_shards_keep_the_noise_level_and_refuse_a_mix(twin, tmp_path):
+    import json
+
+    from arrival.jobs.shards import ShardError, merge_shards
+    from arrival.sim.collect import collect
+
+    def shards(root, noise_for):
+        for i in range(2):
+            collect(twin, ["counter_to_sink"], 4, root, people=0, res=32, seed=2, shard=(i, 2),
+                    exec_noise=noise_for(i), log=lambda *_: None)
+
+    shards(tmp_path / "a", lambda i: 0.02)
+    out = merge_shards([str(tmp_path / "a")], tmp_path / "merged")
+    info = json.loads((out["dataset"] / "meta" / "info.json").read_text())
+    assert info["arrival_exec_noise_rad"] == 0.02
+    assert info["arrival_provenance"]["run"]["exec_noise"] == 0.02  # the shards' provenance survives the merge
+    shards(tmp_path / "b", lambda i: 0.02 if i == 0 else 0.0)
+    with pytest.raises(ShardError, match="arrival_exec_noise_rad"):
+        merge_shards([str(tmp_path / "b")], tmp_path / "merged_b")
+    shards(tmp_path / "c", lambda i: 0.0)  # a clean run is unchanged: no key at all
+    clean = merge_shards([str(tmp_path / "c")], tmp_path / "merged_c")
+    assert "arrival_exec_noise_rad" not in clean["info"]

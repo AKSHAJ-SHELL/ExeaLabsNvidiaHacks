@@ -595,7 +595,10 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
                    "episodes": episodes, "seed": seed, "families": list(families), "people": people,
                    "policy": policy_name, "planner": planner_name, "split": split,
                    "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res}) if shard else None
-    info = writer.finish(attempts, skipped, {"shard": shard_info} if shard else None)
+    extra = {"shard": shard_info} if shard else {}
+    if exec_noise > 0:  # DART: say so in info.json, next to arrival_generator, not only in the provenance block
+        extra["exec_noise_rad"] = exec_noise
+    info = writer.finish(attempts, skipped, extra or None)
     succ = sum(f["successes"] for f in per.values())
     report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name,
               "planner": planner_name, "attempts": attempts, **skipped,
