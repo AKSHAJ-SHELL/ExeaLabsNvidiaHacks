@@ -144,6 +144,7 @@ def decode_response(out: dict, schema: str | None = None) -> np.ndarray:
         if not np.isfinite(a).all():
             raise ProtocolError(f"{key} has non-finite values")
         parts.append(a)
-    if parts[0].shape[0] != parts[1].shape[0]:
-        raise ProtocolError(f"chunk lengths differ: {parts[0].shape[0]} arm vs {parts[1].shape[0]} gripper")
+    if any(part.shape[0] != parts[0].shape[0] for part in parts[1:]):
+        lengths = ", ".join(f"{key}={part.shape[0]}" for key, part in zip(keys, parts))
+        raise ProtocolError(f"chunk lengths differ: {lengths}")
     return np.concatenate(parts, axis=1)
