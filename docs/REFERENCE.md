@@ -344,7 +344,7 @@ The demo dataset's embodiment label is `robocasa_panda` (7 joints + 1 gripper, p
 
 ## Credentials
 
-The demo uses no credentials and makes no network calls, and neither do the tests. Token Factory (Nemotron planner and wordings) reads the variables below, and only inside `arrival.models.token_factory`; Tavily and the VLA client read their own:
+The demo uses no credentials and makes no network calls, and neither do the tests. Every variable below is read through `arrival/config.py` (`SETTINGS` lists each one, whether it is a secret, and which module uses it); no other module touches the environment, and `tests/test_config.py` fails if one starts to:
 
 | Variable | Purpose |
 |---|---|
@@ -353,8 +353,10 @@ The demo uses no credentials and makes no network calls, and neither do the test
 | `NEMOTRON_OMNI_MODEL`, `NEMOTRON_ULTRA_MODEL`, `NEMOTRON_SUPER_MODEL`, `NEMOTRON_LIGHTNING_MODEL` | Optional model ids |
 | `TAVILY_API_KEY`, `TAVILY_BASE_URL` | Optional, for `research` and `sim --tavily`; read only in `arrival.models.tavily`. Base URL defaults to `https://api.tavily.com/search` |
 | `GR00T_POLICY_URL` | Address of a GR00T policy server, for `--policy vla` |
+| `COSMOS_URL` | Cosmos endpoint for `python -m arrival.render.variation --backend cosmos` |
+| `ARRIVAL_DOTENV` | `0` turns the `.env` lookup off; the test suite sets it so a developer's real keys never reach a test |
 
-`python -m arrival doctor` shows which of these are set (never their values). Export them in your shell, or put them in an untracked `.env` (gitignored) in the repo root or cwd: `arrival.models.token_factory` and `arrival.models.tavily` each read it themselves (cwd first, then the repo root), only when their own key is unset, and never override variables already set. No other module loads `.env`. Never commit keys. Account links and what to request are in [docs/08-access.md](08-access.md).
+Export them in your shell, or copy `.env.example` to an untracked `.env` (gitignored) in the repo root or cwd. `arrival.config.get` reads `.env` (cwd first, then the repo root) only for a variable that is unset, and never overrides one already set. `arrival.config.status()` reports which variables are set without their values, and `arrival.config.redact()` (also a logging filter, `install_log_redaction`) scrubs set secrets and common token shapes (Bearer tokens, `nvapi-`/`tvly-` keys, `user:pass@` in URLs, `?token=` parameters) from text before it is printed or stored; the `--policy vla` connection error goes through it. Never commit keys. Account links and what to request are in [docs/08-access.md](08-access.md).
 
 ## Cost
 

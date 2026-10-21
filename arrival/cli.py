@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
+
+from arrival.config import get as get_setting
+from arrival.config import redact
 
 EXIT_OK, EXIT_INVALID, EXIT_USAGE = 0, 1, 2
 
@@ -229,7 +231,7 @@ def cmd_sim(a) -> int:
     except OSError as e:  # URLError is an OSError: the policy server did not answer
         if a.policy != "vla":
             raise
-        print(f"policy vla: no answer from {os.environ.get('GR00T_POLICY_URL')}: {e}", file=sys.stderr)
+        print(redact(f"policy vla: no answer from {get_setting('GR00T_POLICY_URL')}: {e}"), file=sys.stderr)
         return EXIT_USAGE
     r = res["report_data"]
     print(f"dataset: {res['dataset']}")
@@ -361,9 +363,9 @@ def cmd_eval(a) -> int:
         print(f"eval: {e}", file=sys.stderr)
         return EXIT_USAGE
     except OSError as e:
-        prefix = (f"policy vla: no answer from {os.environ.get('GR00T_POLICY_URL')}"
+        prefix = (f"policy vla: no answer from {get_setting('GR00T_POLICY_URL')}"
                   if a.policy == "vla" and not isinstance(e, FileNotFoundError) else "eval")
-        print(f"{prefix}: {e}", file=sys.stderr)
+        print(redact(f"{prefix}: {e}"), file=sys.stderr)
         return EXIT_USAGE
     print(table(rep))
     print(f"eval: {rep['path']}\nmanifest: {rep['manifest_path']}")

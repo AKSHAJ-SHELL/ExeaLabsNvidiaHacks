@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import urllib.request
 from pathlib import Path
@@ -585,7 +584,9 @@ class VLAClient(Policy):
     """
 
     def __init__(self, url: str | None = None, timeout: float = 10.0):
-        self.url = url or os.environ.get("GR00T_POLICY_URL")
+        from arrival import config as settings
+
+        self.url = url or settings.get("GR00T_POLICY_URL")
         if not self.url:
             raise VLANotConfigured("GR00T_POLICY_URL is not set; start a GR00T policy server and export its URL.")
         self.timeout = timeout
