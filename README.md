@@ -146,7 +146,7 @@ Cloud accounts, billing or deploy access.
 | C1 | Nebius Serverless Jobs fan-out with resume, then one real small run Fan-out client with a local backend, done-markers, retry and resume is built and tested. No Nebius client exists. | L | must | Blocked | issue #66 |
 | C2 | Hosted HTTPS demo with a pre-seeded room Smoke test (#115), /healthz, docker-compose.yml and docs/DEPLOY.md are written and tested on a laptop. TLS, the domain, a real seeded room and a run on a host are still blocked. | M | must | Blocked | #115 |
 | C3 | Measured time and cost per demo against the teleop baseline | S | should | Blocked | issue #67 |
-| C4 | Detect small objects from posed frames with a VLM | M | should | Blocked | issue #60 |
+| C4 | Detect small objects from posed frames with a VLM Offline slice built: detection client, back-projection into the room, merge across frames and the worker's labelled fallback, tested on rendered frames with hand-written replies. The real model call is blocked on Token Factory credentials. | M | should | Blocked | issue #60 |
 | C5 | Real Cosmos variation on a tenth of validated frames | M | nice | Blocked | issue #70 |
 
 ### Needs people or an iPhone (5)

@@ -154,7 +154,7 @@ Checked-in `roomplan.json` does not have to rebuild every fixture. The authored 
 
 ## RGB-D scan frames
 
-`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. Only the format, the loader and a synthetic fixture exist; the iOS recorder that would write it is not built (needs a device). `POST /jobs` accepts a bundle as a zip in the `frames` field, validates it and stores it next to the job. The worker compares held-out frames with the compiled twin before adding synthetic objects (docs/REFERENCE.md, Uploaded-frame comparison).
+`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. Only the format, the loader and a synthetic fixture exist; the iOS recorder that would write it is not built (needs a device). `POST /jobs` accepts a bundle as a zip in the `frames` field, validates it and stores it next to the job. The worker compares held-out frames with the compiled twin before adding synthetic objects (docs/REFERENCE.md, Uploaded-frame comparison), and when the scan lists no objects it reads the train frames for them (Objects from frames).
 
 Layout: `frames_manifest.json` plus the files it names, all relative paths inside the bundle folder (no absolute paths, no `..`).
 
@@ -296,6 +296,8 @@ Counter synthesis (only when the scan has a sink or stove whose centre is more t
 Do not emit backing walls.
 
 The twin copies `doors`, `windows`, `openings`, `floors`, `story` and `story_count` from the bundle when present, unchanged, and a fixture flagged as an island carries `island: true`; that flag is also written on its `layout.yaml` row. Doors and windows are not written to `layout.yaml` and the sim does not draw them yet.
+
+Each object also has `label`, `provenance` (`detected`, `authored` or `default_synthetic`; docs/REFERENCE.md, Provenance) and, when the pipeline put it there, `placed_by` (`place_default_objects` or `detect_objects`). A detected object has `detection`: `{"confidence", "frames": [frame ids], "evidence": [{"frame", "box": [x0, y0, x1, y1] in RGB pixels, "confidence"}]}`. A twin whose objects the worker filled has `object_detection`: `{"state": "detected" | "none_found" | "not_run", "reason", "frames_read", "frames_unread", "reply_sources": {source: frames}, "model", "rejected": [{"frame", "label", "box", "confidence", "reason"}]}`. `reply_sources` says where each frame's reply came from (`token_factory`, or `hand_written` in test fixtures) or why the frame was not read (`not_configured`, `unreachable`, `call_failed`, `unusable_reply`). A rejection `reason` is `unsupported_label`, `low_confidence`, `bad_box`, `no_depth`, `no_support` (no counter or table under the box or the merged object), `nothing_above_top`, `too_wide`, `not_standing` (the points do not rise from the top as the object would), `flat_surface` (a wall or backsplash seen face on), `off_top` (the object's footprint would hang off the top), `against_wall`, `on_fixture` (it would stand in another fixture, or in a sink or the strip behind it where the faucet stands) or `same_object` (a weaker box on an object the same frame already found).
 
 ## Tasks
 
@@ -569,6 +571,8 @@ The worker (`python -m arrival work`) keeps those fields and adds these when it 
 `status` is one of `queued`, `running`, `done`, `failed`. `stage` is the last stage entered: `normalize`, `twin`, `realism`, `objects`, `sim`, `validate`, `zip`. `started_at` and `finished_at` are unix seconds like `created_unix`. `error` is null unless `status` is `failed`, then `"<ExceptionType>: <message>"`. `room_id` is the upload filename stem reduced to `[a-z0-9_]` plus `_<id>`. Paths are as the worker saw them (relative to its cwd when `--out` is relative). Fields not reached yet are null.
 
 The job status also has `realism`, initially null, then `{state, metrics, consumed, preview, reason}`. Scored results add `frame_count` and `association`. `metrics` is null unless the camera-offset control passes; otherwise it contains `depth_l1_m`, `rgb_mae`, `rgb_one_minus_ssim`, `n_depth`, `n_rgb` and `frames`. These fields describe the uploaded-frame comparison only, not the generated dataset. Raw reports, the comparison PNG, a pre-placement twin and the applied camera transform stay under the job's `realism/` directory. The public report route returns only the status projection. Normalized RoomPlan bundles carry `arkit_world_to_room` as a row-major 4x4 matrix, used as `bundle_world_to_room @ inverse(manifest_world_to_room)` before scoring.
+
+The job status also has `objects`, null until the `objects` stage, then `{"counts": {"detected", "authored", "default_synthetic"}, "detection", "reason", "reply_sources", "rejected"}`. `detection` is the twin's `object_detection.state`, or `not_run` with the reason `the scan lists its objects`; `rejected` is the number of rejected boxes, which are listed in `twin.json`.
 
 ## Report
 

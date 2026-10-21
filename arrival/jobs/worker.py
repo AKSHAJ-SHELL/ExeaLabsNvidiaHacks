@@ -177,6 +177,16 @@ def _stage(job_dir: Path, status: dict, stage: str, log, meter: Meter | None = N
     log(f"[work] {status['id']}: {stage}")
 
 
+def objects_status(twin: dict) -> dict:
+    """What the job status says about the twin's objects: how many carry each provenance label and how the
+    detection run went (`not_run` with a reason when it did not read a frame, or when the scan lists its objects)."""
+    from arrival.export.provenance import object_counts
+
+    run = twin.get("object_detection") or {"state": "not_run", "reason": "the scan lists its objects"}
+    return {"counts": object_counts(twin), "detection": run["state"], "reason": run.get("reason"),
+            "reply_sources": run.get("reply_sources", {}), "rejected": len(run.get("rejected", []))}
+
+
 def progress_log(job_dir: Path, status: dict, total: int, log):
     """Wrap ``log`` so each finished sim task (an ``[sim] <task>: OK|MISS|DROP|SKIP`` line from ``collect``) bumps
     ``status["progress"] = {"done", "total"}`` and rewrites status.json. ``total`` is the requested episode count, which
@@ -410,14 +420,14 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
     out_dir, job_dir = Path(out_dir), Path(job_dir)
     limits = limits or Limits()
     meter = Meter()
-    status["realism"] = None
+    status["realism"] = status["objects"] = None
     if status.get("frames"):
         status["frames"].update(consumed=False, used_for=None)
     try:
         limits.check_request(episodes, people)
         from arrival.export.provenance import sha256_file
         from arrival.export.validate import validate
-        from arrival.twin.compile import compile_twin, place_default_objects, write_twin
+        from arrival.twin.compile import compile_twin, fill_objects, write_twin
 
         room = room_id_for(status.get("filename", ""), status["id"])
         status["room_id"] = room
@@ -441,7 +451,11 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
 
         _stage(job_dir, status, "objects", log, meter)
         if not twin["objects"]:
-            place_default_objects(twin, seed=seed)
+            from arrival.twin.detect import detect_objects
+
+            frames = job_dir / "frames"
+            fill_objects(twin, detect_objects(frames, twin, bundle, log=log) if frames.is_dir() else None, seed=seed)
+        status["objects"] = objects_status(twin)
         twin_dir = out_dir / "twins" / room
         write_twin(twin, twin_dir)
         status["twin_dir"] = str(twin_dir)

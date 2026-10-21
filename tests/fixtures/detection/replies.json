@@ -1,0 +1,92 @@
+{
+  "about": "Hand-written fixture, not a model reply: no Token Factory call was made. Each mug box is the mug's rendered pixel extent in that frame, as printed by scripts/make_detection_fixture.py; the empty-room frames list nothing. Keys are DetectionClient.key of each RGB file.",
+  "entries": {
+    "efed26a473b11179ee19f496": {
+      "frame": "empty/f000",
+      "source": "hand_written",
+      "model": null,
+      "prompt_version": 1,
+      "reply": {
+        "objects": []
+      }
+    },
+    "644b611531a6dc7c21f7ce13": {
+      "frame": "empty/f001",
+      "source": "hand_written",
+      "model": null,
+      "prompt_version": 1,
+      "reply": {
+        "objects": []
+      }
+    },
+    "cd557b79caecd118818ccca3": {
+      "frame": "empty/f002",
+      "source": "hand_written",
+      "model": null,
+      "prompt_version": 1,
+      "reply": {
+        "objects": []
+      }
+    },
+    "15b87edf1e17e5f0124889d4": {
+      "frame": "mug/f000",
+      "source": "hand_written",
+      "model": null,
+      "prompt_version": 1,
+      "reply": {
+        "objects": [
+          {
+            "label": "mug",
+            "box": [
+              57,
+              38,
+              69,
+              54
+            ],
+            "confidence": 0.9
+          }
+        ]
+      }
+    },
+    "f3322fafc4263877a1cb9023": {
+      "frame": "mug/f001",
+      "source": "hand_written",
+      "model": null,
+      "prompt_version": 1,
+      "reply": {
+        "objects": [
+          {
+            "label": "mug",
+            "box": [
+              58,
+              38,
+              68,
+              53
+            ],
+            "confidence": 0.9
+          }
+        ]
+      }
+    },
+    "1aef27811b1917c11447e85e": {
+      "frame": "mug/f002",
+      "source": "hand_written",
+      "model": null,
+      "prompt_version": 1,
+      "reply": {
+        "objects": [
+          {
+            "label": "mug",
+            "box": [
+              59,
+              39,
+              68,
+              53
+            ],
+            "confidence": 0.9
+          }
+        ]
+      }
+    }
+  }
+}

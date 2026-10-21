@@ -612,6 +612,19 @@ class Handler(BaseHTTPRequestHandler):
         link = (f" <a href='/jobs/{esc(s['id'])}/realism'>View comparison</a>" if measurement else "")
         return f"<div class='chips mt'>{_chip('RGB-D ' + str(fr.get('count', '?')) + ' frames, ' + label)}{link}</div>"
 
+    @staticmethod
+    def _objects_chip(s: dict) -> str:
+        """Where the twin's objects came from: detected in the frames, written in the scan, or invented defaults."""
+        ob = s.get("objects")
+        if not isinstance(ob, dict):
+            return ""
+        counts = ob.get("counts") or {}
+        text = "objects: " + (", ".join(f"{n} {k}" for k, n in counts.items() if n) or "none")
+        if counts.get("default_synthetic"):
+            text += " (invented, not scanned)"
+        why = f"detection {ob.get('detection')}" + (f": {ob['reason']}" if ob.get("reason") else "")
+        return f"<div class='chips mt'><span class='chip' title='{esc(why)}'>{esc(text)}</span></div>"
+
     def _jobs_table(self) -> str:
         rows = []
         for s in self._jobs():
@@ -632,7 +645,7 @@ class Handler(BaseHTTPRequestHandler):
             active = " data-active" if st in ("queued", "running") else ""
             rows.append(
                 f"<tr{active}><td><a href='/jobs/{esc(jid)}'><code>{esc(jid)}</code></a></td>"
-                f"<td>{esc(s.get('filename'))}{self._frames_chip(s)}</td><td>{_chip(st, kind)}</td><td>{_stage_bar(s)}</td>"
+                f"<td>{esc(s.get('filename'))}{self._frames_chip(s)}{self._objects_chip(s)}</td><td>{_chip(st, kind)}</td><td>{_stage_bar(s)}</td>"
                 f"<td><code>{esc(s.get('room_id') or '')}</code></td><td>{eps}</td><td>{result}</td></tr>"
             )
         if not rows:
