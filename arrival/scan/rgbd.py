@@ -85,6 +85,7 @@ def _size(value, what: str) -> tuple[int, int]:
 
 def load_manifest(directory) -> Manifest:
     root = Path(directory)
+    resolved_root = root.resolve()
     path = root / MANIFEST_NAME
     if not path.is_file():
         _fail("missing_manifest", f"{path} not found")
@@ -153,6 +154,8 @@ def load_manifest(directory) -> Manifest:
                 continue
             if not isinstance(rel, str) or not rel or Path(rel).is_absolute() or ".." in Path(rel).parts:
                 _fail("bad_path", f"frame {fid} {key} must be a relative path inside the bundle")
+            if not (root / rel).resolve().is_relative_to(resolved_root):
+                _fail("bad_path", f"frame {fid} {key} resolves outside the bundle")
             if not (root / rel).is_file():
                 _fail("missing_file", f"frame {fid} {key} file {rel} does not exist")
             paths[key] = root / rel
