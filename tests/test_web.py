@@ -176,7 +176,7 @@ def test_room_page_links_sim_dataset(server):
 
 
 def test_capture_app_upload_reaches_worker(server):
-    """CAP-1: the iOS app's request (ios/ArrivalCapture/ArrivalCapture/ArrivalAPI.swift multipartBody)
+    """CAP-1: the iOS app's request (ios/ArrivalCapture/ArrivalCapture/ArrivalAPI.swift writeMultipart, scan part only)
     with a real CapturedRoom export is queued byte for byte and the worker reads it as RoomPlan."""
     from arrival.jobs.worker import load_upload, room_id_for
 
