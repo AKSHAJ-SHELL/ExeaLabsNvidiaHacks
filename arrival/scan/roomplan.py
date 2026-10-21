@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from arrival.catalog.fixtures import default_size
-from arrival.scan.bundle import validate
+from arrival.scan.bundle import MAX_COORD_M, MAX_DIM_M, ScanBundleError, numbers, validate
 
 SNAP_TOL = math.radians(5.0)
 MIN_WALL_THICKNESS = 0.1
@@ -24,7 +24,23 @@ def _enum(value, default: str = "unknown") -> str:
 
 
 def _snake(name: str) -> str:
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    return re.sub(r"[^a-z0-9_]", "_", re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower())
+
+
+def _ident(item: dict, default: str) -> str:
+    """The item's identifier as a name that is safe in XML, a file name and a log line (RoomPlan sends UUIDs)."""
+    raw = item.get("identifier")
+    raw = raw if isinstance(raw, str) and raw.strip() else default
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", raw.strip())
+
+
+def _unique(items: list[dict]) -> None:
+    """Rename repeated ids in place (`a`, `a_2`, `a_3`) so every MJCF body and layout entry has its own name."""
+    seen: dict[str, int] = {}
+    for it in items:
+        n = seen[it["id"]] = seen.get(it["id"], 0) + 1
+        if n > 1:
+            it["id"] = f"{it['id']}_{n}"
 
 
 def _center(m: list[float]) -> list[float]:
@@ -63,7 +79,7 @@ def _wall(w: dict) -> dict:
         half, ux, uy = sy / 2, -math.sin(yaw), math.cos(yaw)
     thickness = float(min(dim[0], dim[2]))
     return {
-        "id": w.get("identifier", "wall"),
+        "id": _ident(w, "wall"),
         "start": [cx - ux * half, cy - uy * half],
         "end": [cx + ux * half, cy + uy * half],
         "height": float(dim[1]),
@@ -77,7 +93,7 @@ def _object(o: dict, i: int) -> dict:
     dim = o.get("dimensions") or []
     size = _size(dim) if len(dim) == 3 and min(dim) > 0 else default_size(category)
     return {
-        "id": o.get("identifier", f"object_{i}"),
+        "id": _ident(o, f"object_{i}"),
         "category": category,
         "size": size,
         "position": _center(m),
@@ -89,8 +105,9 @@ def _portal(s: dict, i: int, kind: str, wall_ids: set[str]) -> dict:
     """A door, window or opening: a Surface whose parentIdentifier is the wall it sits in."""
     m, cat = s["transform"], s.get("category")
     parent = s.get("parentIdentifier")
+    parent = _ident({"identifier": parent}, "") if isinstance(parent, str) else None
     entry = {
-        "id": s.get("identifier", f"{kind}_{i}"),
+        "id": _ident(s, f"{kind}_{i}"),
         "wall_id": parent if parent in wall_ids else None,
         "size": _size(s["dimensions"]),
         "position": _center(m),
@@ -107,7 +124,7 @@ def _floor(f: dict, i: int, z0: float) -> dict | None:
     if len(corners) < 3 or not f.get("transform"):
         return None
     pts = [_apply(f["transform"], c)[:2] for c in corners]
-    return {"id": f.get("identifier", f"floor_{i}"), "z": round(float(f["transform"][13]) - z0, 9), "corners": pts}
+    return {"id": _ident(f, f"floor_{i}"), "z": round(float(f["transform"][13]) - z0, 9), "corners": pts}
 
 
 def _floor_height(roomplan: dict) -> float:
@@ -156,11 +173,11 @@ def _snap(yaw: float) -> float:
     return 0.0 if abs(yaw) < 1e-9 else round(yaw, 9)
 
 
-def _align(walls: list[dict], posed: list[dict], polygons: list[list[list[float]]]) -> None:
+def _align(walls: list[dict], posed: list[dict], polygons: list[list[list[float]]]) -> tuple[float, float, float, float]:
     """Rotate about z so the longest wall runs along +X, then translate the walls' min corner to (0, 0).
     `posed` entries carry position and yaw; `polygons` are bare [x, y] lists."""
     if not walls:
-        return
+        return 1.0, 0.0, 0.0, 0.0
     w = max(walls, key=lambda w: math.dist(w["start"], w["end"]))
     theta = math.atan2(w["end"][1] - w["start"][1], w["end"][0] - w["start"][0])
     theta = (theta + math.pi / 2) % math.pi - math.pi / 2  # direction mod pi, in [-pi/2, pi/2)
@@ -185,33 +202,99 @@ def _align(walls: list[dict], posed: list[dict], polygons: list[list[list[float]
         f["position"] = [round(f["position"][0] - mx, 9), round(f["position"][1] - my, 9), f["position"][2]]
     for poly in polygons:
         poly[:] = [[round(p[0] - mx, 9), round(p[1] - my, 9)] for p in poly]
+    return c, s, mx, my
 
 
 def _kept(o: dict) -> bool:
     return _enum(o.get("confidence"), "high") != "low"
 
 
+def _bad(kind: str, item: dict, i: int, why: str):
+    raise ScanBundleError(f"{kind} {i} ({item.get('identifier')!r}): {why}")
+
+
+def _clean(roomplan) -> dict:
+    """Refuse an export the normalizer cannot read, with the offending item named. Returns the export with every
+    list present (a missing or null list is empty). Checks only what the code below indexes or divides by:
+    a 16-number finite transform, finite dimensions, a floor polygon of [x, y, z] points, an integer story."""
+    if not isinstance(roomplan, dict):
+        raise ScanBundleError(f"a RoomPlan export is a JSON object, got {type(roomplan).__name__}")
+    rooms = roomplan.get("rooms")
+    if rooms is not None and (not isinstance(rooms, list) or not all(isinstance(r, dict) for r in rooms)):
+        raise ScanBundleError("rooms must be a list of CapturedRoom objects")
+    out = dict(roomplan)
+    if rooms is not None:
+        out["rooms"] = [dict(r) for r in rooms]  # the caller's dicts stay untouched
+    for scope in [out] + out.get("rooms", []):
+        if scope.get("story") is not None and (not isinstance(scope["story"], int) or isinstance(scope["story"], bool)):
+            raise ScanBundleError(f"story must be an integer, got {scope['story']!r}")
+        for key in SURFACES + ("objects",):
+            items = scope[key] = scope.get(key) or []
+            if not isinstance(items, list):
+                raise ScanBundleError(f"{key} must be a list, got {type(items).__name__}")
+            for i, item in enumerate(items):
+                if not isinstance(item, dict):
+                    raise ScanBundleError(f"{key} {i}: expected an object, got {type(item).__name__}")
+                _check_item(key, i, item)
+    return out
+
+
+def _check_item(key: str, i: int, item: dict) -> None:
+    kind = key[:-1]
+    if item.get("story") is not None and (not isinstance(item["story"], int) or isinstance(item["story"], bool)):
+        _bad(kind, item, i, f"story must be an integer, got {item['story']!r}")
+    m = numbers(item.get("transform"), 16) if item.get("transform") is not None else None
+    if m is None and not (key == "floors" and not item.get("transform")):
+        _bad(kind, item, i, "transform must be 16 finite numbers (a column-major 4x4)")
+    if m is not None and max(abs(m[12]), abs(m[13]), abs(m[14])) > MAX_COORD_M:
+        _bad(kind, item, i, f"transform places it more than {MAX_COORD_M:g} m from the origin")
+    dim = item.get("dimensions")
+    if key == "objects":
+        if dim is not None and (not isinstance(dim, (list, tuple)) or not all(
+                isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in dim)):
+            _bad(kind, item, i, f"dimensions must be finite numbers, got {dim!r}")
+        if dim and max(abs(v) for v in dim) > MAX_DIM_M:
+            _bad(kind, item, i, f"dimensions {list(dim)} exceed {MAX_DIM_M:g} m; a scan in the wrong unit?")
+    elif key != "floors":
+        d = numbers(dim, 3)
+        if d is None or min(d) < 0 or max(d) > MAX_DIM_M:
+            _bad(kind, item, i, f"dimensions must be 3 finite numbers between 0 and {MAX_DIM_M:g} m, got {dim!r}")
+        if key == "walls" and (d[0] <= 0 or d[1] <= 0):
+            _bad(kind, item, i, f"a wall needs a positive length and height, got {d[0]:g} m by {d[1]:g} m")
+    if key == "floors" and item.get("polygonCorners"):
+        pts = item["polygonCorners"]
+        if not isinstance(pts, list) or any(numbers(p, 3) is None for p in pts):
+            _bad(kind, item, i, "polygonCorners must be a list of finite [x, y, z] points")
+
+
 def to_bundle(roomplan: dict, room_id: str, story: int | None = None) -> dict:
     """Normalize a CapturedRoom (or CapturedStructure) dict. RoomPlan objects become fixtures; counters are not
-    invented here. Low-confidence objects are dropped; z is measured from the selected story's floor."""
-    roomplan, story, story_count = _select_story(_flatten(roomplan), story)
+    invented here. Low-confidence objects are dropped; z is measured from the selected story's floor. Raises
+    ScanBundleError, with the offending item named, for an export the twin cannot be built from."""
+    roomplan, story, story_count = _select_story(_flatten(_clean(roomplan)), story)
     z0 = _floor_height(roomplan)
     walls = [_wall(w) for w in roomplan.get("walls", [])]
+    _unique(walls)
     wall_ids = {w["id"] for w in walls}
     fixtures = [_object(o, i) for i, o in enumerate(roomplan.get("objects", [])) if _kept(o)]
+    _unique(fixtures)
     portals = {key: [_portal(s, i, kind, wall_ids) for i, s in enumerate(roomplan.get(key, []))]
                for key, kind in PORTALS}
+    for ps in portals.values():
+        _unique(ps)
     floors = [fl for fl in (_floor(f, i, z0) for i, f in enumerate(roomplan.get("floors", []))) if fl]
     posed = fixtures + [p for ps in portals.values() for p in ps]
     for p in posed:
         p["position"][2] = round(p["position"][2] - z0, 9)
-    _align(walls, posed, [f["corners"] for f in floors])
+    c, s, mx, my = _align(walls, posed, [f["corners"] for f in floors])
     bundle = {
         "schema_version": "1",
         "room_id": room_id,
         "units": "meters",
         "frame": "z_up",
         "geometry_source": "roomplan",
+        "arkit_world_to_room": [[c, 0.0, s, -mx], [s, 0.0, -c, -my],
+                                [0.0, 1.0, 0.0, -z0], [0.0, 0.0, 0.0, 1.0]],
         "blocks_claims": [],
         "walls": walls,
         "fixtures": fixtures,
@@ -227,5 +310,10 @@ def to_bundle(roomplan: dict, room_id: str, story: int | None = None) -> dict:
 
 
 def load(path: str | Path, room_id: str, story: int | None = None) -> dict:
+    """Normalize a RoomPlan JSON file. The bundle carries `input_sha256`, the sha256 of the export's bytes."""
+    from arrival.export.provenance import sha256_file
+
     with open(path) as f:
-        return to_bundle(json.load(f), room_id, story)
+        bundle = to_bundle(json.load(f), room_id, story)
+    bundle["input_sha256"] = sha256_file(path)
+    return bundle

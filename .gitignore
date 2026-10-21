@@ -13,3 +13,26 @@ ios/build/
 *.xcuserstate
 .DS_Store
 MUJOCO_LOG.TXT
+
+# Python build and tooling output (scripts/smoke_package.py builds in-tree)
+build/
+dist/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv*/
+venv/
+
+# Editors and OS
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+*.swp
+
+# Local secrets and per-worktree Claude state
+.env.*
+!.env.example
+.claude/worktrees/
+arrival/assets/menagerie/

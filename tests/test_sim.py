@@ -41,6 +41,21 @@ def test_ik_reaches_counter_point(twin):
     assert np.linalg.norm(d.site("eef").xpos - target) < 0.02
 
 
+def test_successive_episodes_have_nonblank_camera_video(twin, tmp_path):
+    import imageio.v2 as imageio
+
+    run = collect(twin, ["open_drawer"], 3, tmp_path, people=0, res=32, log=lambda *_: None)
+    assert run["report_data"]["successes"] == 3
+    for camera in ("ego_view", "wrist"):
+        videos = sorted((run["dataset"] / "videos" / "chunk-000" / f"observation.images.{camera}").glob("*.mp4"))
+        assert len(videos) == 3
+        for video in videos:
+            with imageio.get_reader(video, format="ffmpeg") as reader:
+                frames = [frame for frame in reader]
+            assert frames, video
+            assert all(frame.max() > 0 and frame.std() > 1 for frame in frames), video
+
+
 def test_collect_writes_valid_dataset(twin, tmp_path):
     from arrival.export.validate import validate
 
@@ -55,7 +70,8 @@ def test_collect_writes_valid_dataset(twin, tmp_path):
 
     t = pq.read_table(res["dataset"] / "data" / "chunk-000" / "episode_000000.parquet")
     s = np.array(t.column("observation.state").to_pylist())
-    assert s.shape[1] == 8 and np.ptp(s[:, :7], axis=0).max() > 0.3  # real joint motion
+    assert s.shape[1] == 11 and np.ptp(s[:, :7], axis=0).max() > 0.3  # real joint motion
+    assert np.ptp(s[:, 8:11], axis=0).max() == 0.0  # fixed base: the parked pose on every frame
     assert list((res["dataset"] / "videos" / "chunk-000" / "observation.images.wrist").glob("*.mp4"))
     errors = validate(res["dataset"])
     assert not errors, errors
@@ -268,16 +284,19 @@ def test_planner_never_rewrites_the_tasks_family(twin, tmp_path, monkeypatch):
     assert list(res["report_data"]["families"]) == ["open_fridge"]
 
 
-def test_collect_closes_the_env_when_the_policy_raises(twin, tmp_path, monkeypatch):
+def test_collect_skips_a_task_whose_policy_raises_and_closes_its_env(twin, tmp_path, monkeypatch):
     from arrival.sim.policy import ScriptedExpert
 
     closed = []
     real = SimEnv.close
     monkeypatch.setattr(SimEnv, "close", lambda self: (closed.append(1), real(self))[1])
     monkeypatch.setattr(ScriptedExpert, "reset", lambda self, env, task: (_ for _ in ()).throw(ValueError("boom")))
-    with pytest.raises(ValueError):
-        collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=32, log=lambda *_: None)
+    res = collect(twin, ["open_drawer"], 2, tmp_path, people=0, res=32, log=lambda *_: None)
+    r = res["report_data"]
     assert closed
+    assert (r["skipped_error"], r["attempts"], r["successes"]) == (2, 0, 0)  # skipped tasks are not attempts
+    assert [x["stage"] for x in r["skip_reasons"]] == ["rollout", "rollout"] and "boom" in r["skip_reasons"][0]["reason"]
+    assert res["info"]["total_episodes"] == 0 and res["info"]["arrival_skipped_error"] == 2  # nothing was written
 
 
 def test_free_floor_survives_fixtures_only_in_the_far_half(twin):
@@ -285,7 +304,8 @@ def test_free_floor_survives_fixtures_only_in_the_far_half(twin):
 
     far = max(w["start"][1] for w in twin["walls"])
     t = {**twin, "fixtures": [{**f, "position": [f["position"][0], far, f["position"][2]]} for f in twin["fixtures"]]}
-    x0, y0, x1, y1 = SimEnv._free_floor(types.SimpleNamespace(twin=t))
+    anchor = t["fixtures"][0]
+    (x0, y0, x1, y1), *_ = SimEnv._free_floor(types.SimpleNamespace(twin=t), anchor, (2.0, 1.0, 0.75))
     assert x0 < x1 and y0 < y1
 
 

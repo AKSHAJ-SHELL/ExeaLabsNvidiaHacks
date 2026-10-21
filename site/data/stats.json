@@ -1,0 +1,670 @@
+{
+ "room_id": "hero_kitchen",
+ "seed": 5,
+ "people": 2,
+ "out_fps": 15,
+ "episodes": {
+  "attempted": 6,
+  "successful": 6,
+  "exported": 6
+ },
+ "families": {
+  "counter_to_sink": {
+   "exported": true,
+   "success": true,
+   "human_contact": false,
+   "frames": 178,
+   "duration_s": 11.8,
+   "min_human_distance_m": 0.2709,
+   "physics_detail": {
+    "object_pos": [
+     1.6128,
+     0.4173,
+     0.75
+    ],
+    "object_speed": 0.0
+   },
+   "episode_file": "episodes/counter_to_sink.json",
+   "instruction": "Put the bowl in the sink.",
+   "task_id": "sim_counter_to_sink_0000",
+   "seed": 5000,
+   "lighting": "bright"
+  },
+  "open_drawer": {
+   "exported": true,
+   "success": true,
+   "human_contact": false,
+   "frames": 110,
+   "duration_s": 7.267,
+   "min_human_distance_m": 0.3244,
+   "physics_detail": {
+    "joint": "counter_a_drawer0",
+    "qpos": 0.2997
+   },
+   "episode_file": "episodes/open_drawer.json",
+   "instruction": "Open the top drawer.",
+   "task_id": "sim_open_drawer_0001",
+   "seed": 5001,
+   "lighting": "neutral"
+  },
+  "open_door": {
+   "exported": true,
+   "success": true,
+   "human_contact": false,
+   "frames": 140,
+   "duration_s": 9.267,
+   "min_human_distance_m": 0.2225,
+   "physics_detail": {
+    "joint": "counter_a_door",
+    "qpos": 1.1043
+   },
+   "episode_file": "episodes/open_door.json",
+   "instruction": "Open the cabinet door.",
+   "task_id": "sim_open_door_0002",
+   "seed": 5002,
+   "lighting": "dim"
+  },
+  "open_fridge": {
+   "exported": true,
+   "success": true,
+   "human_contact": false,
+   "frames": 232,
+   "duration_s": 15.4,
+   "min_human_distance_m": 0.375,
+   "physics_detail": {
+    "joint": "fridge_1_door",
+    "qpos": 1.3935
+   },
+   "episode_file": "episodes/open_fridge.json",
+   "instruction": "Open the fridge.",
+   "task_id": "sim_open_fridge_0003",
+   "seed": 5003,
+   "lighting": "neutral"
+  },
+  "put_in_drawer": {
+   "exported": true,
+   "success": true,
+   "human_contact": false,
+   "frames": 155,
+   "duration_s": 10.267,
+   "min_human_distance_m": 0.295,
+   "physics_detail": {
+    "object_pos": [
+     1.1138,
+     0.7566,
+     0.6799
+    ],
+    "object_speed": 0.0003,
+    "drawer_qpos": 0.1355
+   },
+   "episode_file": "episodes/put_in_drawer.json",
+   "instruction": "Put the mug in the open drawer.",
+   "task_id": "sim_put_in_drawer_0004",
+   "seed": 5004,
+   "lighting": "bright"
+  },
+  "wipe_counter": {
+   "exported": true,
+   "success": true,
+   "human_contact": false,
+   "frames": 148,
+   "duration_s": 9.8,
+   "min_human_distance_m": 0.3109,
+   "physics_detail": {
+    "object_pos": [
+     3.2375,
+     0.333,
+     0.9349
+    ],
+    "wiped_m": 0.709
+   },
+   "episode_file": "episodes/wipe_counter.json",
+   "instruction": "Scrub the counter using the sponge.",
+   "task_id": "sim_wipe_counter_0005",
+   "seed": 5005,
+   "lighting": "dim"
+  }
+ },
+ "skipped": {},
+ "other_rooms_found": [],
+ "sim": {
+  "engine": "mujoco 3.16.0",
+  "physics_hz": 500,
+  "control_hz": 20,
+  "arm": "procedural 7-DoF Panda-style arm, friction grasp",
+  "success_check": "physics",
+  "people_model": "kinematic capsule walkers, seeded waypoint loops, safety metric per step"
+ },
+ "dataset": {
+  "physically_valid": true,
+  "generator": "mujoco_scripted_ik",
+  "frames": 1278,
+  "episodes": 6,
+  "attempts": 6,
+  "successes": 6,
+  "fps": 20,
+  "families": [
+   "counter_to_sink",
+   "open_door",
+   "open_drawer",
+   "open_fridge",
+   "put_in_drawer",
+   "wipe_counter"
+  ],
+  "cameras": [
+   "ego_view",
+   "wrist"
+  ],
+  "resolution": [
+   128,
+   128
+  ],
+  "state_dim": 8,
+  "action_dim": 8,
+  "format": "LeRobot v2.1 (GR00T layout)",
+  "success_check": "physics",
+  "grasp": "friction",
+  "loader_check": {
+   "ok": true,
+   "errors": [],
+   "warnings": [
+    {
+     "code": "stats_no_quantiles",
+     "msg": "stats.json observation.state has no q01/q99; the recomputed values are in the --json report (the writer only stores min/max/mean/std)"
+    },
+    {
+     "code": "stats_no_quantiles",
+     "msg": "stats.json action has no q01/q99; the recomputed values are in the --json report (the writer only stores min/max/mean/std)"
+    }
+   ],
+   "info": {
+    "episodes": 6,
+    "frames": 1278,
+    "fps": 20,
+    "state_dim": 8,
+    "action_dim": 8,
+    "horizon": 16,
+    "windows": 1278,
+    "padded_windows": 90,
+    "short_episodes": 0,
+    "videos_decoded": 6,
+    "cameras": [
+     "ego_view",
+     "wrist"
+    ],
+    "relative_action_range": [
+     -1.8591,
+     2.1634
+    ]
+   }
+  },
+  "report": {
+   "attempts": 6,
+   "successes": 6,
+   "dropped": 0,
+   "seconds": 23.52,
+   "demos_per_hour": 918.5,
+   "human_contacts": 0,
+   "families": {
+    "counter_to_sink": {
+     "attempts": 1,
+     "successes": 1,
+     "human_contacts": 0,
+     "fridge_visits": 0,
+     "door_contacts": 0,
+     "success_rate": 1.0
+    },
+    "open_drawer": {
+     "attempts": 1,
+     "successes": 1,
+     "human_contacts": 0,
+     "fridge_visits": 0,
+     "door_contacts": 0,
+     "success_rate": 1.0
+    },
+    "open_door": {
+     "attempts": 1,
+     "successes": 1,
+     "human_contacts": 0,
+     "fridge_visits": 0,
+     "door_contacts": 0,
+     "success_rate": 1.0
+    },
+    "open_fridge": {
+     "attempts": 1,
+     "successes": 1,
+     "human_contacts": 0,
+     "fridge_visits": 0,
+     "door_contacts": 0,
+     "success_rate": 1.0
+    },
+    "put_in_drawer": {
+     "attempts": 1,
+     "successes": 1,
+     "human_contacts": 0,
+     "fridge_visits": 0,
+     "door_contacts": 0,
+     "success_rate": 1.0
+    },
+    "wipe_counter": {
+     "attempts": 1,
+     "successes": 1,
+     "human_contacts": 0,
+     "fridge_visits": 0,
+     "door_contacts": 0,
+     "success_rate": 1.0
+    }
+   }
+  },
+  "matches_exported_episodes": true
+ },
+ "eval": {
+  "room_id": "hero_kitchen",
+  "policy": "scripted",
+  "episodes_per_family": 1,
+  "seed": 5,
+  "people": 2,
+  "holdout": false,
+  "resolution": 128,
+  "families": {
+   "counter_to_sink": {
+    "episodes": 1,
+    "successes": 1,
+    "success_rate": 1.0,
+    "wilson_95": [
+     0.2065,
+     1.0
+    ],
+    "mean_seconds": 11.8,
+    "mean_wall_seconds": 5.074,
+    "human_contacts": 0,
+    "errors": [],
+    "min_human_distance_m": 0.3408,
+    "ik_error_max": 0.0,
+    "arm_contact_episodes": 0,
+    "arm_contact_max_depth_m": 0.0
+   },
+   "open_drawer": {
+    "episodes": 1,
+    "successes": 1,
+    "success_rate": 1.0,
+    "wilson_95": [
+     0.2065,
+     1.0
+    ],
+    "mean_seconds": 7.3,
+    "mean_wall_seconds": 3.337,
+    "human_contacts": 0,
+    "errors": [],
+    "min_human_distance_m": 0.3143,
+    "ik_error_max": 0.0,
+    "arm_contact_episodes": 0,
+    "arm_contact_max_depth_m": 0.0
+   },
+   "open_door": {
+    "episodes": 1,
+    "successes": 1,
+    "success_rate": 1.0,
+    "wilson_95": [
+     0.2065,
+     1.0
+    ],
+    "mean_seconds": 9.3,
+    "mean_wall_seconds": 4.633,
+    "human_contacts": 0,
+    "errors": [],
+    "min_human_distance_m": 0.2988,
+    "ik_error_max": 0.0,
+    "arm_contact_episodes": 1,
+    "arm_contact_max_depth_m": 0.0009
+   },
+   "open_fridge": {
+    "episodes": 1,
+    "successes": 1,
+    "success_rate": 1.0,
+    "wilson_95": [
+     0.2065,
+     1.0
+    ],
+    "mean_seconds": 15.4,
+    "mean_wall_seconds": 5.494,
+    "human_contacts": 0,
+    "errors": [],
+    "min_human_distance_m": 0.2895,
+    "ik_error_max": 0.0,
+    "arm_contact_episodes": 0,
+    "arm_contact_max_depth_m": 0.0
+   },
+   "put_in_drawer": {
+    "episodes": 1,
+    "successes": 1,
+    "success_rate": 1.0,
+    "wilson_95": [
+     0.2065,
+     1.0
+    ],
+    "mean_seconds": 10.3,
+    "mean_wall_seconds": 3.475,
+    "human_contacts": 0,
+    "errors": [],
+    "min_human_distance_m": 0.2756,
+    "ik_error_max": 0.0,
+    "arm_contact_episodes": 1,
+    "arm_contact_max_depth_m": 0.0017
+   },
+   "wipe_counter": {
+    "episodes": 1,
+    "successes": 1,
+    "success_rate": 1.0,
+    "wilson_95": [
+     0.2065,
+     1.0
+    ],
+    "mean_seconds": 9.8,
+    "mean_wall_seconds": 3.815,
+    "human_contacts": 0,
+    "errors": [],
+    "min_human_distance_m": 0.3195,
+    "ik_error_max": 0.0,
+    "arm_contact_episodes": 0,
+    "arm_contact_max_depth_m": 0.0
+   }
+  },
+  "totals": {
+   "episodes": 6,
+   "successes": 6,
+   "success_rate": 1.0,
+   "wilson_95": [
+    0.6097,
+    1.0
+   ],
+   "human_contacts": 0,
+   "errors": 0,
+   "arm_contact_episodes": 2,
+   "wall_seconds": 25.83
+  }
+ },
+ "cost": {
+  "rows": [
+   {
+    "source": "report",
+    "room": "hero_kitchen",
+    "family": null,
+    "attempts": 6,
+    "successes": 6,
+    "seconds": 23.52,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": 918.4,
+    "seconds_per_demo": 3.92,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": 23.52
+   },
+   {
+    "source": "report",
+    "room": "hero_kitchen",
+    "family": "counter_to_sink",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": null,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": null,
+    "seconds_per_demo": null,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": null
+   },
+   {
+    "source": "report",
+    "room": "hero_kitchen",
+    "family": "open_drawer",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": null,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": null,
+    "seconds_per_demo": null,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": null
+   },
+   {
+    "source": "report",
+    "room": "hero_kitchen",
+    "family": "open_door",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": null,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": null,
+    "seconds_per_demo": null,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": null
+   },
+   {
+    "source": "report",
+    "room": "hero_kitchen",
+    "family": "open_fridge",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": null,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": null,
+    "seconds_per_demo": null,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": null
+   },
+   {
+    "source": "report",
+    "room": "hero_kitchen",
+    "family": "put_in_drawer",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": null,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": null,
+    "seconds_per_demo": null,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": null
+   },
+   {
+    "source": "report",
+    "room": "hero_kitchen",
+    "family": "wipe_counter",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": null,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": null,
+    "seconds_per_demo": null,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": null
+   },
+   {
+    "source": "eval",
+    "room": "hero_kitchen",
+    "family": "counter_to_sink",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": 5.074,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": 709.5,
+    "seconds_per_demo": 5.074,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": 5.074
+   },
+   {
+    "source": "eval",
+    "room": "hero_kitchen",
+    "family": "open_drawer",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": 3.337,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": 1078.8,
+    "seconds_per_demo": 3.337,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": 3.337
+   },
+   {
+    "source": "eval",
+    "room": "hero_kitchen",
+    "family": "open_door",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": 4.633,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": 777.0,
+    "seconds_per_demo": 4.633,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": 4.633
+   },
+   {
+    "source": "eval",
+    "room": "hero_kitchen",
+    "family": "open_fridge",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": 5.494,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": 655.3,
+    "seconds_per_demo": 5.494,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": 5.494
+   },
+   {
+    "source": "eval",
+    "room": "hero_kitchen",
+    "family": "put_in_drawer",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": 3.475,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": 1036.0,
+    "seconds_per_demo": 3.475,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": 3.475
+   },
+   {
+    "source": "eval",
+    "room": "hero_kitchen",
+    "family": "wipe_counter",
+    "attempts": 1,
+    "successes": 1,
+    "seconds": 3.815,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": 943.6,
+    "seconds_per_demo": 3.815,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": 3.815
+   },
+   {
+    "source": "eval",
+    "room": "hero_kitchen",
+    "family": null,
+    "attempts": 6,
+    "successes": 6,
+    "seconds": 25.83,
+    "human_contacts": 0,
+    "dropped": 0,
+    "drop_rate": 0.0,
+    "demos_per_hour": 836.2,
+    "seconds_per_demo": 4.305,
+    "attempts_per_demo": 1.0,
+    "local_cpu_wall_seconds": 25.83
+   }
+  ],
+  "dollars": {
+   "local_cpu": {
+    "usd": 0,
+    "measured": true
+   },
+   "token_factory": {
+    "usd": null,
+    "measured": false
+   },
+   "serverless_jobs": {
+    "usd": null,
+    "measured": false
+   },
+   "cosmos": {
+    "usd": null,
+    "measured": false
+   },
+   "object_storage": {
+    "usd": null,
+    "measured": false
+   },
+   "endpoint": {
+    "usd": null,
+    "measured": false
+   }
+  },
+  "teleop_baseline": null,
+  "comparison": {
+   "measured": false,
+   "reason": "no teleop baseline"
+  }
+ },
+ "files": {
+  "README.md": 7176,
+  "episodes/counter_to_sink.json": 286005,
+  "episodes/open_door.json": 228899,
+  "episodes/open_drawer.json": 175717,
+  "episodes/open_fridge.json": 372744,
+  "episodes/put_in_drawer.json": 257944,
+  "episodes/wipe_counter.json": 238641,
+  "frames/counter_to_sink_ego_view_end.png": 49393,
+  "frames/counter_to_sink_ego_view_mid.png": 45147,
+  "frames/counter_to_sink_wrist_end.png": 32577,
+  "frames/counter_to_sink_wrist_mid.png": 34082,
+  "frames/open_door_ego_view_end.png": 35298,
+  "frames/open_door_ego_view_mid.png": 31863,
+  "frames/open_door_wrist_end.png": 15414,
+  "frames/open_door_wrist_mid.png": 12258,
+  "frames/open_drawer_ego_view_end.png": 39301,
+  "frames/open_drawer_ego_view_mid.png": 38095,
+  "frames/open_drawer_wrist_end.png": 17483,
+  "frames/open_drawer_wrist_mid.png": 15430,
+  "frames/open_fridge_ego_view_end.png": 37735,
+  "frames/open_fridge_ego_view_mid.png": 35712,
+  "frames/open_fridge_wrist_end.png": 4734,
+  "frames/open_fridge_wrist_mid.png": 7815,
+  "frames/put_in_drawer_ego_view_end.png": 42362,
+  "frames/put_in_drawer_ego_view_mid.png": 42532,
+  "frames/put_in_drawer_wrist_end.png": 6854,
+  "frames/put_in_drawer_wrist_mid.png": 59435,
+  "frames/wipe_counter_ego_view_end.png": 29385,
+  "frames/wipe_counter_ego_view_mid.png": 29312,
+  "frames/wipe_counter_wrist_end.png": 35349,
+  "frames/wipe_counter_wrist_mid.png": 16258,
+  "geoms.json": 34258,
+  "rooms.json": 6838,
+  "scan_points.bin": 180000,
+  "scan_points.json": 842,
+  "stats.json": 13634
+ }
+}

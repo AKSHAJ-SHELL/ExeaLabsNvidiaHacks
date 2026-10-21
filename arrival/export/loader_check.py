@@ -18,6 +18,8 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from arrival.sim.robot import BASE_SPEED, BASE_TURN
+
 HORIZON = 16  # len(delta_indices) of the action modality in configs/gr00t/arrival_panda_config.py
 TS_TOL = 1e-4  # seconds, same as validate.py and LeRobot's timestamp sync check
 STAT_RTOL, STAT_ATOL = 1e-3, 1e-4
@@ -26,6 +28,9 @@ ARROW = {"float32": pa.float32(), "int64": pa.int64(), "bool": pa.bool_()}
 STAT_KEYS = ("mean", "std", "min", "max")
 Q = (0.01, 0.99)
 MAX_ERRORS = 60
+BASE_SLICE = (8, 11)  # base x, y, yaw in the room frame: the third slice of state and action in sim datasets (MAN-3)
+BASE_HOLD_TOL = 1e-4  # a fixed base's state and action must not move more than this (m, rad) in an episode
+BASE_SPEED_TOL = 0.01  # slack over BASE_SPEED / BASE_TURN for float32 rounding of the written columns
 
 
 class _Findings:
@@ -115,6 +120,7 @@ def check_loader(root: str | Path) -> dict:
 
     # modality.json slices against the state/action dims
     arm_s = arm_a = None
+    base_s = base_a = None
     for group, dim in (("state", s_dim), ("action", a_dim)):
         parts = modality.get(group) or {}
         if not parts:
@@ -128,11 +134,32 @@ def check_loader(root: str | Path) -> dict:
                     arm_s = (st, en)
                 else:
                     arm_a = (st, en)
+            elif k == "base":
+                if group == "state":
+                    base_s = (st, en)
+                else:
+                    base_a = (st, en)
     if arm_s is None or arm_a is None:
         f.err("modality_slices", "modality.json needs state.single_arm and action.single_arm for the relative arm action")
     elif arm_s[1] - arm_s[0] != arm_a[1] - arm_a[0]:
         f.err("modality_slices", "state.single_arm and action.single_arm have different widths")
         arm_s = arm_a = None
+
+    # the base pose (MAN-3): both slices or neither, at [8, 11), and the embodiment must agree with the dims
+    has_base = base_s is not None or base_a is not None
+    base_ok = False
+    if has_base:
+        if base_s != BASE_SLICE or base_a != BASE_SLICE or s_dim != BASE_SLICE[1] or a_dim != BASE_SLICE[1]:
+            f.err("base_slice", f"modality base slices must be [{BASE_SLICE[0]}, {BASE_SLICE[1]}) in both state and action "
+                  f"with 11-float rows, got state {base_s}, action {base_a}, dims {s_dim}/{a_dim}")
+        else:
+            base_ok = True
+    elif emb.get("dof_base"):
+        f.err("base_slice", f"embodiment.json says dof_base {emb.get('dof_base')} but modality.json has no base slice")
+    base_actuated = emb.get("base_actuated")
+    if has_base and not isinstance(base_actuated, bool):
+        f.err("base_slice", "embodiment.json needs base_actuated true or false when modality.json has a base slice")
+        base_ok = False
 
     # video keys: original_key must be a video feature in info.json; every episode needs an mp4 per key
     video_tpl = info.get("video_path") or ""
@@ -229,6 +256,19 @@ def check_loader(root: str | Path) -> dict:
                 f.err("nonfinite", f"{name}: {c} has NaN or inf")
         if not fin:
             continue
+        if base_ok:
+            for c, x in (("observation.state", s), ("action", a)):
+                b = x[:, BASE_SLICE[0]:BASE_SLICE[1]]
+                if not base_actuated:
+                    if len(b) and float(np.ptp(b, axis=0).max()) > BASE_HOLD_TOL:
+                        f.err("base_fixed_moves", f"{name}: {c} base moves (range "
+                              f"{float(np.ptp(b, axis=0).max()):.4f}) but embodiment.base_actuated is false")
+                elif len(b) > 1:
+                    v = np.linalg.norm(np.diff(b[:, :2], axis=0), axis=1) * fps
+                    w = np.abs(np.diff(b[:, 2])) * fps
+                    if v.max() > BASE_SPEED + BASE_SPEED_TOL or w.max() > BASE_TURN + BASE_SPEED_TOL:
+                        f.err("base_speed", f"{name}: {c} base moves {v.max():.3f} m/s and {w.max():.3f} rad/s, over the "
+                              f"{BASE_SPEED} m/s and {BASE_TURN} rad/s the writer limits it to (a teleport, not a drive)")
         if arm_s and arm_a:
             # relative arm action as the loader builds it: action[t+k] - state[t], tail padded with the last action
             idx = np.minimum(np.arange(len(s))[:, None] + np.arange(HORIZON)[None, :], len(s) - 1)
@@ -255,6 +295,12 @@ def check_loader(root: str | Path) -> dict:
         mine = {"mean": mean, "std": std, "min": d["min"], "max": d["max"], "q01": q[0], "q99": q[1]}
         out_stats[c] = {k: v.tolist() for k, v in mine.items()}
         const = np.flatnonzero(std <= CONST_STD)
+        if base_ok and base_actuated is False:  # a parked base is constant by construction: say so once, not as a defect
+            parked = [i for i in const.tolist() if BASE_SLICE[0] <= i < BASE_SLICE[1]]
+            const = np.asarray([i for i in const.tolist() if i not in parked], dtype=int)
+            if parked:
+                f.warn("fixed_base_constant", f"{c} dims {parked} are the parked base pose and constant (std 0): train "
+                       f"with configs/gr00t/arrival_panda_config.py (arm and gripper only), not the mobile config")
         if len(const):
             f.warn("constant_dim", f"{c} dims {const.tolist()} are constant (std 0); std normalisation divides by it, "
                    f"so the loader must clamp it")
@@ -319,6 +365,7 @@ def check_loader(root: str | Path) -> dict:
         "episodes": n_ep, "frames": frames, "fps": fps, "state_dim": s_dim, "action_dim": a_dim,
         "horizon": HORIZON, "windows": windows, "padded_windows": padded, "short_episodes": short,
         "videos_decoded": n_decoded, "cameras": sorted(cams),
+        "base": None if not has_base else ("mobile" if base_actuated else "fixed"),
         "relative_action_range": [rel_min, rel_max] if np.isfinite(rel_min) else None,
     }
     out["ok"] = not f.errors
@@ -330,7 +377,8 @@ def format_report(root, res: dict) -> str:
     lines = [f"loader check: {root}: {'PASS' if res['ok'] else 'FAIL'}"]
     if i:
         lines.append(f"  {i['episodes']} episodes, {i['frames']} frames @ {i['fps']} fps, state {i['state_dim']}d / "
-                     f"action {i['action_dim']}d, cameras {', '.join(i['cameras'])}, {i['videos_decoded']} mp4s decoded")
+                     f"action {i['action_dim']}d, cameras {', '.join(i['cameras'])}, {i['videos_decoded']} mp4s decoded"
+                     + (f", {i['base']} base in state/action[8:11]" if i.get("base") else ""))
         pct = 100 * i["padded_windows"] / max(i["windows"], 1)
         lines.append(f"  {i['horizon']}-step action windows: {i['padded_windows']}/{i['windows']} padded at the tail "
                      f"({pct:.0f}%), {i['short_episodes']} episode(s) shorter than the horizon")

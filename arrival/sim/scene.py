@@ -8,32 +8,37 @@ import math
 import random
 
 from arrival.catalog.objects import object_spec
+from arrival.scan.bundle import ScanBundleError
 from arrival.sim import people, robot
-from arrival.twin.compile import to_local
+from arrival.twin.compile import COUNTER_HEIGHT, is_counter_host, to_local
 
 LIGHT = {"dim": 0.35, "neutral": 0.7, "bright": 1.0}
 LIGHT_JITTER = 0.15  # per-task intensity jitter inside a label; the three bands never overlap
 WARM, COOL = (1.0, 0.93, 0.82), (0.86, 0.93, 1.0)  # key light colour runs between these
 WALL = "0.93 0.91 0.86 1"
 TOP_T = 0.04
+MIN_HALF = 0.0005  # smallest box half-extent written: MuJoCo refuses a size of 0 or less
 CARCASS_H = 0.70  # cabinet body below the counter top (sink basin sits between this and the top)
 DRAWER = 'contype="2" conaffinity="2"'  # moving parts collide with the robot, not with their carcass
 APPLIANCES = ("fridge", "stove", "dishwasher")  # floor-standing: counters are trimmed where they run into one
 VIS = 'contype="0" conaffinity="0" group="2"'
 FRONT, GAP = "0.70 0.55 0.40 1", "0.10 0.09 0.08 1"
 STEEL, DARK, SPLASH = "0.75 0.77 0.80 1", "0.08 0.08 0.09 1", "0.88 0.86 0.81 1"
+TOP, FURNITURE = "0.82 0.82 0.8 1", "0.46 0.44 0.42 1"  # counter top; the solid box a scanned fixture without a model gets
 REVEAL, INSET, FRONT_T, KICK = 0.003, 0.015, 0.018, 0.10
 UPPER_Z0, UPPER_H, UPPER_D, UPPER_DOOR_MAX = 1.56, 0.60, 0.32, 0.60  # wall cabinets over a counter run; the wrist
 # reaches 1.50 m over the back of the counter when it drops into the sink, so the cabinets start above that
 DOOR_FLAT = 1.5  # bottom-hinged doors (oven, dishwasher) stop just short of horizontal
 TOP = "0.82 0.82 0.8 1"
 MATERIALS = {FRONT: "wood", TOP: "stone", SPLASH: "panel", WALL: "paint"}  # attached by colour in build_mjcf
+RACK_Z, RACK_OUT = 0.52, 0.45  # dishwasher upper rack: tray height and how far it slides out over the open door
 
 
 def _box(name, pos, size, rgba, extra=""):
     label = f'name="{name}" ' if name else ""
+    half = [max(s / 2, MIN_HALF) for s in size]  # a counter squeezed by neighbours can leave a zero-width panel
     return (f'<geom {label}type="box" pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}" '
-            f'size="{size[0] / 2:.4f} {size[1] / 2:.4f} {size[2] / 2:.4f}" rgba="{rgba}" {extra}/>')
+            f'size="{half[0]:.4f} {half[1]:.4f} {half[2]:.4f}" rgba="{rgba}" {extra}/>')
 
 
 def _vbox(pos, size, rgba):
@@ -57,8 +62,18 @@ def _vcyl(rgba, r, a, b, kind="cylinder"):
 
 
 def _sinks_in(counter: dict, sinks: list[dict]) -> list[dict]:
-    (cx, cy, _), (sx, sy, _) = counter["position"], counter["size"]
-    return [s for s in sinks if abs(s["position"][0] - cx) < sx / 2 and abs(s["position"][1] - cy) < sy / 2]
+    sx, sy, _ = counter["size"]
+    inside = []
+    for sink in sinks:
+        x, y = to_local(sink["position"], counter)
+        if abs(x) < sx / 2 and abs(y) < sy / 2:
+            inside.append(sink)
+    return inside
+
+
+def _host_of(s: dict, fixtures: list[dict]) -> dict | None:
+    """The counter or counter-height cabinet a sink is set into, if any."""
+    return next((f for f in fixtures if is_counter_host(f) and _sinks_in(f, [s])), None)
 
 
 def _span(c: dict, fixtures: list[dict]) -> tuple[float, float]:
@@ -86,15 +101,32 @@ def _span(c: dict, fixtures: list[dict]) -> tuple[float, float]:
 
 
 def drawer_x(c: dict, fixtures: list[dict]) -> float:
-    """Local x of the drawer stack: left quarter, or the middle if a fridge/stove overlaps the left quarter."""
-    x = c["position"][0] - c["size"][0] / 4
-    appl = [f for f in fixtures if f["type"].startswith(APPLIANCES)]
-    if any(abs(f["position"][0] - x) < f["size"][0] / 2 + DRAWER_W / 2 for f in appl):
-        return 0.0
-    return -c["size"][0] / 4
+    """Local x of the drawer stack: left quarter, or the middle if a fridge/stove in the same run overlaps the
+    left quarter. Judged in the counter's frame, so a run on any wall gets the same layout."""
+    x = -c["size"][0] / 4
+    for f in fixtures:
+        if not f["type"].startswith(APPLIANCES):
+            continue
+        rel = float(f.get("yaw", 0.0)) - float(c.get("yaw", 0.0))
+        co, si = abs(math.cos(rel)), abs(math.sin(rel))
+        lx, ly = to_local(f["position"], c)
+        if abs(ly) > (c["size"][1] + si * f["size"][0] + co * f["size"][1]) / 2:
+            continue  # across the room, not in this run
+        if abs(lx - x) < (co * f["size"][0] + si * f["size"][1]) / 2 + DRAWER_W / 2:
+            return 0.0
+    return x
 
 
 DRAWER_W = 0.5
+
+
+def front_stand(c: dict, family: str, fixtures: list[dict]) -> tuple[float, float]:
+    """Where the base stands for a drawer or door task: local x along the run, and distance out from the front."""
+    if family in ("open_drawer", "close_drawer"):
+        return drawer_x(c, fixtures), 0.72
+    # just left of the handle (away from the hinge), outside the door's swing, far enough out that the far end of
+    # the handle arc stays within reach of the tilted-down grasp
+    return c["size"][0] / 2 - 0.02 - door_w(c, fixtures) + 0.06 - 0.1, 0.65
 
 
 def door_w(c: dict, fixtures: list[dict]) -> float:
@@ -126,8 +158,8 @@ def _sink_visuals(hx, hw, hd, sy, h) -> list[str]:
 def _faucet_lever_xml(sid: str, hx: float, y0: float, h: float) -> str:
     """Single-lever mixer handle on the faucet column: hinge `{sid}_faucet`, q > 0 lifts the lever (water on)."""
     return (f'<body name="{sid}_faucet_lever" pos="{hx + 0.012:.4f} {y0:.4f} {h + 0.19:.4f}">'
-            f'<joint name="{sid}_faucet" type="hinge" axis="0 -1 0" range="0 1.2" damping="0.05" frictionloss="0.05"/>'
-            f'<inertial pos="0.025 0 0.005" mass="0.05" diaginertia="1e-5 1e-5 1e-5"/>'
+            f'<joint name="{sid}_faucet" type="hinge" axis="0 -1 0" range="0 1.2" damping="0.5" frictionloss="0.05"/>'
+            f'<inertial pos="0 0 0" mass="0.05" diaginertia="1e-5 1e-5 1e-5"/>'  # balanced on its cartridge: it stays
             f'<geom name="{sid}_faucet_handle" type="capsule" size="0.006" fromto="0 0 0 0.05 0 0.01" rgba="{STEEL}" '
             f'{DRAWER}/><site name="{sid}_faucet_handle" pos="0.04 0 0.008" size="0.005"/></body>')
 
@@ -172,6 +204,26 @@ def _upper_cabinet_xml(cid: str, c: dict, fixtures: list[dict]) -> str:
     return "".join(g)
 
 
+TABLE_LEG = 0.05  # square leg side (m)
+
+
+def is_table(f: dict) -> bool:
+    """A scanned table: compiled as a counter for RoboCasa (default_config_name "dining") but built as a table."""
+    return f.get("type") == "counter" and f.get("default_config_name") == "dining"
+
+
+def table_xml(f: dict) -> str:
+    """A top slab on four legs, no carcass, drawers or doors. Objects rest on the top; the arm collides with it."""
+    (cx, cy, _), (sx, sy, h) = f["position"], f["size"]
+    fid, yaw = f["id"], f.get("yaw", 0.0)
+    wood = "0.62 0.47 0.33 1"
+    g = [_box(f"{fid}_top", (0, 0, h - TOP_T / 2), (sx, sy, TOP_T), wood)]
+    lx, ly, lh = sx / 2 - 0.06 - TABLE_LEG / 2, sy / 2 - 0.06 - TABLE_LEG / 2, h - TOP_T
+    g += [_box(f"{fid}_leg{k}", (px, py, lh / 2), (TABLE_LEG, TABLE_LEG, lh), "0.35 0.27 0.2 1")
+          for k, (px, py) in enumerate(((-lx, -ly), (lx, -ly), (-lx, ly), (lx, ly)))]
+    return f'<body name="{fid}" pos="{cx} {cy} 0" euler="0 0 {yaw}">' + "".join(g) + "</body>"
+
+
 def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
     """Counter in its local frame (+y local = front). Top slab is split around any sink hole; the counter
     is trimmed where it runs into a fridge/stove. Visible fronts are recessed visual twins of the physical
@@ -182,30 +234,13 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
     x0, x1 = _span(c, fixtures)
     xm, xw = (x0 + x1) / 2, x1 - x0
     g = [_box(f"{cid}_carcass", (xm, 0, CARCASS_H / 2), (xw, sy - 0.04, CARCASS_H), "0.55 0.42 0.3 1")]
-    holes = [(s["position"][0] - cx, s["size"][0], s["size"][1], s) for s in _sinks_in(c, sinks)]
+    holes = [(to_local(s["position"], c)[0], s["size"][0], s["size"][1], s) for s in _sinks_in(c, sinks)]
     zt = h - TOP_T / 2
-    top = TOP
     if not holes:
-        g.append(_box(f"{cid}_top", (xm, 0, zt), (xw, sy, TOP_T), top))
+        g.append(_box(f"{cid}_top", (xm, 0, zt), (xw, sy, TOP_T), TOP))
     for hx, hw, hd, s in holes[:1]:
-        lx0, lx1 = x0, hx - hw / 2
-        rx0, rx1 = hx + hw / 2, x1
-        g.append(_box(f"{cid}_top_l", ((lx0 + lx1) / 2, 0, zt), (lx1 - lx0, sy, TOP_T), top))
-        g.append(_box(f"{cid}_top_r", ((rx0 + rx1) / 2, 0, zt), (rx1 - rx0, sy, TOP_T), top))
-        rim = (sy - hd) / 2
-        g.append(_box(f"{cid}_top_f", (hx, sy / 2 - rim / 2, zt), (hw, rim, TOP_T), top))
-        g.append(_box(f"{cid}_top_b", (hx, -sy / 2 + rim / 2, zt), (hw, rim, TOP_T), top))
-        # basin: bottom + 4 thin walls, from carcass top to counter top
-        bz0, bt = CARCASS_H + 0.01, 0.01
-        wall_h = h - bz0
-        steel = "0.6 0.62 0.65 1"
-        sid = s["id"]
-        g.append(_box(f"{sid}_bottom", (hx, 0, bz0), (hw, hd, 0.02), steel))
-        for k, (px, py, wx, wy) in enumerate([(hx - hw / 2 + bt / 2, 0, bt, hd), (hx + hw / 2 - bt / 2, 0, bt, hd),
-                                              (hx, hd / 2 - bt / 2, hw, bt), (hx, -hd / 2 + bt / 2, hw, bt)]):
-            g.append(_box(f"{sid}_wall{k}", (px, py, bz0 + wall_h / 2), (wx, wy, wall_h), steel))
-        g += _sink_visuals(hx, hw, hd, sy, h)
-        g.append(_faucet_lever_xml(sid, hx, -sy / 2 + 0.04, h))
+        g += _split_top_xml(cid, x0, x1, hx, hw, hd, sy, zt)
+        g += _basin_xml(s["id"], hx, hw, hd, sy, h)
     # ---- visual shell: backer, end panels, fronts ----
     front = sy / 2 - 0.02
     yf, zf = sy / 2 - INSET, h - TOP_T
@@ -279,6 +314,55 @@ def counter_xml(c: dict, sinks: list[dict], fixtures: list[dict] = ()) -> str:
     return "".join(body) + "</body>"
 
 
+def _split_top_xml(cid: str, x0: float, x1: float, hx: float, hw: float, hd: float, sy: float, zt: float) -> list[str]:
+    """Top slab in four pieces around a sink hole centred at local x=hx."""
+    lx0, lx1 = x0, hx - hw / 2
+    rx0, rx1 = hx + hw / 2, x1
+    rim = (sy - hd) / 2
+    g = []
+    if lx1 - lx0 > 1e-4:  # a hole flush with the counter end leaves no slab on that side
+        g.append(_box(f"{cid}_top_l", ((lx0 + lx1) / 2, 0, zt), (lx1 - lx0, sy, TOP_T), TOP))
+    if rx1 - rx0 > 1e-4:
+        g.append(_box(f"{cid}_top_r", ((rx0 + rx1) / 2, 0, zt), (rx1 - rx0, sy, TOP_T), TOP))
+    g.append(_box(f"{cid}_top_f", (hx, sy / 2 - rim / 2, zt), (hw, rim, TOP_T), TOP))
+    g.append(_box(f"{cid}_top_b", (hx, -sy / 2 + rim / 2, zt), (hw, rim, TOP_T), TOP))
+    return g
+
+
+def _basin_xml(sid: str, hx: float, hw: float, hd: float, sy: float, h: float) -> list[str]:
+    """Basin: bottom + 4 thin walls from carcass top to counter top, rim and drain visuals, faucet lever."""
+    bz0, bt = CARCASS_H + 0.01, 0.01
+    wall_h = h - bz0
+    steel = "0.6 0.62 0.65 1"
+    g = [_box(f"{sid}_bottom", (hx, 0, bz0), (hw, hd, 0.02), steel)]
+    for k, (px, py, wx, wy) in enumerate([(hx - hw / 2 + bt / 2, 0, bt, hd), (hx + hw / 2 - bt / 2, 0, bt, hd),
+                                          (hx, hd / 2 - bt / 2, hw, bt), (hx, -hd / 2 + bt / 2, hw, bt)]):
+        g.append(_box(f"{sid}_wall{k}", (px, py, bz0 + wall_h / 2), (wx, wy, wall_h), steel))
+    g += _sink_visuals(hx, hw, hd, sy, h)
+    g.append(_faucet_lever_xml(sid, hx, -sy / 2 + 0.04, h))
+    return g
+
+
+def sink_unit_xml(s: dict) -> str:
+    """A sink with no counter or cabinet under it: a carcass the sink's footprint plus a 5 cm rim, a top at
+    counter height and the same basin and faucet a counter gets, so a sink task still has a basin to reach."""
+    (cx, cy, _), (hw, hd, _) = s["position"], s["size"]
+    sid, yaw, h = s["id"], s.get("yaw", 0.0), COUNTER_HEIGHT
+    sx, sy = hw + 0.1, hd + 0.1
+    g = [_box(f"{sid}_carcass", (0, 0, CARCASS_H / 2), (sx, sy - 0.04, CARCASS_H), "0.55 0.42 0.3 1")]
+    g += _split_top_xml(sid, -sx / 2, sx / 2, 0.0, hw, hd, sy, h - TOP_T / 2)
+    g += _basin_xml(sid, 0.0, hw, hd, sy, h)
+    return f'<body name="{sid}" pos="{cx} {cy} 0" euler="0 0 {yaw}">' + "".join(g) + "</body>"
+
+
+def furniture_xml(f: dict) -> str:
+    """Any scanned fixture without its own model (tall or wall-hung storage, chair, bed, sofa, TV, ...): one
+    solid box at its scanned size and height, so the arm, the base and the walkers cannot pass through it."""
+    (cx, cy, cz), (sx, sy, sz) = f["position"], f["size"]
+    return (f'<body name="{f["id"]}" pos="{cx} {cy} {cz}" euler="0 0 {f.get("yaw", 0.0)}">'
+            + _box(f'{f["id"]}_box', (0, 0, 0), (sx, sy, sz), FURNITURE) + "</body>")
+
+
 def stove_xml(f: dict) -> str:
     (cx, cy, _), (sx, sy, sz) = f["position"], f["size"]
     sid = f["id"]
@@ -326,13 +410,29 @@ def _flap_door_xml(name: str, pivot, width: float, height: float, mass: float, r
 
 
 def dishwasher_xml(f: dict) -> str:
-    """Floor-standing dishwasher: carcass box and a bottom-hinged front door with the handle bar near the top."""
+    """Floor-standing dishwasher: a hollow carcass (bottom, top, back and two sides), a bottom-hinged front door
+    with the handle bar near the top, and an upper rack (`{fid}_rack`, slide along +y) that rolls out over the
+    open door so an arm on a pedestal can reach it; the lower rack would sit below a fixed-base arm's reach."""
     (cx, cy, _), (sx, sy, h) = f["position"], f["size"]
     fid, ys = f["id"], sy / 2
-    g = [_box(f"{fid}_box", (0, -0.01, h / 2), (sx, sy - 0.02, h), "0.55 0.56 0.58 1"),
+    shell, t = "0.55 0.56 0.58 1", 0.03
+    g = [_box(f"{fid}_bottom", (0, -0.01, 0.04), (sx, sy - 0.02, 0.08), shell),
+         _box(f"{fid}_top", (0, -0.01, h - t / 2), (sx, sy - 0.02, t), shell),
+         _box(f"{fid}_back", (0, -ys + t / 2, h / 2), (sx, t, h), shell),
+         _box(f"{fid}_left", (-sx / 2 + t / 2, -0.01, h / 2), (t, sy - 0.02, h), shell),
+         _box(f"{fid}_right", (sx / 2 - t / 2, -0.01, h / 2), (t, sy - 0.02, h), shell),
          _vr(-sx / 2, sx / 2, ys - 0.012, ys + 0.004, h - 0.08, h - 0.01, "0.2 0.2 0.21 1"),
          _vr(-sx / 2, sx / 2, ys - 0.01, ys + 0.003, 0, 0.08, DARK),
          _flap_door_xml(f"{fid}_door", (0, ys + 0.006, 0.08), sx - 0.04, h - 0.18, 5.0, STEEL, handle_dz=0.05)]
+    rw, rd, rail = sx - 2 * t - 0.06, sy - 0.12, 0.04
+    rack = [f'<body name="{fid}_rack" pos="0 0 {RACK_Z}">'
+            f'<joint name="{fid}_rack" type="slide" axis="0 1 0" range="0 {RACK_OUT}" damping="5" frictionloss="0.5"/>'
+            f'<inertial pos="0 0 0.01" mass="1.2" diaginertia="0.02 0.02 0.02"/>'
+            + _box(f"{fid}_rack_tray", (0, 0, 0), (rw, rd, 0.02), "0.7 0.72 0.75 1", DRAWER)]
+    for k, (px, py, wx, wy) in enumerate([(0, rd / 2 - 0.005, rw, 0.01), (0, -rd / 2 + 0.005, rw, 0.01),
+                                          (rw / 2 - 0.005, 0, 0.01, rd), (-rw / 2 + 0.005, 0, 0.01, rd)]):
+        rack.append(_box(f"{fid}_rack_rail{k}", (px, py, 0.01 + rail / 2), (wx, wy, rail), "0.7 0.72 0.75 1", DRAWER))
+    g.append("".join(rack) + "</body>")
     return f'<body name="{fid}" pos="{cx} {cy} 0" euler="0 0 {f.get("yaw", 0)}">' + "".join(g) + "</body>"
 
 
@@ -460,7 +560,7 @@ def part_names(twin: dict) -> list[dict]:
 
     for f in fx:
         t, fid = f["type"], f["id"]
-        if t == "counter":
+        if is_counter_host(f) and not is_table(f):  # a table has no moving parts
             for k in range(2):
                 add(fid, f"{fid}_drawer{k}", "slide", 0.3)
             add(fid, f"{fid}_door", "hinge", 1.2)
@@ -468,12 +568,16 @@ def part_names(twin: dict) -> list[dict]:
                 add(fid, f"{fid}_upper_door{k}", "hinge", 1.2)
             for s in _sinks_in(f, sinks)[:1]:
                 add(s["id"], f'{s["id"]}_faucet', "hinge", 1.0)
+        elif t == "sink":
+            if _host_of(f, fx) is None:
+                add(fid, f"{fid}_faucet", "hinge", 1.0)
         elif t.startswith("fridge"):
             add(fid, f"{fid}_door", "hinge", 1.2)
         elif t == "stove":
             add(fid, f"{fid}_oven_door", "hinge", 1.3)
         elif t == "dishwasher":
             add(fid, f"{fid}_door", "hinge", 1.3)
+            parts.append({"fixture": fid, "joint": f"{fid}_rack", "site": None, "kind": "slide", "open": RACK_OUT})
         elif t == "microwave":
             add(fid, f"{fid}_door", "hinge", 1.2)
     return parts
@@ -529,11 +633,29 @@ def lights_xml(lighting: str, cx: float, cy: float, y_front: float, seed: int | 
             f'dir="{-side * 0.8:.1f} 0 -0.45" diffuse="{window}" specular="0 0 0" castshadow="false"/>'), li
 
 
+def arm_parts(arm: str, base_pos, base_yaw_deg: float, mobile: bool = False) -> dict[str, str]:
+    """MJCF fragments for the chosen arm: `procedural` (robot.py) or `menagerie` (the Franka asset, menagerie.py)."""
+    if arm == "procedural":
+        return {"meshdir": "", "defaults": "", "assets": "", "body": robot.arm_xml(tuple(base_pos), base_yaw_deg, mobile=mobile),
+                "actuators": robot.actuators_xml(mobile=mobile), "contact": ""}
+    if arm == "menagerie":
+        from arrival.sim import menagerie
+
+        return menagerie.arm_fragments(tuple(base_pos), base_yaw_deg, mobile)
+    raise ValueError(f"unknown arm {arm!r} (procedural or menagerie)")
+
+
 def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: dict | None = None,
-               lighting: str = "neutral", n_people: int = 0, seed: int | None = None, people_seed: int = 0) -> str:
+               lighting: str = "neutral", n_people: int = 0, seed: int | None = None, people_seed: int = 0,
+               base: str = "fixed", arm: str = "procedural") -> str:
     """Returns an MJCF string. object_pos overrides {object_id: [x, y, z]} start positions.
-    seed jitters the lights within the lighting label (None gives the nominal lights); people_seed picks the walkers' bodies."""
+    seed jitters the lights within the lighting label (None gives the nominal lights); people_seed picks the walkers' bodies.
+    base="mobile" gives the pedestal planar joints and actuators (MAN-3); "fixed" is the string main always built.
+    arm="menagerie" swaps in the Franka asset from MuJoCo Menagerie (needs `python scripts/fetch_menagerie.py`)."""
     object_pos = object_pos or {}
+    if not twin["walls"]:
+        raise ScanBundleError("the twin has no walls, so there is no room to simulate; rescan with the walls captured")
+    a = arm_parts(arm, base_pos, base_yaw_deg, mobile=base == "mobile")
     fx = twin["fixtures"]
     sinks = [f for f in fx if f["type"] == "sink"]
     world = []
@@ -546,8 +668,11 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
                      f'rgba="{WALL}"/>')
     for f in fx:
         t = f["type"]
-        if t == "counter":
-            world.append(counter_xml(f, sinks, fx))
+        if is_counter_host(f):
+            world.append(table_xml(f) if is_table(f) else counter_xml(f, sinks, fx))
+        elif t == "sink":
+            if _host_of(f, fx) is None:  # set into a counter or cabinet, the basin is cut by counter_xml
+                world.append(sink_unit_xml(f))
         elif t.startswith("fridge"):
             world.append(fridge_xml(f))
         elif t == "stove":
@@ -556,10 +681,12 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
             world.append(dishwasher_xml(f))
         elif t == "microwave":
             world.append(microwave_xml(f))
+        else:
+            world.append(furniture_xml(f))
     for o in twin["objects"]:
         world.append(object_xml(o, object_pos.get(o["id"], o["position"])))
     world += [people.person_xml(i, people_seed) for i in range(n_people)]
-    world.append(robot.arm_xml(tuple(base_pos), base_yaw_deg))
+    world.append(a["body"])
     xs = [p for w in twin["walls"] for p in (w["start"][0], w["end"][0])]
     ys = [p for w in twin["walls"] for p in (w["start"][1], w["end"][1])]
     cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
@@ -567,17 +694,19 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
     body = "".join(world)
     for rgba, mat in MATERIALS.items():
         body = body.replace(f'rgba="{rgba}"', f'rgba="{rgba}" material="{mat}"')
+    meshdir = f' meshdir="{a["meshdir"]}"' if a["meshdir"] else ""
+    assets = assets_xml().replace("</asset>", a["assets"] + "</asset>")
     return f"""<mujoco model="{twin['room_id']}_sim">
-<compiler angle="radian" autolimits="true"/>
+<compiler angle="radian" autolimits="true"{meshdir}/>
 <option timestep="0.002" cone="elliptic" impratio="10" integrator="implicitfast"/>
 <visual><global offwidth="640" offheight="480"/><headlight ambient="{0.15 * li:.3f} {0.15 * li:.3f} {0.15 * li:.3f}" diffuse="{0.1 * li:.3f} {0.1 * li:.3f} {0.1 * li:.3f}" specular="0 0 0"/><quality shadowsize="2048"/></visual>
-{assets_xml()}
-<default><geom friction="1.0 0.01 0.001"/></default>
+{assets}
+<default><geom friction="1.0 0.01 0.001"/>{a['defaults']}</default>
 <worldbody>
 {lights}
 <geom name="floor" type="plane" pos="{cx} {cy} 0" size="{max(xs)} {max(ys)} 0.1" material="floor"/>
 <camera name="overview" pos="{cx} {max(ys) - 0.1} 2.2" xyaxes="-1 0 0 0 -0.6 0.8" fovy="80"/>
 {body}
-</worldbody>
-<actuator>{robot.actuators_xml()}</actuator>
+</worldbody>{a['contact']}
+<actuator>{a['actuators']}</actuator>
 </mujoco>"""

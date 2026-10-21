@@ -1,0 +1,29 @@
+{
+  "schema_version": "1",
+  "room_id": "u_kitchen_42",
+  "units": "meters",
+  "frame": "z_up",
+  "geometry_source": "authored_sample",
+  "blocks_claims": [],
+  "walls": [
+    {"id": "wall_south", "start": [0.0, 0.0], "end": [7.55, 0.0], "height": 2.4, "thickness": 0.02},
+    {"id": "wall_east", "start": [7.55, 0.0], "end": [7.55, 3.82], "height": 2.4, "thickness": 0.02},
+    {"id": "wall_north", "start": [7.55, 3.82], "end": [0.0, 3.82], "height": 2.4, "thickness": 0.02},
+    {"id": "wall_west", "start": [0.0, 3.82], "end": [0.0, 0.0], "height": 2.4, "thickness": 0.02}
+  ],
+  "fixtures": [
+    {"id": "sink", "category": "sink", "size": [0.60, 0.50, 0.25], "position": [7.22, 2.43, 0.85], "yaw": 1.5707963267948966},
+    {"id": "storage_sink", "category": "storage", "size": [1.00, 0.60, 0.90], "position": [7.22, 2.47, 0.45], "yaw": 1.5707963267948966},
+    {"id": "dishwasher", "category": "dishwasher", "size": [0.60, 0.60, 0.85], "position": [7.21, 1.62, 0.425], "yaw": 1.5707963267948966},
+    {"id": "oven", "category": "oven", "size": [0.70, 0.65, 0.90], "position": [5.91, 3.45, 0.45], "yaw": 3.141592653589793},
+    {"id": "storage_a", "category": "storage", "size": [1.20, 0.60, 0.90], "position": [4.95, 3.47, 0.45], "yaw": 3.141592653589793},
+    {"id": "storage_b", "category": "storage", "size": [1.00, 0.60, 0.90], "position": [6.93, 3.42, 0.45], "yaw": 3.141592653589793},
+    {"id": "fridge", "category": "refrigerator", "size": [0.75, 0.70, 1.80], "position": [6.95, 0.47, 0.90], "yaw": 1.5707963267948966}
+  ],
+  "objects": [
+    {"id": "mug_1", "label": "mug", "size": [0.08, 0.08, 0.10], "position": [7.22, 2.05, 0.95], "yaw": 0.0},
+    {"id": "cup_1", "label": "cup", "size": [0.08, 0.08, 0.09], "position": [7.17, 2.87, 0.945], "yaw": 0.0},
+    {"id": "bowl_1", "label": "bowl", "size": [0.14, 0.14, 0.06], "position": [4.65, 3.47, 0.93], "yaw": 0.0},
+    {"id": "sponge_1", "label": "sponge", "size": [0.10, 0.06, 0.03], "position": [5.25, 3.42, 0.915], "yaw": 0.0}
+  ]
+}

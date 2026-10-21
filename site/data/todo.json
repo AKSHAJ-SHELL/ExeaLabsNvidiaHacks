@@ -1,0 +1,825 @@
+{
+ "as_of": "2026-10-21",
+ "repo": "AvnehSBhatia/ExeaLabsNvidiaHacks",
+ "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site",
+ "counts": {
+  "done": 22,
+  "review": 28,
+  "todo": 2,
+  "blocked": 18,
+  "total": 70
+ },
+ "prs": {
+  "merged": 44,
+  "open": 28,
+  "closed_unmerged": 4
+ },
+ "groups": [
+  {
+   "id": "shipped",
+   "title": "Shipped on main",
+   "blurb": "Merged PRs, grouped by what they do.",
+   "items": [
+    {
+     "id": "S01",
+     "title": "Sample kitchen tiles the wall with no overlapping fixtures",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      5
+     ]
+    },
+    {
+     "id": "S02",
+     "title": "Scan regression suite and full RoomPlan coverage, two real public exports",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      10
+     ]
+    },
+    {
+     "id": "S03",
+     "title": "Kitchen and Panda arm visuals; wrist camera framing and joint 7 off its stop",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      2,
+      71
+     ]
+    },
+    {
+     "id": "S04",
+     "title": "Open drawer and open door, with collision boxes that match the drawn fronts",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      4,
+      47
+     ]
+    },
+    {
+     "id": "S05",
+     "title": "Close drawer, close door, put mug in drawer, wipe counter; a bowl the gripper can hold",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      11
+     ]
+    },
+    {
+     "id": "S06",
+     "title": "Plates by the rim and pans by the handle",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      31
+     ]
+    },
+    {
+     "id": "S07",
+     "title": "The arm opens the fridge: pull by the bar, push the inside face",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      78
+     ]
+    },
+    {
+     "id": "S08",
+     "title": "Oven, dishwasher, microwave and wall-cabinet doors, faucet lever, nine more objects",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      19
+     ]
+    },
+    {
+     "id": "S09",
+     "title": "Key, fill and window lights, tile, wood and stone materials",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      21
+     ]
+    },
+    {
+     "id": "S10",
+     "title": "Walking people: proportioned bodies, a gait, slow stops at the counter",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      23,
+      76
+     ]
+    },
+    {
+     "id": "S11",
+     "title": "A person opens the fridge and the held door counts for safety",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      73
+     ]
+    },
+    {
+     "id": "S12",
+     "title": "Closed-loop eval harness, human-contact metric, arm-fixture contacts",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      13,
+      55
+     ]
+    },
+    {
+     "id": "S13",
+     "title": "Upload worker: queued scan to twin to sim dataset to zip, with atomic job status",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      12,
+      51
+     ]
+    },
+    {
+     "id": "S14",
+     "title": "GR00T modality config; validator rejects NaN, inf and bad timestamps",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      38,
+      52
+     ]
+    },
+    {
+     "id": "S15",
+     "title": "Nemotron planner in sim collection; Tavily appliance research",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      3,
+      35
+     ]
+    },
+    {
+     "id": "S16",
+     "title": "iOS RoomPlan capture app and field scanning protocol",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      43,
+      44
+     ]
+    },
+    {
+     "id": "S17",
+     "title": "CI workflow, Makefile and CPU Dockerfile; one-command demo pipeline",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      82,
+      86
+     ]
+    },
+    {
+     "id": "S18",
+     "title": "Offline GR00T policy-server contract (mock server, shim, VLAClient fix) and loader conformance check",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      83,
+      84
+     ]
+    },
+    {
+     "id": "S19",
+     "title": "Scan intake, RGB-D frame format, tape-measure accuracy harness, realism metrics",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      87,
+      90,
+      92,
+      88
+     ]
+    },
+    {
+     "id": "S20",
+     "title": "Time and cost report, seed-replay retargeting, appearance-variation stage with honest labels",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      85,
+      89,
+      93
+     ]
+    },
+    {
+     "id": "S21",
+     "title": "Docs and README claim checker, release QA, PyAV fix, refreshed demo video",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      91,
+      29,
+      9,
+      50
+     ]
+    },
+    {
+     "id": "S22",
+     "title": "Integration of 16 PRs and the sprint PRs #82-#93, plus the to-do docs",
+     "status": "done",
+     "owner_kind": "laptop",
+     "pr": [
+      80,
+      94,
+      1,
+      81,
+      95
+     ]
+    }
+   ]
+  },
+  {
+   "id": "review",
+   "title": "In review",
+   "blurb": "Pull requests against main. All are merged into feat/demo-site and none is on main yet, so none counts as done.",
+   "items": [
+    {
+     "id": "L1",
+     "title": "Fixtures on any wall (#49, #75, #77 folded into one PR)",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "must",
+     "pr": [
+      99
+     ],
+     "issue": 42,
+     "note": "Replaces #49, #75 and #77."
+    },
+    {
+     "id": "L2",
+     "title": "Failed task skips instead of crashing; pre-flight reach check",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "must",
+     "pr": [
+      99
+     ],
+     "issue": 42
+    },
+    {
+     "id": "L3",
+     "title": "Worker hard limits: subprocess timeout, size caps, stage-tagged errors",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "must",
+     "pr": [
+      96
+     ],
+     "issue": 68
+    },
+    {
+     "id": "L4",
+     "title": "Harden the web app for public hosting",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "must",
+     "pr": [
+      97
+     ],
+     "issue": 68
+    },
+    {
+     "id": "L5",
+     "title": "Shardable, resumable sim collection: --shard, --resume, merge-shards",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "must",
+     "issue": 66,
+     "pr": [
+      104
+     ]
+    },
+    {
+     "id": "L6",
+     "title": "Fresh-clone matrix: macOS and Windows in CI, wheel smoke, docker job, Windows checks fixed, separate rendering gate",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "must",
+     "pr": [
+      98,
+      108
+     ],
+     "issue": 72
+    },
+    {
+     "id": "L7",
+     "title": "Docs and repo hygiene sweep",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "must",
+     "pr": [
+      98
+     ],
+     "issue": 30
+    },
+    {
+     "id": "L8",
+     "title": "One-command offline demo from a fresh venv, GL fallback",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "must",
+     "pr": [
+      98
+     ]
+    },
+    {
+     "id": "L9",
+     "title": "Non-kitchen rooms with room-appropriate objects (book, remote, laptop)",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "pr": [
+      105
+     ],
+     "issue": 56,
+     "note": "Replaces #57."
+    },
+    {
+     "id": "L10",
+     "title": "Twin compile fixes on the real U-shaped scan",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      100
+     ],
+     "issue": 42
+    },
+    {
+     "id": "L11",
+     "title": "Scan robustness sweep: fuzzed RoomPlan variants",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "pr": [
+      100
+     ],
+     "issue": 42
+    },
+    {
+     "id": "L12",
+     "title": "Per-episode quality validator",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      102
+     ],
+     "issue": 72
+    },
+    {
+     "id": "L13",
+     "title": "Mobile base on any wall: 11-float state and action through export, GR00T config and loader check",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "L",
+     "priority": "should",
+     "pr": [
+      103
+     ],
+     "issue": 34,
+     "note": "Replaces #33 and #36. The fixed base stays the default; run the fixed-base GR00T check (G1) before training on the 11-float schema."
+    },
+    {
+     "id": "L14",
+     "title": "Scan frames through the upload path, compared against held-out views in the worker",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      97,
+      110
+     ],
+     "issue": 58
+    },
+    {
+     "id": "L15",
+     "title": "Provenance on twin objects: detected, default, authored",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      100
+     ],
+     "issue": 60
+    },
+    {
+     "id": "L16",
+     "title": "Realism command: JSON and side-by-side PNG (real frames still missing)",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      100
+     ],
+     "issue": 65
+    },
+    {
+     "id": "L17",
+     "title": "Reachability planner: IK solve of the expert's waypoints, fallback base grid",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "L",
+     "priority": "should",
+     "pr": [
+      116
+     ]
+    },
+    {
+     "id": "L18",
+     "title": "Retention and deletion",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      96
+     ],
+     "issue": 68
+    },
+    {
+     "id": "L19",
+     "title": "Worker concurrency: atomic claim, heartbeat, cancel",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "pr": [
+      96
+     ],
+     "issue": 66
+    },
+    {
+     "id": "L20",
+     "title": "Usage metering for the cost report; timed keyboard teleop baseline",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "pr": [
+      96,
+      113
+     ],
+     "issue": 67
+    },
+    {
+     "id": "L21",
+     "title": "CI extras: ruff, link check, Dependabot",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      98
+     ]
+    },
+    {
+     "id": "L22",
+     "title": "Secrets handling: single config loader, .env.example, redaction, arrival doctor",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      97,
+      114
+     ]
+    },
+    {
+     "id": "L23",
+     "title": "Static demo-site export",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      102
+     ],
+     "issue": 68
+    },
+    {
+     "id": "L24",
+     "title": "Oven, dishwasher and faucet families on the any-wall chain",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "nice",
+     "pr": [
+      106
+     ],
+     "issue": 28,
+     "note": "Replaces #27."
+    },
+    {
+     "id": "L25",
+     "title": "Real Menagerie Franka behind --arm menagerie",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "nice",
+     "pr": [
+      107
+     ],
+     "issue": 26,
+     "note": "Replaces #25. The 34 MB meshes are fetched by script and stay out of git."
+    },
+    {
+     "id": "L26",
+     "title": "Thin-object (spatula) pinch grasp, in counter_to_sink and wipe, both arms",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "nice",
+     "issue": 32,
+     "pr": [
+      117
+     ]
+    },
+    {
+     "id": "L28",
+     "title": "Multi-room summary command (real rooms wait on P2)",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "nice",
+     "pr": [
+      102
+     ],
+     "issue": 59
+    },
+    {
+     "id": "L29",
+     "title": "Frozen evaluation trials: replay the same trials for any policy and keep every run",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "issue": 64,
+     "pr": [
+      109
+     ]
+    }
+   ]
+  },
+  {
+   "id": "laptop",
+   "title": "Laptop: next",
+   "blurb": "Can be done on a laptop with no extra access.",
+   "items": [
+    {
+     "id": "L27",
+     "title": "People pass: yield and stop behaviour, mirrored fridge plan",
+     "status": "todo",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "nice",
+     "issue": 24
+    },
+    {
+     "id": "L30",
+     "title": "Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress",
+     "status": "todo",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "issue": 68,
+     "pr": [],
+     "note": "Left out of L3, L18 and L19 and listed in the build log as not done."
+    }
+   ]
+  },
+  {
+   "id": "gpu",
+   "title": "Needs a GPU",
+   "blurb": "A GPU host with 40 GB or more, or a Linux box.",
+   "items": [
+    {
+     "id": "G1",
+     "title": "Real GR00T loader check and 100-step fine-tune on hero_kitchen_sim",
+     "status": "blocked",
+     "owner_kind": "gpu",
+     "size": "M",
+     "priority": "must",
+     "issue": 63
+    },
+    {
+     "id": "G2",
+     "title": "Real GR00T policy server: chunking, both camera keys, golden-file test",
+     "status": "blocked",
+     "owner_kind": "gpu",
+     "size": "M",
+     "priority": "must"
+    },
+    {
+     "id": "G3",
+     "title": "Three-cell held-out eval, 50 episodes per cell, Wilson intervals",
+     "status": "blocked",
+     "owner_kind": "gpu",
+     "size": "L",
+     "priority": "must",
+     "issue": 64
+    },
+    {
+     "id": "G4",
+     "title": "Generic-RoboCasa baseline dataset and fine-tune",
+     "status": "blocked",
+     "owner_kind": "gpu",
+     "size": "M",
+     "priority": "must",
+     "issue": 64
+    },
+    {
+     "id": "G5",
+     "title": "Dockerfile.gpu, run_finetune.sh, train and serve targets",
+     "status": "blocked",
+     "owner_kind": "gpu",
+     "size": "L",
+     "priority": "must",
+     "issue": 63
+    },
+    {
+     "id": "G6",
+     "title": "Prove layout.yaml loads in real RoboCasa",
+     "status": "blocked",
+     "owner_kind": "gpu",
+     "size": "M",
+     "priority": "must",
+     "issue": 69
+    },
+    {
+     "id": "G7",
+     "title": "Real MimicGen retargeting for counter_to_sink",
+     "status": "blocked",
+     "owner_kind": "gpu",
+     "size": "L",
+     "priority": "should",
+     "issue": 62
+    },
+    {
+     "id": "G8",
+     "title": "Scan-appearance composite replacing the splat stub",
+     "status": "blocked",
+     "owner_kind": "gpu",
+     "size": "L",
+     "priority": "should",
+     "issue": 61
+    }
+   ]
+  },
+  {
+   "id": "cloud",
+   "title": "Needs cloud",
+   "blurb": "Cloud accounts, billing or deploy access.",
+   "items": [
+    {
+     "id": "C1",
+     "title": "Nebius Serverless Jobs fan-out with resume, then one real small run",
+     "status": "blocked",
+     "owner_kind": "cloud",
+     "size": "L",
+     "priority": "must",
+     "issue": 66
+    },
+    {
+     "id": "C2",
+     "title": "Hosted HTTPS demo with a pre-seeded room",
+     "status": "blocked",
+     "owner_kind": "cloud",
+     "size": "M",
+     "priority": "must",
+     "issue": 68,
+     "pr": [
+      115
+     ],
+     "note": "Smoke test (#115), /healthz, docker-compose.yml and docs/DEPLOY.md are written and tested on a laptop. TLS, the domain, a real seeded room and a run on a host are still blocked."
+    },
+    {
+     "id": "C3",
+     "title": "Measured time and cost per demo against the teleop baseline",
+     "status": "blocked",
+     "owner_kind": "cloud",
+     "size": "S",
+     "priority": "should",
+     "issue": 67
+    },
+    {
+     "id": "C4",
+     "title": "Detect small objects from posed frames with a VLM",
+     "status": "blocked",
+     "owner_kind": "cloud",
+     "size": "M",
+     "priority": "should",
+     "issue": 60
+    },
+    {
+     "id": "C5",
+     "title": "Real Cosmos variation on a tenth of validated frames",
+     "status": "blocked",
+     "owner_kind": "cloud",
+     "size": "M",
+     "priority": "nice",
+     "issue": 70
+    }
+   ]
+  },
+  {
+   "id": "people",
+   "title": "Needs people or an iPhone",
+   "blurb": "Physical rooms, a LiDAR iPhone, or a human.",
+   "items": [
+    {
+     "id": "P1",
+     "title": "Field-test the iOS app on a LiDAR iPhone; RGB-D recorder in Swift",
+     "status": "blocked",
+     "owner_kind": "people",
+     "size": "L",
+     "priority": "must",
+     "issue": 58
+    },
+    {
+     "id": "P2",
+     "title": "Three consented real kitchen scans with tape measurements; licence check of the two public scans",
+     "status": "blocked",
+     "owner_kind": "people",
+     "size": "L",
+     "priority": "must",
+     "issue": 59
+    },
+    {
+     "id": "P3",
+     "title": "Twenty timed teleoperated counter_to_sink demos",
+     "status": "blocked",
+     "owner_kind": "people",
+     "size": "S",
+     "priority": "should",
+     "issue": 67,
+     "note": "The timer tool is in review as part of L20 (#113); the demos need a person."
+    },
+    {
+     "id": "P4",
+     "title": "Refresh the pitch video with real footage; check the demo page in a browser",
+     "status": "blocked",
+     "owner_kind": "people",
+     "size": "S",
+     "priority": "should"
+    },
+    {
+     "id": "OWN",
+     "title": "Close or update stale issues #18, #22, #24, #26, #28, #30, #32, #34",
+     "status": "blocked",
+     "owner_kind": "people",
+     "size": "S",
+     "note": "Repo owner only"
+    }
+   ]
+  }
+ ],
+ "superseded": {
+  "prs": [
+   25,
+   27,
+   33,
+   36,
+   49,
+   57,
+   75,
+   77
+  ],
+  "note": "Rebased into #96 to #110. Close them once those merge."
+ },
+ "not_merged": {
+  "prs": [
+   101
+  ],
+  "note": "#101 ignores site/, which this branch tracks. Left out on purpose."
+ }
+}

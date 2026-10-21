@@ -1,6 +1,6 @@
 # POL-3: GR00T policy-server contract
 
-The VLA cell of `python -m arrival eval --policy vla` needs a GR00T server. This is the HTTP contract, an offline mock and a shim; only the mock has been run.
+The VLA cell of `python -m arrival eval --policy vla --checkpoint-id base-gr00t` needs a GR00T server. This is the HTTP contract, an offline mock and a shim; only the mock has been run.
 
 ## Contract
 
@@ -18,7 +18,7 @@ Response: `{"action.single_arm": [[7 floats] x T], "action.gripper": [[1 float] 
 ```bash
 python -m arrival.policy_server.mock_server --port 8000 --mode hold      # or noise, or fail_after_n --fail-after 50
 export GR00T_POLICY_URL=http://127.0.0.1:8000
-python -m arrival eval --policy vla --families open_drawer --episodes 1 --people 0 --res 64
+python -m arrival eval --policy vla --checkpoint-id base-gr00t --families open_drawer --episodes 1 --people 0 --res 64
 ```
 
 `hold` returns the current state as the chunk, so the arm stays put; the eval completes with no errors and no success. It ignores images and text, so it says nothing about any policy.

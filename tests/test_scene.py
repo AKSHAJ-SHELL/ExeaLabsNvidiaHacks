@@ -9,7 +9,8 @@ import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
-from arrival.catalog.objects import GRASPABLE, HANDLE_HELD, OBJECT_SPECS, PICKABLE, RIM_HELD, object_spec, sample_size  # noqa: E402
+from arrival.catalog.objects import (GRASPABLE, HANDLE_HELD, OBJECT_SPECS, PICKABLE, RIM_HELD, THIN_HELD,  # noqa: E402
+                                     object_spec, sample_size)
 from arrival.scan.bundle import load_room  # noqa: E402
 from arrival.sim.scene import DOOR_FLAT, UPPER_Z0, build_mjcf, part_names  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
@@ -87,6 +88,22 @@ def test_upper_cabinets_start_above_the_measured_wrist_height_and_skip_tables(tw
     assert any("counter_a_upper" in m.joint(i).name for i in range(m.njnt))
 
 
+def test_sink_in_yawed_counter_height_storage_reaches_the_scene():
+    import math
+
+    base = {"id": "base", "category": "storage", "size": [1.0, 0.6, 0.9],
+            "position": [2.0, 1.5, 0.45], "yaw": -math.pi / 2}
+    sink = {"id": "sink", "category": "sink", "size": [0.6, 0.5, 0.25],
+            "position": [2.0, 1.4, 0.85], "yaw": -math.pi / 2}
+    t = compile_twin(_bundle([sink, base]))
+    assert not any(f["id"].startswith("counter_synth") for f in t["fixtures"])
+    m = _model(t)
+    assert m.geom("sink_bottom").pos[0] == pytest.approx(0.1, abs=1e-4)
+    assert m.geom("base_carcass") is not None
+    assert m.joint("sink_faucet") is not None
+    assert {p["joint"] for p in part_names(t)} >= {"base_drawer0", "base_door", "sink_faucet"}
+
+
 def test_dishwasher_and_microwave_from_scan():
     fixtures = [COUNTER,
                 {"id": "dw_1", "category": "dishwasher", "size": [0.6, 0.6, 0.86], "position": [2.1, 0.40, 0.43], "yaw": 0.0},
@@ -123,11 +140,15 @@ def test_dishwasher_and_microwave_from_scan():
 
 
 def test_every_catalog_object_rests_on_the_counter_with_a_plausible_mass():
-    objects = []
-    for k, (cid, (_, size, *_)) in enumerate(OBJECT_SPECS.items()):
+    objects, x = [], 0.3
+    for cid, (_, size, *_) in OBJECT_SPECS.items():  # laid out in a row, each clear of the last (a pan has a handle)
+        reach = max(size[:2]) / 2 + (0.28 if cid == "pan" else 0.0)
+        x += max(size[:2]) / 2
         objects.append({"id": f"{cid}_1", "label": cid, "size": list(size),
-                        "position": [0.35 + 0.19 * k, 0.40, 0.92 + size[2] / 2 + 0.003], "yaw": 0.0})
-    twin = compile_twin(_bundle([COUNTER], objects))
+                        "position": [x, 0.40, 0.92 + size[2] / 2 + 0.003], "yaw": 0.0})
+        x += reach + 0.05
+    twin = compile_twin(_bundle([{**COUNTER, "size": [x + 0.3, 0.65, 0.92], "position": [(x + 0.3) / 2, 0.40, 0.46]}],
+                                objects))
     assert {o["catalog_id"] for o in twin["objects"]} == set(OBJECT_SPECS)
     m = _model(twin)
     d = mujoco.MjData(m)
@@ -139,7 +160,7 @@ def test_every_catalog_object_rests_on_the_counter_with_a_plausible_mass():
         assert abs(float(b.xpos[2]) - z0) < 0.012, (o["id"], b.xpos)
         assert np.linalg.norm(b.xpos[:2] - np.array(o["position"][:2])) < 0.02, o["id"]
         mass[o["label"]] = float(m.body_mass[b.id])
-    assert all(0.02 < v < 1.2 for v in mass.values()), mass
+    assert all(0.02 < v < 1.5 for v in mass.values()), mass  # the closed laptop is the heavy one, 1.2 kg
     assert mass["pan"] > mass["bottle"] > mass["mug"] > mass["apple"] > mass["sponge"]
     assert mass["mug"] == pytest.approx(0.30, abs=1e-3)
     assert _no_warnings(d)
@@ -156,7 +177,8 @@ def test_size_variation_is_seeded_and_bounded():
         assert object_spec(cid, nominal)["mass"] == pytest.approx(mass, abs=1e-3)
     assert object_spec("mug", [0.08, 0.08, 0.05])["mass"] == pytest.approx(0.15, abs=1e-3)  # mass follows volume
     assert set(PICKABLE) <= set(OBJECT_SPECS) and "bowl" not in PICKABLE and "pan" not in PICKABLE
-    assert set(GRASPABLE) == set(PICKABLE) | set(RIM_HELD) | set(HANDLE_HELD) and "spatula" not in GRASPABLE
+    assert set(GRASPABLE) == set(PICKABLE) | set(RIM_HELD) | set(HANDLE_HELD) | set(THIN_HELD)
+    assert THIN_HELD == ("spatula",) and "laptop" not in GRASPABLE
 
 
 @pytest.mark.parametrize("cid", ["cup", "apple", "bottle", "plate", "pan"])
@@ -220,3 +242,53 @@ def test_pan_is_held_by_its_handle_only(twin):
                     touched.add(pan[c.geom1 if c.geom1 in pan else c.geom2])
     assert touched == {"pan_1_handle"}, touched
     assert env.success(task)[0]
+
+
+@pytest.mark.parametrize("arm", ["procedural", "menagerie"])
+@pytest.mark.parametrize("family, replaces", [("counter_to_sink", "mug_1"), ("wipe_counter", "sponge_1")])
+def test_spatula_is_pinched_with_the_pads_off_the_counter(twin, family, replaces, arm):
+    """L26: the 1 cm spatula is held between both pads for every closed step, from the pick to the release, and no
+    finger touches the counter it lies on (the old body grasp put the pad tips 1 to 3 mm into the top)."""
+    from arrival.sim import menagerie
+    from arrival.sim.collect import PAD_BELOW_EEF, SimEnv
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.tasks import make_tasks
+
+    if arm == "menagerie" and not menagerie.available():
+        pytest.skip("run python scripts/fetch_menagerie.py")
+    t = copy.deepcopy(twin)
+    o = next(o for o in t["objects"] if o["id"] == replaces)
+    o.update({"id": "spatula_1", "label": "spatula", "catalog_id": "spatula", "size": list(OBJECT_SPECS["spatula"][1])})
+    o["position"][2] = 0.92 + o["size"][2] / 2
+    t["objects"] = [o]
+    task = make_tasks(t, [family], 1, seed=3, people=0, log=lambda *_: None)[0]
+    assert task["object_id"] == "spatula_1"
+    env = SimEnv(t, task, res=32, arm=arm)
+    if arm == "procedural":  # the pad reach read from the model is the hand geometry robot.py builds
+        assert env.pad_reach() == pytest.approx(PAD_BELOW_EEF, abs=0.001)
+    pol = ScriptedExpert()
+    pol.reset(env, task)
+    m, d = env.model, env.data
+    side = {i: m.body(m.geom_bodyid[i]).name for i in range(m.ngeom)
+            if m.body(m.geom_bodyid[i]).name in ("finger_l", "finger_r") and m.geom_contype[i]}
+    counter = {i for i in range(m.ngeom) if m.body(m.geom_bodyid[i]).name == task["source"]}
+    sp = m.geom("spatula_1").id
+    closed = pinched = 0
+    z0, top = float(env.body_pos("spatula_1")[2]), 0.0
+    for _ in range(len(pol.plan) + 10):
+        a = pol.act(None)
+        env.step(a)
+        pairs = [(c.geom1, c.geom2) for c in d.contact[:d.ncon]] + [(c.geom2, c.geom1) for c in d.contact[:d.ncon]]
+        assert not any(g in side and h in counter for g, h in pairs), "a finger touched the counter"
+        if a[7] < 0.005:
+            closed += 1
+            pinched += {side[g] for g, h in pairs if g in side and h == sp} == {"finger_l", "finger_r"}
+        top = max(top, float(env.body_pos("spatula_1")[2]) - z0)
+    assert closed > 50 and pinched == closed, (pinched, closed)
+    ok, detail = env.success(task)
+    env.close()
+    assert ok, detail
+    if family == "counter_to_sink":
+        assert top > 0.2  # carried, not pushed
+    else:
+        assert detail["wiped_m"] > 1.0  # it followed the hand through all four strokes

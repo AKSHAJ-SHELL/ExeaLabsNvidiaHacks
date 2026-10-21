@@ -10,14 +10,18 @@ from pathlib import Path
 import yaml
 
 from arrival.catalog.fixtures import default_config_name, fixture_type
-from arrival.catalog.objects import catalog_id, sample_size
+from arrival.catalog.objects import ROOM_OBJECTS, catalog_id, room_kind, sample_size
+from arrival.export.provenance import OBJECT_PROVENANCE, note_seed, object_counts, stamp_twin
 
 COUNTER_DEPTH = 0.65
 COUNTER_HEIGHT = 0.92
 SYNTH_RADIUS = 0.3
+SYNTH_MARGIN = 0.3  # a synthesized counter reaches at least this far past each end of the sink or stove it serves
+CLIP_TOL = 0.02  # a counter clipped at a fridge still covers the fixture it serves to within this
 ADJACENT_GAP = 0.05  # an appliance this close to a counter's footprint is built in beside it
-DEFAULT_OBJECTS = ("mug", "bowl", "plate", "cup", "apple")  # sizes come from the catalog, varied per seed
+DEFAULT_OBJECTS = ROOM_OBJECTS["kitchen"]  # sizes come from the catalog, varied per seed; other rooms: room_kind()
 PLACE_MARGIN = 0.08
+TABLE_EDGE_BAND = 0.40  # outside a kitchen, objects on a table deeper than twice this lie within it of a long edge
 # A kitchen island: counter-height block (RoomPlan calls it a table) clear of every wall.
 # Dining tables measure about 0.75 m, so the band starts above them. Storage stays a cabinet
 # wherever it stands, so a freestanding sideboard is not retyped.
@@ -56,24 +60,87 @@ def _footprint_gap(f: dict, counter: dict) -> float:
     return min(_rect_distance(list(p), counter) for p in pts)
 
 
+def is_counter_host(fixture: dict) -> bool:
+    """A worktop that can carry a sink, including RoomPlan's floor-standing storage cabinets."""
+    return fixture["type"] == "counter" or (
+        fixture.get("source_category") == "storage"
+        and abs(fixture["size"][2] - COUNTER_HEIGHT) <= 0.15
+        and abs(fixture["position"][2] - fixture["size"][2] / 2) <= 0.1
+    )
+
+
+def _local_x_range(f: dict, frame: dict, half_depth: float | None = None) -> tuple[float, float] | None:
+    """Local-X extent of f's footprint in `frame`'s coordinates; None when f lies outside the band |y| < half_depth."""
+    hx, hy = f["size"][0] / 2, f["size"][1] / 2
+    pts = [to_local(to_world((dx, dy), f), frame) for dx in (-hx, hx) for dy in (-hy, hy)]
+    if half_depth is not None and (max(p[1] for p in pts) <= -half_depth + 1e-6
+                                   or min(p[1] for p in pts) >= half_depth - 1e-6):
+        return None
+    return min(p[0] for p in pts), max(p[0] for p in pts)
+
+
+def _clip_span(lo: float, hi: float, frame: dict, obstacles: list[dict], keep: tuple[float, float]) -> tuple[float, float]:
+    """Shorten a synthesized counter's local-X span [lo, hi] so it stops at a fridge, dishwasher or tall cabinet
+    standing in its row, never cutting into `keep`, the span of the fixture it was synthesized for."""
+    for o in obstacles:
+        if o["position"][2] - o["size"][2] / 2 >= COUNTER_HEIGHT:
+            continue  # hangs above the counter top
+        r = _local_x_range(o, frame, COUNTER_DEPTH / 2)
+        if r is None or r[1] <= lo or r[0] >= hi:
+            continue
+        if r[1] <= keep[0] + CLIP_TOL:
+            lo = max(lo, min(r[1], keep[0] - CLIP_TOL))
+        elif r[0] >= keep[1] - CLIP_TOL:
+            hi = min(hi, max(r[0], keep[1] + CLIP_TOL))
+    return lo, hi
+
+
 def _synth_counters(fixtures: list[dict]) -> list[dict]:
-    counters = [f for f in fixtures if f["type"] == "counter"]
-    out = []
+    """A counter under each sink or stove that no counter holds. Neighbouring sinks share one counter (extended, not
+    stacked, so counters never overlap each other) and a counter stops at the fridge or dishwasher beside it."""
+    hosts = [f for f in fixtures if is_counter_host(f)]
+    obstacles = [f for f in fixtures if f["source_category"] not in ("sink", "stove")]  # incl. the real counters
+    out: list[dict] = []
     for f in fixtures:
         if f["source_category"] not in ("sink", "stove"):
             continue
         if any(_rect_distance(f["position"], c) <= SYNTH_RADIUS or _footprint_gap(f, c) <= ADJACENT_GAP
-               for c in counters + out):
+               for c in hosts):
             continue  # set into a counter, or built in beside one (a stove between two counters)
+        # a sink within 0.3 m of a synthesized counter's end joins its run; a stove must sit on the counter itself
+        held = next((c for c in out if (_footprint_gap(f, c) if f["source_category"] == "sink"
+                                        else _rect_distance(f["position"], c)) <= SYNTH_RADIUS), None)
+        if held is not None:
+            _extend(held, f, obstacles)  # same synthesized run: widen it if f hangs off an end
+            continue
+        if any(_footprint_gap(f, c) <= ADJACENT_GAP for c in out):
+            continue  # built in beside a synthesized counter
+        half = max(f["size"][0] + 1.2, 1.8) / 2
+        keep = _local_x_range(f, f)
+        lo, hi = _clip_span(-half, half, f, obstacles, keep)
         out.append({
             "id": f"counter_synth_{f['id']}",
             "type": "counter",
-            "size": [max(f["size"][0] + 1.2, 1.8), COUNTER_DEPTH, COUNTER_HEIGHT],
-            "position": [f["position"][0], f["position"][1], COUNTER_HEIGHT / 2],
+            "size": [hi - lo, COUNTER_DEPTH, COUNTER_HEIGHT],
+            "position": [*to_world(((lo + hi) / 2, 0.0), f), COUNTER_HEIGHT / 2],
             "yaw": float(f.get("yaw", 0.0)),  # long axis along the fixture's local X
             "source_category": "synthesized",
         })
     return out
+
+
+def _extend(counter: dict, f: dict, obstacles: list[dict]) -> None:
+    """Widen a synthesized counter so the sink or stove f (same heading) lies wholly on it, with a 0.3 m margin."""
+    if abs(math.remainder(float(f.get("yaw", 0.0)) - counter["yaw"], 2 * math.pi)) > 0.02:
+        return
+    r = _local_x_range(f, counter)
+    sx = counter["size"][0]
+    lo, hi = -sx / 2, sx / 2
+    if r[0] >= lo + SYNTH_MARGIN and r[1] <= hi - SYNTH_MARGIN:
+        return
+    new_lo, new_hi = _clip_span(min(lo, r[0] - SYNTH_MARGIN), max(hi, r[1] + SYNTH_MARGIN), counter, obstacles, r)
+    counter["position"][:2] = list(to_world(((new_lo + new_hi) / 2, 0.0), counter))
+    counter["size"][0] = new_hi - new_lo
 
 
 def wall_distance(fixture: dict, walls: list[dict], step: float = 0.05) -> float:
@@ -123,6 +190,8 @@ def compile_twin(bundle: dict) -> dict:
             "size": [float(v) for v in o["size"]],
             "position": [float(v) for v in o["position"]],
             "yaw": float(o.get("yaw", 0.0)),
+            # a scan.json object is somebody's entry; place_default_objects' own label survives a recompile
+            "provenance": o.get("provenance") if o.get("provenance") in OBJECT_PROVENANCE else "authored",
         }
         for o in bundle.get("objects", [])
     ]
@@ -142,14 +211,15 @@ def compile_twin(bundle: dict) -> dict:
     for key in ("story", "story_count"):
         if key in bundle:
             twin[key] = bundle[key]
-    return twin
+    return stamp_twin(twin, bundle=bundle)
 
 
 def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
-    """RoomPlan captures no small objects: put DEFAULT_OBJECTS on a counter top (the one holding or touching a
+    """RoomPlan captures no small objects: put the default objects for the kind of room (`room_kind`: DEFAULT_OBJECTS
+    in a kitchen, a book, laptop or remote in an office or living room) on a counter or table top (the one holding or touching a
     sink if any), away from sinks/stoves, deterministically from `seed`, each at a seeded size. An object that
     does not fit the counter is skipped. Mutates twin."""
-    counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
+    counters = [f for f in twin["fixtures"] if is_counter_host(f)]
     blockers = [f for f in twin["fixtures"] if f["type"] in ("sink", "stove")]
     sinks = [f for f in blockers if f["type"] == "sink"]
     if not counters:
@@ -160,13 +230,19 @@ def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
     sx, sy, _ = counter["size"]
     top = counter["position"][2] + counter["size"][2] / 2
     placed: list[dict] = []
-    for label in DEFAULT_OBJECTS:
+    kind = room_kind(twin["fixtures"])
+    # a big table outside a kitchen: things lie along its long edges, where someone sits (and a fixed arm reaches),
+    # not in the middle of a 1.6 m top
+    edges = kind != "kitchen" and sy > 2 * TABLE_EDGE_BAND
+    for label in ROOM_OBJECTS[kind]:
         size = sample_size(label, rng)
         half = max(size[0], size[1]) / 2 + PLACE_MARGIN
         if sx / 2 <= half or sy / 2 <= half:
             continue
         for _ in range(200):
             local = (rng.uniform(-sx / 2 + half, sx / 2 - half), rng.uniform(-sy / 2 + half, sy / 2 - half))
+            if edges:
+                local = (local[0], rng.choice((-1, 1)) * rng.uniform(sy / 2 - TABLE_EDGE_BAND, sy / 2 - half))
             x, y = to_world(local, counter)
             if any(_rect_distance([x, y], b) < half for b in blockers if b is not counter):
                 continue
@@ -174,9 +250,12 @@ def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
                 continue
             placed.append({"id": f"{label}_1", "catalog_id": catalog_id(label), "label": label, "size": list(size),
                            "position": [round(x, 6), round(y, 6), round(top + size[2] / 2, 6)], "yaw": 0.0,
-                           "placed_by": "place_default_objects"})
+                           "placed_by": "place_default_objects", "provenance": "default_synthetic"})
             break
     twin["objects"] += placed
+    if placed:  # these were put there by us, not measured: say so in the twin's own record
+        note_seed(twin, "default_objects", seed)
+        twin["provenance"].setdefault("generators", {})["objects"] = object_counts(twin)
     return placed
 
 

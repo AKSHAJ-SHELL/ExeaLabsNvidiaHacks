@@ -1,0 +1,75 @@
+"""Worker and queue limits. One place that names every ceiling, read from the environment for a hosted deployment.
+
+``Limits()`` holds the defaults; ``Limits.from_env()`` overrides them from ``ARRIVAL_*`` variables. A limit of 0
+(or unset retention) means "not enforced" and is never the default for upload size, episodes, people or queue length.
+This module imports nothing heavy so the web server can use it.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, fields
+
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+
+ENV = {
+    "max_upload_bytes": ("ARRIVAL_MAX_UPLOAD_MB", 1024 * 1024),
+    "max_episodes": ("ARRIVAL_MAX_EPISODES", 1),
+    "max_people": ("ARRIVAL_MAX_PEOPLE", 1),
+    "max_job_seconds": ("ARRIVAL_MAX_JOB_SECONDS", 1),
+    "max_queue": ("ARRIVAL_MAX_QUEUE", 1),
+    "retention_hours": ("ARRIVAL_RETENTION_HOURS", 1),
+}
+
+
+class LimitError(ValueError):
+    """A request or setting outside the configured limits."""
+
+
+class QueueFull(LimitError):
+    """The queue already holds ``max_queue`` queued or running jobs."""
+
+
+@dataclass(frozen=True)
+class Limits:
+    max_upload_bytes: int = MAX_UPLOAD_BYTES  # one upload; web 413 and worker re-check of upload.bin
+    max_episodes: int = 100  # episodes per job (the sim's attempt count)
+    max_people: int = 4  # simulated people per job
+    max_job_seconds: float = 1800.0  # wall clock per job; 0 runs the job in-process with no timeout
+    max_queue: int = 20  # queued + running jobs; a new upload beyond this is refused (0 = unlimited)
+    retention_hours: float | None = None  # finished jobs older than this are deleted by the worker sweep; None keeps them
+    stale_seconds: float = 120.0  # a running job whose worker has not heartbeat this long is requeued
+
+    def check_request(self, episodes: int, people: int) -> None:
+        """Raise ``LimitError`` if one job's sim options exceed the ceilings."""
+        if self.max_episodes and episodes > self.max_episodes:
+            raise LimitError(f"episodes {episodes} exceeds the limit of {self.max_episodes}")
+        if self.max_people and people > self.max_people:
+            raise LimitError(f"people {people} exceeds the limit of {self.max_people}")
+
+    def replace(self, **kw) -> "Limits":
+        known = {f.name for f in fields(self)}
+        bad = set(kw) - known
+        if bad:
+            raise TypeError(f"unknown limits {sorted(bad)}")
+        return Limits(**{**{k: getattr(self, k) for k in known}, **{k: v for k, v in kw.items() if v is not None}})
+
+    @classmethod
+    def from_env(cls, environ=None) -> "Limits":
+        env = os.environ if environ is None else environ
+        kw: dict = {}
+        for name, (var, scale) in ENV.items():
+            raw = env.get(var)
+            if raw is None or not str(raw).strip():
+                continue
+            try:
+                num = float(raw)
+            except ValueError:
+                raise LimitError(f"{var}={raw!r} is not a number") from None
+            if not num >= 0 or num == float("inf"):
+                raise LimitError(f"{var}={raw!r} must be a finite number >= 0")
+            if name in ("max_job_seconds", "retention_hours"):
+                kw[name] = num
+            else:
+                kw[name] = int(num * scale)
+        return cls(**kw)

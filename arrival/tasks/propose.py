@@ -6,7 +6,7 @@ import json
 import random
 from pathlib import Path
 
-from arrival.twin.compile import to_local
+from arrival.twin.compile import is_counter_host, to_local
 
 LIGHTING = ("dim", "neutral", "bright")
 POSE_OFFSETS = ([0.0, 0.0], [0.08, 0.0], [-0.08, 0.0], [0.0, 0.08])
@@ -51,12 +51,12 @@ def _fixture(twin: dict, fid: str) -> dict | None:
 
 
 def propose(twin: dict) -> dict:
-    counters = [f for f in twin["fixtures"] if f["type"] == "counter"]
+    counters = [f for f in twin["fixtures"] if is_counter_host(f)]
     counter_a = (_fixture(twin, "counter_a")
                  or next((c for c in counters if any(on_counter(o, c) for o in twin["objects"])), None)
                  or next(iter(counters), None))
     counter_b = _fixture(twin, "counter_b") or next(
-        (f for f in twin["fixtures"] if f["type"] == "counter" and f is not counter_a), None)
+        (f for f in twin["fixtures"] if is_counter_host(f) and f is not counter_a), None)
     sink = next((f for f in twin["fixtures"] if f["type"] == "sink"), None)
     targets = {"counter_to_sink": sink, "counter_to_counter": counter_b}
     tasks = []

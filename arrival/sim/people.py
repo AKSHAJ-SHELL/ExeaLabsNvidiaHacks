@@ -12,6 +12,19 @@ import numpy as np
 CLEAR = 0.6  # min distance (m) from the base column for any path segment: 0.12 pedestal + 0.17 torso + margin
 LANE = (0.5, 0.75)  # the crossing lane runs this far behind the base, closer than CLEAR on purpose
 
+
+def frame(yaw: float) -> np.ndarray:
+    """Rotation taking world xy into the frame where a fixture with this yaw faces +y (local = M @ world)."""
+    c, s = np.cos(yaw), np.sin(yaw)
+    return np.array([[c, s], [-s, c]])
+
+
+def _in_frame(f: dict, M: np.ndarray, yaw: float) -> dict:
+    """A fixture dict moved into the frame `M` takes the world to (the one where a fixture with yaw `yaw` faces +y)."""
+    x, y = M @ np.array(f["position"][:2], dtype=float)
+    return {**f, "position": [float(x), float(y), *f["position"][2:]], "yaw": f.get("yaw", 0.0) - yaw}
+
+
 HEIGHT = (1.55, 1.90)
 NC = 'contype="0" conaffinity="0"'
 SHIRTS = ["0.70 0.20 0.20 1", "0.20 0.40 0.70 1", "0.30 0.60 0.30 1", "0.85 0.75 0.25 1", "0.55 0.30 0.60 1",
@@ -291,24 +304,31 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
             "sector": sector}
 
 
-def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = None, r: float = 0.0):
+def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = None, r: float = 0.0,
+                      base_to=None):
     """Free point -> approach from behind -> walk a lane behind the base (crossing the robot's work strip)
     -> stop at the counter on the far side -> free point. Free points are resampled until no segment comes
-    within CLEAR of the base; after 50 misses the point directly behind the stop or the lane is used."""
+    within CLEAR of the base; after 50 misses the point directly behind the stop or the lane is used.
+    base_to (MAN-3) is where a mobile base drives to: the lane, the stop and the clearances then cover the whole
+    straight drive from base_xy to base_to, so nobody stands on the route."""
     x0, y0, x1, y1 = floor
     base = np.asarray(base_xy, dtype=float)
-    room = {1.0: x1 - base[0], -1.0: base[0] - x0}  # the stop needs 0.8 m beside the base; pick a side that has it
+    end = base if base_to is None else np.asarray(base_to, dtype=float)
+    lo, hi = min(base[0], end[0]), max(base[0], end[0])
+    drive = [base + k / 8 * (end - base) for k in range(9)]  # points the loop must keep CLEAR from
+    room = {1.0: x1 - hi, -1.0: lo - x0}  # the stop needs 0.8 m beside the base; pick a side that has it
     side = rng.choice([-1.0, 1.0]) if min(room.values()) >= 1.3 else max(room, key=room.get)
-    lane_y = min(base[1] + rng.uniform(*LANE), y1 - 0.4)
-    lane = [np.array([np.clip(base[0] - side, x0, x1), lane_y]), np.array([np.clip(base[0] + side, x0, x1), lane_y])]
+    lane_y = min(max(base[1], end[1]) + rng.uniform(*LANE), y1 - 0.4)
+    near, far = (hi, lo) if side > 0 else (lo, hi)  # the stop sits beyond the route's end on its side
+    lane = [np.array([np.clip(far - side, x0, x1), lane_y]), np.array([np.clip(near + side, x0, x1), lane_y])]
     approach = np.array([lane[0][0], y1 - 0.2])
-    stop = np.array([base[0] + side * rng.uniform(0.8, min(1.3, room[side])), front_y + 0.35])
+    stop = np.array([near + side * rng.uniform(0.8, min(1.3, room[side])), front_y + 0.35])
 
     def free(prev, nxt, fallback):
         for _ in range(50):
             p = rng.uniform([x0, y0], [x1, y1])
-            if (np.linalg.norm(p - base) >= CLEAR and _seg_dist(prev, p, base) >= CLEAR
-                    and _seg_dist(p, nxt, base) >= CLEAR and not (prints and prints.blocked(p, r))):
+            if (all(np.linalg.norm(p - q) >= CLEAR and _seg_dist(prev, p, q) >= CLEAR
+                    and _seg_dist(p, nxt, q) >= CLEAR for q in drive) and not (prints and prints.blocked(p, r))):
                 return p
         return fallback
 
@@ -336,11 +356,19 @@ class Walkers:
     and pauses at the counter. Limbs follow a gait phase driven by distance walked; the swing fades out when standing.
     With a fridge in the room, P_VISIT of the seeds send one person to it first: they start beside the handle,
     hold it while the hinge swings open, stand in the doorway, come back, hold the handle while it swings shut,
-    and then walk their loop. The others route round the door's swing. `fridge_visit` True or False forces it."""
+    and then walk their loop. The others route round the door's swing. `fridge_visit` True or False forces it.
+    `floor`, `base_xy` and `front_y` are in the frame where the fixture with yaw `yaw` faces +y (see `frame`; the
+    hero kitchen's north wall has yaw 0, so there it is the world), `fixtures` are in the world. Everything is
+    planned in that frame, so a run on any wall gets its strip, lane, counter stop and fridge trip, and the paths,
+    the visit and the door geometry are turned back into the world before the first step. `front_y` None means no
+    counter stop: free loops over the floor (the base is still kept clear of)."""
 
     def __init__(self, n: int, floor: tuple[float, float, float, float], seed: int = 0, speed: float = 0.8,
-                 base_xy=None, front_y: float | None = None, fixtures=None, fridge_visit: bool | None = None):
+                 base_xy=None, front_y: float | None = None, fixtures=None, fridge_visit: bool | None = None,
+                 yaw: float = 0.0, base_to=None):
         rng = np.random.default_rng(seed)
+        self.M, self.work_yaw = frame(yaw), yaw
+        fixtures = [_in_frame(f, self.M, yaw) for f in fixtures or []]
         self.specs = [person_spec(seed, i) for i in range(n)]
         self.visit = None
         if n and fixtures and fridge_visit is not False:  # its own stream, so seeds without a visit walk as before
@@ -355,11 +383,11 @@ class Walkers:
         for i, s in enumerate(self.specs):
             visiting = self.visit is not None and i == self.visit["person"]
             pr = prints if visiting else avoid
-            if base_xy is None:
+            if front_y is None:
                 pts = free_path(rng, floor, pr, s["radius"])
                 pause = [0.0] * len(pts)
             else:
-                pts, pause = _interaction_loop(rng, floor, base_xy, front_y, pr, s["radius"])
+                pts, pause = _interaction_loop(rng, floor, base_xy, front_y, pr, s["radius"], base_to)
             faces, slow = [None] * len(pts), [False] * len(pts)
             if visiting:
                 pts, pause, faces, slow = self._splice_visit(pts, pause, s["radius"], floor, fixtures, base_xy)
@@ -367,6 +395,7 @@ class Walkers:
             self.pauses.append(pause)
             self.faces.append(faces)
             self.slow.append(slow)
+        self._to_world(yaw)
         self.pos = [p[0].copy() for p in self.paths]
         self.idx = [1] * n
         self.wait = [0.0] * n
@@ -384,6 +413,17 @@ class Walkers:
         if self.visit:
             who = self.visit["person"]
             self.wait[who], self.total[who], self.at[who] = self.pauses[who][0], self.pauses[who][0], 0
+
+    def _to_world(self, yaw: float) -> None:
+        """Turn the paths and the planned visit from the work frame back into the world."""
+        back = self.M.T
+        self.paths = [[back @ p for p in path] for path in self.paths]
+        if self.visit:
+            v = self.visit
+            for k in ("hinge", "centre", "s1", "s2"):
+                v[k] = back @ v[k]
+            v["yaw"] += yaw
+            v["face"] += yaw
 
     def _splice_visit(self, pts, pause, r, floor, fixtures, base_xy):
         """Put the fridge trip at the front of the loop: s1 (open), s2 (look), s1 (close), then the loop's own
@@ -467,7 +507,7 @@ class Walkers:
     def _pause_yaw(self, i: int) -> float:
         if self.faces[i][self.at[i]] in ("open", "look", "close") and self.visit:
             return self.visit["face"]  # square to the fridge; the toes stay out of the door's swing
-        return -np.pi / 2  # face the counter while stopped
+        return -np.pi / 2 + self.work_yaw  # face the counter while stopped
 
     def step(self, model, data, dt: float) -> list[list[float]]:
         if self._gids is None:

@@ -1,6 +1,8 @@
 """Time and cost report computed from local runs: python -m arrival.eval.cost [--out out].
 
-Reads out/reports/*.json (demo and sim reports), out/eval/*.json and out/jobs/*/status.json. Throughput numbers are
+Reads out/reports/*.json (demo and sim reports), out/eval/*/report.json, legacy out/eval/*.json, out/jobs/*/status.json and the per-job usage ledger
+out/usage/jobs.jsonl (the worker's metering: wall seconds, episodes, frames, bytes; it outlives `arrival gc`, so a deleted
+job keeps its row). Metered units are measured on the local machine and carry no price. Throughput numbers are
 whatever those files hold. A dollar row is measured only when a usage file supplied the units AND the pricing line
 says its rate is invoiced; with the placeholder rates of configs/pricing.example.yaml it is an estimate and says so.
 The generated-vs-teleop comparison prints only when a valid teleop_baseline.json exists.
@@ -81,11 +83,44 @@ def load_usage(path: str | Path) -> dict:
     return u
 
 
-def _row(source: str, room: str, family: str | None, attempts, successes, seconds, human_contacts=None) -> dict:
+def _row(source: str, room: str, family: str | None, attempts, successes, seconds, human_contacts=None,
+         frames=None) -> dict:
     ok = isinstance(attempts, int) and isinstance(successes, int)
     secs = seconds if _num(seconds) and seconds > 0 else None
     return {"source": source, "room": room, "family": family, "attempts": attempts if ok else None,
-            "successes": successes if ok else None, "seconds": secs, "human_contacts": human_contacts}
+            "successes": successes if ok else None, "seconds": secs, "human_contacts": human_contacts,
+            "frames": frames if isinstance(frames, int) and not isinstance(frames, bool) else None}
+
+
+METER_KEYS = ("wall_seconds", "episodes_attempted", "episodes_succeeded", "frames", "upload_bytes", "zip_bytes",
+              "dataset_bytes")
+
+
+def job_usage(out_dir: str | Path) -> dict[str, dict]:
+    """Per-job metering by job id: the ledger first, then each status.json (which wins: it is the live record).
+    A value is None when it was not measured; a job without a usage block (an older worker) is not here."""
+    out = Path(out_dir)
+    jobs: dict[str, dict] = {}
+    ledger = out / "usage" / "jobs.jsonl"
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines() if ledger.is_file() else []
+    except OSError as e:
+        raise CostError(f"usage ledger {ledger}: cannot read ({type(e).__name__}: {e})") from e
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue  # a line cut short by a crash; the rest of the ledger is still good
+        if isinstance(rec, dict) and isinstance(rec.get("id"), str):
+            jobs[rec["id"]] = {"room_id": rec.get("room_id"), "attempts": rec.get("attempts"),
+                               "successes": rec.get("successes"), **{k: rec.get(k) for k in METER_KEYS}}
+    for p in sorted((out / "jobs").glob("*/status.json")):
+        s = _load(p, "job status")
+        u = s.get("usage")
+        if isinstance(u, dict) and isinstance(s.get("id"), str) and s.get("finished_at") is not None:
+            jobs[s["id"]] = {"room_id": s.get("room_id"), "attempts": s.get("attempts"),
+                             "successes": s.get("successes"), **{k: u.get(k) for k in METER_KEYS}}
+    return jobs
 
 
 def collect_rows(out_dir: str | Path) -> list[dict]:
@@ -101,9 +136,12 @@ def collect_rows(out_dir: str | Path) -> list[dict]:
         if isinstance(fams, dict):  # sim reports: per-family counts, no per-family seconds
             for fam, f in fams.items():
                 rows.append(_row("report", room, fam, f.get("attempts"), f.get("successes"), None, f.get("human_contacts")))
-    for p in sorted((out / "eval").glob("*.json")):
+    for p in sorted(list((out / "eval").glob("*.json")) + list((out / "eval").glob("*/report.json"))):
         r = _load(p, "report")
+        if not isinstance(r.get("totals"), dict) or not isinstance(r.get("families"), dict):
+            continue
         room = r.get("room_id", p.stem)
+        start = len(rows)
         for fam, f in (r.get("families") or {}).items():
             n = f.get("episodes")
             wall = f.get("mean_wall_seconds")
@@ -112,12 +150,22 @@ def collect_rows(out_dir: str | Path) -> list[dict]:
         t = r.get("totals") or {}
         rows.append(_row("eval", room, None, t.get("episodes"), t.get("successes"), t.get("wall_seconds"),
                          t.get("human_contacts")))
+        for row in rows[start:]:
+            row.update(run_id=r.get("run_id"), checkpoint_id=r.get("checkpoint_id"))
+    metered = job_usage(out)
     for p in sorted((out / "jobs").glob("*/status.json")):
         s = _load(p, "job status")
         a, f_ = s.get("started_at"), s.get("finished_at")
-        if s.get("attempts") is None or not _num(a) or not _num(f_):
+        u = metered.get(s.get("id"), {})
+        secs = u.get("wall_seconds") if _num(u.get("wall_seconds")) else (f_ - a if _num(a) and _num(f_) else None)
+        if s.get("attempts") is None or secs is None:
             continue  # a job that has not finished has no time to report
-        rows.append(_row("job", s.get("room_id") or p.parent.name, None, s["attempts"], s.get("successes"), f_ - a))
+        rows.append(_row("job", s.get("room_id") or p.parent.name, None, s["attempts"], s.get("successes"), secs,
+                         frames=u.get("frames")))
+    for jid, u in metered.items():  # jobs deleted by `arrival gc` keep their ledger line
+        if not (out / "jobs" / jid / "status.json").is_file() and u["attempts"] is not None:
+            rows.append(_row("job", u.get("room_id") or jid, None, u["attempts"], u.get("successes"),
+                             u.get("wall_seconds"), frames=u.get("frames")))
     for r in rows:
         a, k, sec = r["attempts"], r["successes"], r["seconds"]
         r["dropped"] = a - k if a is not None else None
@@ -143,6 +191,17 @@ def dollars(usage: dict | None, pricing: dict | None) -> dict:
                   "unit": rate.get("unit"), "usd_per_unit": rate["usd_per_unit"], "rate_basis": basis,
                   **({} if invoiced else {"estimate": True})}
     return d
+
+
+def metering_totals(out_dir: str | Path) -> dict:
+    """Sum of the worker's per-job metering. Each total is None when no job measured it (a sum over nothing is not 0)."""
+    jobs = job_usage(out_dir)
+    tot: dict = {"jobs": len(jobs)}
+    for k in METER_KEYS:
+        vals = [u[k] for u in jobs.values() if _num(u.get(k))]
+        tot[k] = round(sum(vals), 3) if vals else None
+    tot["note"] = "measured on the local machine by arrival work; not priced (local CPU is $0, no Nebius product was used)"
+    return tot
 
 
 def teleop_block(baseline: dict | None) -> dict | None:
@@ -187,7 +246,8 @@ def build(out_dir, usage_path=None, pricing_path="configs/pricing.example.yaml",
     pricing = load_pricing(pricing_path) if usage else None
     rows = collect_rows(out)
     dol = dollars(usage, pricing)
-    return {"rows": rows, "dollars": dol, "teleop_baseline": tele, "comparison": compare(rows, dol, tele)}
+    return {"rows": rows, "dollars": dol, "teleop_baseline": tele, "comparison": compare(rows, dol, tele),
+            "metering": metering_totals(out)}
 
 
 def _f(v, fmt="{}"):
@@ -198,7 +258,7 @@ def markdown(rep: dict) -> str:
     L = ["| source | room | family | attempts | successes | drop rate | seconds | demos/hour | s/demo | attempts/demo |",
          "|---|---|---|---|---|---|---|---|---|---|"]
     for r in rep["rows"]:
-        L.append(f"| {r['source']} | {r['room']} | {r['family'] or 'all'} | {_f(r['attempts'])} | {_f(r['successes'])} | "
+        L.append(f"| {r['source']}{':' + r['run_id'] if r.get('run_id') else ''} | {r['room']} | {r['family'] or 'all'} | {_f(r['attempts'])} | {_f(r['successes'])} | "
                  f"{_f(r['drop_rate'])} | {_f(r['seconds'], '{:.1f}')} | {_f(r['demos_per_hour'])} | "
                  f"{_f(r['seconds_per_demo'])} | {_f(r['attempts_per_demo'])} |")
     if not rep["rows"]:
@@ -209,6 +269,13 @@ def markdown(rep: dict) -> str:
         note = f"{v['units']} {v['unit']} at {v['usd_per_unit']} ({v['rate_basis']})" if "units" in v else (
             "local run" if k == "local_cpu" else "not measured")
         L.append(f"| {k} | {_f(v['usd'])} | {str(v['measured']).lower()} | {note} |")
+    m = rep.get("metering") or {"jobs": 0}
+    if m["jobs"]:
+        L += ["", f"Worker metering over {m['jobs']} job(s): " + ", ".join(f"{k} {_f(m[k])}" for k in METER_KEYS) + "."]
+    runs = {r["run_id"]: r.get("checkpoint_id") for r in rep["rows"] if r.get("run_id")}
+    if runs:
+        L += ["", "Evaluation runs (checkpoint labels supplied by the caller):"]
+        L += [f"- {run_id}: {checkpoint}" for run_id, checkpoint in runs.items()]
     c = rep["comparison"]
     L.append("")
     if not c["measured"]:

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import urllib.request
 from pathlib import Path
@@ -17,7 +16,10 @@ from pathlib import Path
 import numpy as np
 
 from arrival.sim import ik
-from arrival.sim.robot import FINGER_OPEN, HOME
+from arrival.sim.robot import BASE_SPEED, BASE_TURN, FINGER_OPEN, HAND, HOME
+
+MINJERK_PEAK = 1.875  # peak over mean speed of a min-jerk move: sizes a base drive so it never exceeds BASE_SPEED
+STOP_CLEAR = 0.7  # the base waits while a person is this close ahead of it (0.12 pedestal + 0.17 torso + margin)
 
 
 class Policy:
@@ -44,6 +46,11 @@ FRIDGE_PUSH_END = np.radians(80)  # door angle the push is planned to
 FRIDGE_PUSH_ROLL = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])  # fingers stacked vertically
 # for the push, so the hand is narrow along the panel and its far finger stays off the edge
 FRIDGE_PULL_STEPS = 10  # control steps per quarter of the hooked pull and per sixth of the push
+FLAP_OUT = 0.12  # m: how far out along the door normal the hand backs off after letting a flap door go
+FAUCET_UNDER, FAUCET_PUSH = 0.045, 0.05  # m: closed fingers start this far below the lever tip, then travel up this far
+FLAP_TILTS = (0.0, 0.35, 0.7)  # rad below the door's horizontal for the hand on a flap-door bar; chosen per task
+FLAP_RELEASE = 0.5  # rad; a bottom-hinged door is let go here and falls to its flat stop (its handle swings
+# toward the base as it opens, and past this angle the wrist would have to fold back under the arm)
 
 
 class ScriptedExpert(Policy):
@@ -61,14 +68,17 @@ class ScriptedExpert(Policy):
         return yaw + np.pi if np.cos(yaw - np.arctan2(x[1], x[0])) < -0.5 else yaw
 
     def _waypoints(self, env, task: dict) -> list[tuple]:
-        """(pos, R, gripper, steps[, via]) list."""
-        fam, o, c = task["family"], FINGER_OPEN, 0.0
-        if fam in ("counter_to_sink", "counter_to_counter"):
+        """(pos, R, gripper, steps[, via[, base]]) list. base is a room-frame (x, y, yaw) the base stands at for
+        that waypoint (None: where it already is); pos None keeps the arm's joints while the base drives."""
+        fam, o, c = task["family"], getattr(env, "finger_open", FINGER_OPEN), 0.0
+        if fam == "counter_to_counter" and env.drive_to is not None:
+            return self._drive_and_place(env, task, o, c)
+        if fam in ("counter_to_sink", "counter_to_counter", "move_on_table"):
             p = env.body_pos(task["object_id"])
             gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
             tgt = env.place_point(task)
             g = env.grasp(task["object_id"])
-            yaw = 0.0
+            yaw = env.run_yaw()  # fingers close across the counter, whichever wall it stands on
             if g is not None:  # rim or handle grasp: same xy offset at the set-down, eef kept at its height over the body
                 p = p + np.array([g["off"][0], g["off"][1], 0.0])
                 tgt = tgt + np.array([g["off"][0], g["off"][1], g["z"] - env.body_pos(task["object_id"])[2]])
@@ -99,7 +109,7 @@ class ScriptedExpert(Policy):
             p = env.body_pos(task["object_id"])
             gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
             tgt = env.drawer_place_point(task)
-            R = ik.down(self._grip_yaw(env, np.pi / 2))
+            R = ik.down(self._grip_yaw(env, env.run_yaw() + np.pi / 2))
             s = self.seg_steps
             lift = gz + 0.15
             n_steps = int(np.ceil((lift - tgt[2]) / 0.1))
@@ -114,12 +124,16 @@ class ScriptedExpert(Policy):
             p = env.body_pos(task["object_id"])
             top = env.place_point_top(task)
             hh = env.obj_half_h(task["object_id"])
-            R = ik.down(self._grip_yaw(env, 0.0))
+            g = env.grasp(task["object_id"])
+            R = ik.down(self._grip_yaw(env, env.run_yaw() if g is None else g["yaw"]))
             s = self.seg_steps
-            press = top + hh - 0.004
-            strokes = [(p[0] + dx, p[1], press) for dx in (0.15, -0.15, 0.15, -0.15)]
-            return [((p[0], p[1], p[2] + 0.15), R, o, s), ((p[0], p[1], p[2]), R, o, s),
-                    ((p[0], p[1], p[2]), R, c, self.hold_steps), ((p[0], p[1], press), R, c, s // 2)] + [
+            gz, press = p[2], top + hh - 0.004
+            if g is not None:  # the spatula: the pinch already has the pad tips over the top, so it is not pressed lower
+                gz = press = g["z"]
+            u = np.array([np.cos(env.run_yaw()), np.sin(env.run_yaw())])  # strokes run along the counter
+            strokes = [(p[0] + d * u[0], p[1] + d * u[1], press) for d in (0.15, -0.15, 0.15, -0.15)]
+            return [((p[0], p[1], gz + 0.15), R, o, s), ((p[0], p[1], gz), R, o, s),
+                    ((p[0], p[1], gz), R, c, self.hold_steps), ((p[0], p[1], press), R, c, s // 2)] + [
                     (w, R, c, s, k < 3) for k, w in enumerate(strokes)] + [
                     ((p[0], p[1], press), R, c, s), ((p[0], p[1], press), R, o, self.hold_steps),
                     ((p[0], p[1], press + 0.15), R, o, s)]
@@ -249,9 +263,131 @@ class ScriptedExpert(Policy):
             q = FRIDGE_PUSH_END
             out += [(push(q) - 0.12 * nrm(q), pori(q), c, s), (push(q) - 0.12 * nrm(q) + 0.1 * up, pori(q), c, s)]
             return out
+        if fam in ("open_oven", "open_dishwasher"):
+            # The bar sits on the outside of a bottom-hinged door, so a top-down grasp would put the hand body in
+            # the panel as soon as the door tilts. The hand points into the panel with the fingers closing across
+            # the bar vertically, and that frame turns with the door; at FLAP_RELEASE the gripper opens and gravity
+            # takes the door to its flat stop.
+            pivot, h, _ = env.flap_geometry(task)
+            hand = getattr(env, "hand", HAND)  # pad and wrist geometry of the arm that is loaded
+            n = env.pull_axis(task)  # outward normal of the closed panel
+            s, up = self.seg_steps, np.array([0, 0, 1.0])
+            a = np.cross(up, n)  # hinge axis direction
+            rel = h - pivot
+
+            def pt(q):
+                """Handle position after the door turns q about the hinge (top edge forward and down)."""
+                return pivot + rel * np.cos(q) + np.cross(a, rel) * np.sin(q) + a * np.dot(a, rel) * (1 - np.cos(q))
+
+            def nrm(q):
+                return n * np.cos(q) - up * np.sin(q)
+
+            def ori(q, tilt):
+                # pointing into the panel and `tilt` below the door's horizontal, fingers closing along the door's
+                # up direction tilted the same way; a bigger tilt keeps the wrist higher and closer to the base
+                nq, uq = nrm(q), up * np.cos(q) + n * np.sin(q)
+                z = -nq * np.cos(tilt) - uq * np.sin(tilt)
+                y = uq * np.cos(tilt) - nq * np.sin(tilt)
+                if np.dot(y, env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
+                    y = -y
+                return np.column_stack([np.cross(y, z), y, z])
+
+            # sign check for pt: the handle must move outward (+n) as q grows
+            if np.dot(pt(0.3) - pt(0.0), n) < 0:
+                a = -a
+
+            def chain(tilt):
+                out = [(pt(0) + 0.18 * n + 0.05 * up, ori(0, tilt), o, s), (pt(0) + hand["flap_bar"] * n, ori(0, tilt), o, s),
+                       (pt(0) + hand["flap_bar"] * n, ori(0, tilt), c, self.hold_steps)]
+                for k in range(1, 9):
+                    q = FLAP_RELEASE * k / 8
+                    out.append((pt(q) + hand["flap_bar"] * nrm(q), ori(q, tilt), c, s // 2, k < 8))
+                q = FLAP_RELEASE
+                out.append((pt(q) + hand["flap_bar"] * nrm(q), ori(q, tilt), o, self.hold_steps))
+                out.append((pt(q) + FLAP_OUT * nrm(q) + hand["flap_up"] * up, ori(q, tilt), o, s))
+                return out
+
+            # which tilt reaches depends on the bar's height and distance (oven bars sit higher than dishwasher
+            # bars), so take the candidate whose whole chain has the smallest IK residual
+            return min((chain(t) for t in FLAP_TILTS), key=lambda wps: self._chain_error(env, wps))
+        if fam == "turn_on_faucet":
+            # push the lever tip up from below with the closed fingers: hand horizontal, pointing at the wall
+            tip = env.site_pos(task["handle"])
+            n = env.pull_axis(task)  # the counter front direction; the lever sits at the back of the counter
+            R = ik.facing(-n)
+            if np.dot(R[:, 1], env.data.site("eef").xmat.reshape(3, 3)[:, 1]) < 0:
+                R = R @ np.diag([-1, -1, 1])  # same grasp, half a turn less wrist roll
+            s = self.seg_steps
+            # the tip rises at most 3.8 cm over the lever's 1.2 rad range, so the push stops short of driving it
+            # into the stop: 5 cm of hand travel from 3.5 cm below the tip lands the lever near 0.9 rad
+            under = tip - np.array([0, 0, FAUCET_UNDER])
+            lift = FAUCET_PUSH
+            return [(under + 0.12 * n + np.array([0, 0, 0.06]), R, c, s), (under + 0.12 * n, R, c, s),
+                    (under, R, c, s)] + [(under + np.array([0, 0, lift * k / 3]), R, c, s // 2, k < 3) for k in (1, 2, 3)] + [
+                    (under + np.array([0, 0, lift]) + 0.12 * n, R, c, s)]
+        if fam in ("load_dishwasher", "unload_dishwasher"):
+            # pick by the body as for counter_to_sink; the set-down into the rack (or onto the counter) is a chain of
+            # short via-point steps like put_in_drawer, so the joint-space path does not bow through the rack rails
+            p = env.body_pos(task["object_id"])
+            gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
+            tgt = env.rack_place_point(task) if fam == "load_dishwasher" else env.counter_place_point(task)
+            R = ik.down(self._grip_yaw(env, env.run_yaw()))
+            s = self.seg_steps
+            lift = max(gz, tgt[2]) + 0.15
+            n_steps = max(1, int(np.ceil((lift - tgt[2]) / 0.1)))
+            zs = np.linspace(lift, tgt[2], n_steps + 1)[1:]
+            descent = [((tgt[0], tgt[1], z), R, c, s // 2, k < n_steps - 1) for k, z in enumerate(zs)]
+            # the approach to an object low in the rack is the same kind of chain: one long joint-space move from
+            # HOME dips the hand onto the dishwasher's top edge on the way down
+            n_app = max(1, int(np.ceil((lift - gz - 0.02) / 0.1)))
+            zs = np.linspace(lift, gz + 0.02, n_app + 1)[1:]
+            approach = [((p[0], p[1], z), R, o, s // 2, k < n_app - 1) for k, z in enumerate(zs)]
+            rise = [((p[0], p[1], z), R, c, s // 2, k < n_app - 1) for k, z in enumerate(zs[::-1])]  # same pace up
+            return [((p[0], p[1], lift), R, o, s)] + approach + [
+                    ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps)] + rise + [
+                    ((p[0], p[1], lift), R, c, s // 2), ((tgt[0], tgt[1], lift), R, c, 2 * s)] + descent + [
+                    ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps), ((tgt[0], tgt[1], tgt[2] + 0.15), R, o, s)]
         raise ValueError(f"unknown family {fam}")
 
+    @staticmethod
+    def _chain_error(env, wps) -> float:
+        q, worst = np.array(HOME), 0.0
+        for pos, R, *_ in wps:
+            q, err = ik.solve(env.model, env.data, pos, R, q, env.qadr, env.dofadr)
+            worst = max(worst, err)
+        return worst
+
+    def _drive_and_place(self, env, task: dict, o: float, c: float) -> list[tuple]:
+        """counter_to_counter on a mobile base: grasp in front of the object, tuck the object in front of the base
+        and above the counter top, drive along the counter front to the target, then place as counter_to_sink does."""
+        from arrival.sim.collect import _front
+
+        p = env.body_pos(task["object_id"])
+        gz = p[2] + min(0.01, env.obj_half_h(task["object_id"]) * 0.2)
+        tgt = env.place_point(task)
+        g = env.grasp(task["object_id"])
+        yaw = env.run_yaw()
+        if g is not None:  # rim or handle grasp: same xy offset at the set-down, eef kept at its height over the body
+            p = p + np.array([g["off"][0], g["off"][1], 0.0])
+            tgt = tgt + np.array([g["off"][0], g["off"][1], g["z"] - env.body_pos(task["object_id"])[2]])
+            gz, yaw = g["z"], g["yaw"]
+        R = ik.down(self._grip_yaw(env, yaw))
+        s = self.seg_steps
+        here, there = env.base_pose(), env.drive_to
+        n = _front(env.fx[task["source"]])[:2]
+        carry = (here[0] - 0.25 * n[0], here[1] - 0.25 * n[1], 1.1)  # just off the counter front, above its top
+        lift = [((p[0], p[1], gz + 0.22), R, c, s)]
+        if g is not None:  # a wide object tips in the pads as it leaves the counter: lift it in short steps
+            lift = [((p[0], p[1], gz + dz), R, c, s, dz < 0.22) for dz in (0.03, 0.08, 0.15, 0.22)]
+        return [((p[0], p[1], gz + 0.18), R, o, s, False, here), ((p[0], p[1], gz + 0.02), R, o, s),
+                ((p[0], p[1], gz), R, o, s // 2), ((p[0], p[1], gz), R, c, self.hold_steps)] + lift + [
+                (carry, R, c, s),
+                (None, None, c, s, False, there),
+                ((tgt[0], tgt[1], gz + 0.22), R, c, 2 * s), ((tgt[0], tgt[1], tgt[2]), R, c, s),
+                ((tgt[0], tgt[1], tgt[2]), R, o, self.hold_steps), ((tgt[0], tgt[1], tgt[2] + 0.2), R, o, s)]
+
     def reset(self, env, task: dict) -> None:
+        self.env, self.last, self.held = env, None, 0
         if task["family"] in ("close_drawer", "close_door"):
             self.open_at = float(env.data.joint(task["joint"]).qpos[0])  # how far the part starts open
         wps = self._waypoints(env, task)
@@ -263,25 +399,39 @@ class ScriptedExpert(Policy):
         if task["family"] not in ("open_door", "close_door"):
             # flipped, the cabinet-door grasp lands on the other wrist branch (joint 5 negative): link5 or the elbow
             # then meets the solid panel (#47) and the bar slips out of the pads at 26 to 36 deg
-            plans.append(self._plan(env, [(p, R @ flip, *rest) for p, R, *rest in wps]))
+            plans.append(self._plan(env, [(p, None if R is None else R @ flip, *rest) for p, R, *rest in wps]))
         best_err = min(err for _, err, _ in plans)
         self.plan, self.ik_error, _ = min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])
         self.t = 0
 
     @staticmethod
     def _plan(env, waypoints) -> tuple[list[np.ndarray], float, float]:
-        """Joint-space plan for the waypoints: (targets per step, worst IK position error, peak |joint 7|)."""
+        """Joint-space plan for the waypoints: (targets per step, worst IK position error, peak |joint 7|). Every
+        target is 11 wide: 7 arm joints, the gripper, then the base pose (the parked one unless a waypoint drives)."""
+        from arrival.sim.collect import FPS
+
         q = np.array(HOME)
         plan: list[np.ndarray] = []
-        prev = np.concatenate([q, [FINGER_OPEN]])
+        base = env.base_pose()
+        prev = np.concatenate([q, [getattr(env, "finger_open", FINGER_OPEN)], base])
         ik_error, q7 = 0.0, abs(q[6])
         chain: list[tuple[np.ndarray, int]] = []
-        for pos, R, g, steps, *via in waypoints:
-            q, err = ik.solve(env.model, env.data, pos, R, q, env.qadr, env.dofadr)
-            ik_error, q7 = max(ik_error, err), max(q7, abs(float(q[6])))
-            nxt = np.concatenate([q, [g]])
+        for pos, R, g, steps, *rest in waypoints:
+            via = bool(rest[0]) if rest else False
+            nxt_base = np.asarray(rest[1], dtype=float) if len(rest) > 1 and rest[1] is not None else base
+            if pos is not None:
+                pin = (env.badr, nxt_base - env.base0) if env.mobile else None  # solve with the base where it will stand
+                q, err = ik.solve(env.model, env.data, pos, R, q, env.qadr, env.dofadr, fixed=pin)
+                ik_error, q7 = max(ik_error, err), max(q7, abs(float(q[6])))
+            d_xy = float(np.hypot(*(nxt_base[:2] - base[:2])))
+            d_yaw = abs(float(nxt_base[2] - base[2]))
+            if d_xy > 1e-6 or d_yaw > 1e-6:  # a drive: long enough that the min-jerk peak stays under the limits
+                steps = max(steps, int(np.ceil(MINJERK_PEAK * d_xy / BASE_SPEED * FPS)) + 2,
+                            int(np.ceil(MINJERK_PEAK * d_yaw / BASE_TURN * FPS)) + 2)
+            base = nxt_base
+            nxt = np.concatenate([q, [g], base])
             chain.append((nxt, steps))
-            if via and via[0]:
+            if via:
                 continue
             total = sum(n for _, n in chain)
             knots = np.cumsum([0] + [n for _, n in chain]) / total
@@ -298,6 +448,16 @@ class ScriptedExpert(Policy):
 
     def act(self, obs: dict) -> np.ndarray:
         a = self.plan[min(self.t, len(self.plan) - 1)]
+        if self.last is not None and self.t < len(self.plan) and getattr(self.env, "mobile", False):
+            cur = self.env.base_pose()[:2]
+            d = a[8:10] - cur
+            if np.linalg.norm(d) > 1e-5:  # about to drive: wait for anyone close in front, the plan resumes after
+                for p in self.env.people_xy:
+                    v = np.asarray(p, dtype=float) - cur
+                    if np.linalg.norm(v) < STOP_CLEAR and v @ d > 0:
+                        self.held += 1
+                        return self.last
+        self.last = a
         self.t += 1
         return a
 
@@ -427,7 +587,9 @@ class VLAClient(Policy):
     """
 
     def __init__(self, url: str | None = None, timeout: float = 10.0):
-        self.url = url or os.environ.get("GR00T_POLICY_URL")
+        from arrival import config as settings
+
+        self.url = url or settings.get("GR00T_POLICY_URL")
         if not self.url:
             raise VLANotConfigured("GR00T_POLICY_URL is not set; start a GR00T policy server and export its URL.")
         self.timeout = timeout

@@ -154,7 +154,7 @@ Checked-in `roomplan.json` does not have to rebuild every fixture. The authored 
 
 ## RGB-D scan frames
 
-`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. Only the format, the loader and a synthetic fixture exist; the iOS recorder that would write it is not built (needs a device). Nothing in the pipeline consumes it yet.
+`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. Only the format, the loader and a synthetic fixture exist; the iOS recorder that would write it is not built (needs a device). `POST /jobs` accepts a bundle as a zip in the `frames` field, validates it and stores it next to the job. The worker compares held-out frames with the compiled twin before adding synthetic objects (docs/REFERENCE.md, Uploaded-frame comparison).
 
 Layout: `frames_manifest.json` plus the files it names, all relative paths inside the bundle folder (no absolute paths, no `..`).
 
@@ -225,7 +225,7 @@ Object labels:
 | spatula | spatula |
 | anything else | box |
 
-Object physics come from `arrival/catalog/objects.py`: shape, nominal size, mass at that size (scaled by volume for any other size), friction and colour. `PICKABLE` lists the ids the scripted expert holds by the body (mug, cup, sponge, apple, bottle), `RIM_HELD` (bowl, plate) are hollow and pinched by the rim nearest the robot, `HANDLE_HELD` (pan) is pinched across the handle at its root; `GRASPABLE` is their union and what the pick families draw from. The spatula is a scene object only. The plate is a deep plate, 3 cm tall with an 18 mm rim, because the closed pads leave a 12 mm gap and a thinner rim slips out. `place_default_objects` draws each default object's size within 8% of the nominal size from its seed.
+Object physics come from `arrival/catalog/objects.py`: shape, nominal size, mass at that size (scaled by volume for any other size), friction and colour. `PICKABLE` lists the ids the scripted expert holds by the body (mug, cup, sponge, apple, bottle, book, remote), `RIM_HELD` (bowl, plate) are hollow and pinched by the rim nearest the robot, `HANDLE_HELD` (pan) is pinched across the handle at its root, `THIN_HELD` (spatula) is pinched across its width with the pad tips 3 mm over the top it lies on; `GRASPABLE` is their union and what the pick families draw from. `WIPE_TOOLS` (sponge, spatula) are what `wipe_counter` drags. The closed laptop is a scene object only (it is wider than the gripper opening both ways). `room_kind` reads a twin's scanned categories (kitchen, bedroom, living room or office) and `ROOM_OBJECTS` lists what `place_default_objects` puts on a table or counter for each: the kitchen's mug, bowl, plate, cup and apple, an office's laptop, book and cup, a living room's remote, book and cup, a bedroom's book and cup; outside a kitchen, on a table deeper than 0.8 m, they lie within 0.40 m of a long edge. The plate is a deep plate, 3 cm tall with an 18 mm rim, because the closed pads leave a 12 mm gap and a thinner rim slips out. `place_default_objects` draws each default object's size within 8% of the nominal size from its seed.
 
 Moving parts in the sim (`arrival.sim.scene.part_names(twin)`): each is a joint, with a site `<joint>_handle` on its handle bar, in the parent fixture's frame.
 
@@ -235,7 +235,7 @@ Moving parts in the sim (`arrival.sim.scene.part_names(twin)`): each is a joint,
 | sink inside a counter | `<sink_id>_faucet` (hinge, 0 to 1.2 rad; the lever up is water on) |
 | stove | `<id>_oven_door` (hinge about the bottom edge, 0 to 1.5 rad; closed is held by gravity) |
 | fridge_bottom_freezer | `<id>_door` (hinge, 0 to 2.0 rad) |
-| dishwasher | `<id>_door` (hinge about the bottom edge, 0 to 1.5 rad); floor-standing; a counter run whose end overlaps it is trimmed back, like a fridge or stove (an appliance wholly inside a run is not cut out) |
+| dishwasher | `<id>_door` (hinge about the bottom edge, 0 to 1.5 rad), `<id>_rack` (slide, 0 to 0.45 m: the upper rack rolls out over the open door; the carcass is hollow so it can); floor-standing; a counter run whose end overlaps it is trimmed back, like a fridge or stove (an appliance wholly inside a run is not cut out) |
 | microwave | `<id>_door` (hinge on the left edge, 0 to 1.9 rad); the fixture `position` is the box centre, so it sits on a counter top |
 
 ## Twin
@@ -439,6 +439,8 @@ Episode indexes are 6 digits, starting at 0, with no gaps after drops. Dropped a
 
 State and action are float32 length 8: 7 joints then gripper. Action at frame i equals the state at frame i (absolute joint targets). This matches the GR00T slicing rule in <https://github.com/NVIDIA/Isaac-GR00T/blob/main/getting_started/data_preparation.md>.
 
+The `sim` dataset (`<room_id>_sim`, written by `python -m arrival sim`) has a third slice: `"base": {"start": 8, "end": 11}` in `state` and the same with `"absolute": true` in `action`, so its state and action are length 11. The slice is the base x, y (meters) and yaw (radians) in the room frame; the action is the commanded base pose. With the default fixed base the three values hold the parked pose for the whole episode; with `--base mobile` they move at up to 0.3 m/s and 0.5 rad/s. One schema for both, so one GR00T modality config lists all three slices. `embodiment.json` carries `"dof_base": 3`, `"base": "planar"`, `"base_frame": "room"` and `"base_actuated": true|false`.
+
 ### embodiment.json
 
 ```json
@@ -564,7 +566,9 @@ The worker (`python -m arrival work`) keeps those fields and adds these when it 
 }
 ```
 
-`status` is one of `queued`, `running`, `done`, `failed`. `stage` is the last stage entered: `normalize`, `twin`, `objects`, `sim`, `validate`, `zip`. `started_at` and `finished_at` are unix seconds like `created_unix`. `error` is null unless `status` is `failed`, then `"<ExceptionType>: <message>"`. `room_id` is the upload filename stem reduced to `[a-z0-9_]` plus `_<id>`. Paths are as the worker saw them (relative to its cwd when `--out` is relative). Fields not reached yet are null.
+`status` is one of `queued`, `running`, `done`, `failed`. `stage` is the last stage entered: `normalize`, `twin`, `realism`, `objects`, `sim`, `validate`, `zip`. `started_at` and `finished_at` are unix seconds like `created_unix`. `error` is null unless `status` is `failed`, then `"<ExceptionType>: <message>"`. `room_id` is the upload filename stem reduced to `[a-z0-9_]` plus `_<id>`. Paths are as the worker saw them (relative to its cwd when `--out` is relative). Fields not reached yet are null.
+
+The job status also has `realism`, initially null, then `{state, metrics, consumed, preview, reason}`. Scored results add `frame_count` and `association`. `metrics` is null unless the camera-offset control passes; otherwise it contains `depth_l1_m`, `rgb_mae`, `rgb_one_minus_ssim`, `n_depth`, `n_rgb` and `frames`. These fields describe the uploaded-frame comparison only, not the generated dataset. Raw reports, the comparison PNG, a pre-placement twin and the applied camera transform stay under the job's `realism/` directory. The public report route returns only the status projection. Normalized RoomPlan bundles carry `arkit_world_to_room` as a row-major 4x4 matrix, used as `bundle_world_to_room @ inverse(manifest_world_to_room)` before scoring.
 
 ## Report
 
@@ -599,7 +603,11 @@ The `sim` report (`out/reports/<room_id>_sim.json`) adds `human_contacts` (total
 
 ## Eval
 
-`out/eval/<room_id>_<policy>.json`, written by `python -m arrival eval`.
+`out/eval/<run_id>/report.json`, written by `python -m arrival eval`. Each invocation creates a new directory. The summary fields below are retained; the report also includes `run_id`, `checkpoint_id`, `checkpoint_id_source`, `manifest_id`, `twin_sha256`, `manifest_path`, `episodes_path`, `runtime`, `base` and `omitted_families`.
+
+`manifest.json` has `schema_version: 1`, the full `twin`, its `twin_sha256`, ordered `tasks`, `omitted_families` and `settings` (families, episodes_per_family, seed, people, holdout, resolution, base, fps, max_steps). `manifest_id` is the SHA-256 of sorted compact UTF-8 JSON with that ID omitted; nonfinite values are refused. The twin hash uses the same encoding. Replay validates and copies the manifest before any rollout.
+
+`episodes.jsonl` has one row per attempted trial: `run_id`, `checkpoint_id`, `manifest_id`, `trial_index`, `task_id`, `family`, `physics_success`, `success`, `seconds`, `wall_seconds`, `safety`, `ik_error`, `detail`, `error`. Physics success is null on an exception; scored success is false. Simulation time and safety fields are null on exceptions. Family and total `observed_episodes` counts identify attempts with measurements; safety aggregates and mean simulation time use only those attempts and are null when none were observed. Success rates still count all attempts, including errors. Completed reports aggregate these rows. A run interrupted before completion keeps its manifest and recorded attempts without a summary report.
 
 ```json
 {
@@ -610,6 +618,7 @@ The `sim` report (`out/reports/<room_id>_sim.json`) adds `human_contacts` (total
   "people": 2,
   "holdout": false,
   "resolution": 128,
+  "base": "fixed",
   "families": {
     "counter_to_sink": {
       "episodes": 4,
@@ -634,7 +643,7 @@ The `sim` report (`out/reports/<room_id>_sim.json`) adds `human_contacts` (total
 }
 ```
 
-`holdout: true` means every task used wording template 4 and the start offset `[0, +0.08]` where the family has them; `sim` datasets never contain those (the sim applies half the y offset, so the held-out start is +0.04 m in y). `success_rate = successes / episodes`, where an episode with a human contact is a failure whatever the physics check said. `wilson_95` is the Wilson score interval at z = 1.96. `mean_seconds` is sim time, frames / 20. `min_human_distance_m` is the minimum over episodes (`null` with `people` 0); a negative value is the depth of the worst overlap. `ik_error_max` is `null` for policies without an IK residual.
+`holdout: true` means every task used wording template 4 and the start offset `[0, +0.08]` where the family has them; `sim` datasets never contain those (the sim applies half the y offset, so the held-out start is +0.04 m in y). `success_rate = successes / episodes`, where an episode with a human contact is a failure whatever the physics check said. `wilson_95` is the Wilson score interval at z = 1.96. `mean_seconds` is sim time, frames / 20. `min_human_distance_m` is the minimum over episodes (`null` with `people` 0); a negative value is the depth of the worst overlap. `ik_error_max` is `null` for policies without an IK residual. `base` is `fixed` or `mobile` (`--base`), and the `sim` report carries the same key.
 
 ## Validator
 
@@ -642,7 +651,7 @@ The `sim` report (`out/reports/<room_id>_sim.json`) adds `human_contacts` (total
 
 - The four meta files plus `embodiment.json` exist.
 - `modality.json` slices match the contract.
-- Parquet columns exist and `observation.state` length is 8.
+- Parquet columns exist and `observation.state` length matches `info.features` (8 for `demo`, 11 for `sim`).
 - Episode count equals `total_episodes`.
 - Sum of episode lengths equals `total_frames`.
 - If `arrival_video_policy` is `sparse`, at least 8 mp4s exist for a 1,000-episode dataset, and at least 1 mp4 exists for a dataset with fewer than 125 episodes.

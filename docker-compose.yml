@@ -1,0 +1,36 @@
+# Web page plus one worker sharing one data volume. Put a TLS-terminating proxy (Caddy, nginx, a cloud load balancer)
+# in front of port 8000: the web service runs with --public and --behind-proxy, so it trusts X-Forwarded-* headers
+# and must not be reachable directly from the internet. See docs/DEPLOY.md.
+services:
+  web:
+    build: .
+    command: >
+      python -m arrival serve --host 0.0.0.0 --public --behind-proxy
+      --max-upload-mb 50 --rate-limit 10 --max-queued 20
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - arrival-out:/app/out
+    environment:
+      ARRIVAL_MAX_QUEUE: "20"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status != 200)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: python -m arrival work --max-job-seconds 900 --retention-hours 24
+    volumes:
+      - arrival-out:/app/out
+    environment:
+      ARRIVAL_MAX_EPISODES: "20"
+      ARRIVAL_MAX_PEOPLE: "2"
+    depends_on:
+      - web
+    restart: unless-stopped
+
+volumes:
+  arrival-out:

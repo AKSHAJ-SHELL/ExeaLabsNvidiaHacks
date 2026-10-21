@@ -10,11 +10,14 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-from arrival.sim import robot
-from arrival.sim.people import Walkers
+from arrival.sim import menagerie, robot
+from arrival.sim.people import Walkers, frame
 from arrival.sim.safety import SafetyMonitor
-from arrival.catalog.objects import HANDLE_HELD, RIM_HELD
-from arrival.sim.scene import BOWL_WALL, PLATE_FLOOR, PLATE_RIM, build_mjcf, door_w, drawer_x
+from arrival.catalog.objects import HANDLE_HELD, RIM_HELD, THIN_HELD
+from arrival.sim.export import STATE_DIM
+from arrival.sim.preflight import DRAWER_OPEN_PUT, base_pose, corners, drive_spot, front, mobile_drive, place_point, rack_spot
+from arrival.sim.scene import BOWL_WALL, DOOR_FLAT, PLATE_FLOOR, PLATE_RIM, RACK_OUT, build_mjcf
+from arrival.twin.compile import is_counter_host, to_local
 
 FPS = 20
 SUBSTEPS = 25  # 0.002 s physics -> 20 Hz control
@@ -22,24 +25,30 @@ SETTLE_STEPS = 12
 DRAWER_OPEN = 0.30  # start state (m) for close_drawer; open_drawer counts > 0.15 as open
 HANDLE_ROOT = 0.017  # grasp point out from a pan's ring: pad half-width 0.01 plus 7 mm
 PAD_BELOW_EEF = 0.023  # the finger pads reach this far below the eef site (robot.py hand geometry)
-DRAWER_OPEN_PUT = 0.14  # start state for put_in_drawer: wide enough for a mug on the exposed tray, and the base
-# can then park straight in front without the pulled-out front reaching its column
+PAD_CLEAR = 0.003  # pad tips over the counter when pinching a flat object: lower and they drag on the top
 DOOR_OPEN = np.radians(70)  # start state for close_door; open_door counts > 60 deg as open
 FRIDGE_OPEN = np.radians(60)  # open_fridge counts the door open past this, the same bar as open_door
-FRIDGE_BASE_ALONG = 0.1  # base centre past the door's free edge, along the front
-FRIDGE_BASE_OUT = 0.75  # base centre out from the fridge front: nearer, the handle's arc folds the elbow onto its stop
-FRIDGE_BASE_YAW = 0.0  # degrees the base turns toward the hinge from facing the front
+SKIP_REASONS_KEPT = 50  # reasons kept in the report and the dataset info
 WIPE_MIN = 0.4  # metres the sponge must travel pressed to the counter for wipe_counter to count
+FLAP_OPEN = 1.0  # rad; open_oven / open_dishwasher count a bottom-hinged door past this as open
+FAUCET_ON = 0.6  # rad; the lever lifted past this is water on (range is 0 to 1.2)
 
 
-def _front(f: dict) -> np.ndarray:
-    y = f.get("yaw", 0.0)
-    return np.array([-np.sin(y), np.cos(y), 0.0])
+_front, _corners = front, corners  # the stand-rule helpers live in preflight; the old names stay importable
+
+
+BASE_MODES = ("fixed", "mobile")
 
 
 class SimEnv:
-    def __init__(self, twin: dict, task: dict, res: int = 128, cameras=("ego_view", "wrist"), overview: bool = False):
-        self.twin, self.task = twin, task
+    def __init__(self, twin: dict, task: dict, res: int = 128, cameras=("ego_view", "wrist"), overview: bool = False,
+                 base: str = "fixed", arm: str = "procedural"):
+        if base not in BASE_MODES:
+            raise ValueError(f"base must be one of {BASE_MODES}, got {base!r}")
+        self.twin, self.task, self.mobile = twin, task, base == "mobile"
+        self.arm = arm
+        self.finger_open = menagerie.FINGER_OPEN if arm == "menagerie" else robot.FINGER_OPEN  # per finger, m
+        self.hand = menagerie.HAND if arm == "menagerie" else robot.HAND
         self.fx = {f["id"]: f for f in twin["fixtures"]}
         self.objs = {o["id"]: o for o in twin["objects"]}
         obj_pos = {}
@@ -47,27 +56,41 @@ class SimEnv:
             o = self.objs[task["object_id"]]
             src = self.fx[task["source"]]
             obj_pos[o["id"]] = [task["start"][0], task["start"][1], self._top(src) + o["size"][2] / 2 + 0.003]
+        if task["family"] == "unload_dishwasher":  # the object starts in the pulled-out rack
+            xy, z = self._rack_spot(task)
+            obj_pos[task["object_id"]] = [xy[0], xy[1], z + self.objs[task["object_id"]]["size"][2] / 2 + 0.003]
         base, yaw = self._base_pose(task, obj_pos)
+        self.base0 = np.array([base[0], base[1], np.radians(yaw)])  # parked pose, room frame; base joints are zero here
         xml = build_mjcf(twin, base, yaw, obj_pos, task.get("lighting", "neutral"), task.get("people", 0),
-                         seed=task.get("seed"), people_seed=task.get("seed", 0))
+                         seed=task.get("seed"), people_seed=task.get("seed", 0), base="mobile" if self.mobile else "fixed", arm=arm)
         self.model = mujoco.MjModel.from_xml_string(xml)
         self.data = mujoco.MjData(self.model)
         self.qadr = [int(self.model.joint(j).qposadr[0]) for j in robot.ARM_JOINTS]
         self.dofadr = [int(self.model.joint(j).dofadr[0]) for j in robot.ARM_JOINTS]
         self.fadr = [int(self.model.joint(f"finger_{s}").qposadr[0]) for s in ("l", "r")]
+        self.badr = [int(self.model.joint(j).qposadr[0]) for j in robot.BASE_JOINTS] if self.mobile else []
+        self.bact = [int(self.model.actuator(a).id) for a in ("b_x", "b_y", "b_yaw")] if self.mobile else []
         self.data.qpos[self.qadr] = robot.HOME
-        self.data.qpos[self.fadr] = robot.FINGER_OPEN
+        self.data.qpos[self.fadr] = self.finger_open
         if task["family"] in ("close_drawer", "close_door", "put_in_drawer"):  # the part starts open
             jn = f'{task["fixture"]}_door' if task["family"] == "close_door" else f'{task["fixture"]}_drawer0'
             start = {"close_drawer": DRAWER_OPEN, "close_door": DOOR_OPEN, "put_in_drawer": DRAWER_OPEN_PUT}
             self.data.qpos[int(self.model.joint(jn).qposadr[0])] = start[task["family"]]
-        self.data.ctrl[:] = list(robot.HOME) + [robot.FINGER_OPEN] * 2
+        if task["family"] in ("load_dishwasher", "unload_dishwasher"):  # door flat, upper rack rolled out over it
+            self.data.qpos[int(self.model.joint(f'{task["fixture"]}_door').qposadr[0])] = DOOR_FLAT
+            self.data.qpos[int(self.model.joint(f'{task["fixture"]}_rack').qposadr[0])] = RACK_OUT
+        self.data.ctrl[:9] = list(robot.HOME) + [self.finger_open] * 2  # base actuators, if any, stay at zero
         self.wiped = 0.0  # xy distance the sponge travelled while pressed to the counter (wipe_counter)
+        self.people_note = None
         self.walkers = None
+        self.drive_to = None  # room-frame base pose the expert drives to after the grasp (mobile counter_to_counter)
+        if mobile_drive(task, self.mobile):
+            self.drive_to = np.array([*drive_spot(twin, task)[:2], self.base0[2]])
         if task.get("people"):
-            front = max((f["position"][1] + f["size"][1] / 2 for f in twin["fixtures"]), default=base[1])
-            self.walkers = Walkers(task["people"], self._free_floor(), seed=task.get("seed", 0), base_xy=base[:2],
-                                   front_y=front, fixtures=twin["fixtures"])
+            free, bxy, front, self.people_note = self._free_floor(self.anchor, base)
+            to = None if self.drive_to is None else frame(self.anchor.get("yaw", 0.0)) @ self.drive_to[:2]
+            self.walkers = Walkers(task["people"], free, seed=task.get("seed", 0), base_xy=bxy, front_y=front,
+                                   fixtures=twin["fixtures"], yaw=self.anchor.get("yaw", 0.0), base_to=to)
         self.safety = SafetyMonitor(self.model)
         mujoco.mj_forward(self.model, self.data)
         self.cameras, self.res = cameras, res
@@ -75,7 +98,7 @@ class SimEnv:
         self.big = mujoco.Renderer(self.model, 360, 480) if overview else None
         try:
             for _ in range(SETTLE_STEPS):
-                self.step(np.array(list(robot.HOME) + [robot.FINGER_OPEN]))
+                self.step(np.array(list(robot.HOME) + [self.finger_open]))
         except BaseException:
             self.close()
             raise
@@ -85,70 +108,50 @@ class SimEnv:
     def _top(f: dict) -> float:
         return f["position"][2] + f["size"][2] / 2
 
-    def _free_floor(self):
-        xs = [p for w in self.twin["walls"] for p in (w["start"][0], w["end"][0])]
-        ys = [p for w in self.twin["walls"] for p in (w["start"][1], w["end"][1])]
-        mid = (min(ys) + max(ys)) / 2  # the work strip runs along the back wall; anything further in is an obstacle
-        deep = max((f["position"][1] + f["size"][1] / 2 for f in self.twin["fixtures"] if f["position"][1] < mid),
-                   default=min(ys))
-        return (min(xs) + 0.4, deep + 0.9, max(xs) - 0.4, max(ys) - 0.3)
+    def _free_floor(self, anchor: dict, base):
+        """Floor for the walkers, in the frame where `anchor` (the fixture the task works at) faces +y: the strip
+        in front of its run, from 0.9 m past the run's deepest fixture to 0.3 m short of the facing wall or of a
+        run on it, narrowed by runs on the side walls. Returns (floor, base_xy, front_y, note) in that frame.
+        A room with no usable strip gets the whole floor and front_y None (no counter stop), and `note` says so."""
+        M = frame(anchor.get("yaw", 0.0))
+        n = _front(anchor)[:2]
+        pts = np.array([M @ np.array(p, dtype=float) for w in self.twin["walls"] for p in (w["start"], w["end"])])
+        bx, by = M @ np.array(base[:2])
+        x0, x1, y1 = float(pts[:, 0].min()) + 0.4, float(pts[:, 0].max()) - 0.4, float(pts[:, 1].max()) - 0.3
+        deep, sides = -np.inf, []
+        for f in self.twin["fixtures"]:
+            c = np.array([M @ np.array(p) for p in _corners(f)])
+            d = float(np.dot(_front(f)[:2], n))
+            if d > 0.9:
+                deep = max(deep, float(c[:, 1].max()))
+            elif d < -0.9:
+                y1 = min(y1, float(c[:, 1].min()) - 0.3)
+            else:
+                sides.append(c)
+        y0 = deep + 0.9
+        for c in sides:
+            if c[:, 1].max() > y0:  # a side-wall run reaching into the strip
+                if c[:, 0].max() < bx:
+                    x0 = max(x0, float(c[:, 0].max()) + 0.4)
+                else:
+                    x1 = min(x1, float(c[:, 0].min()) - 0.4)
+        if max(x1 - bx, bx - x0) >= 0.8 and x1 - x0 >= 1.0 and y1 - y0 >= 0.6:
+            return (x0, y0, x1, y1), (bx, by), deep, None
+        whole = (float(pts[:, 0].min()) + 0.4, float(pts[:, 1].min()) + 0.4,
+                 float(pts[:, 0].max()) - 0.4, float(pts[:, 1].max()) - 0.4)
+        return whole, (bx, by), None, f"no free strip in front of {anchor['id']}: people walk the whole floor, no counter stop"
 
     def _base_pose(self, task: dict, obj_pos: dict):
-        fam = task["family"]
-        if fam in ("counter_to_sink", "counter_to_counter"):
-            src = self.fx[task["source"]]
-            p = np.array(obj_pos[task["object_id"]])
-            mid = (p[0] + task["target_x"]) / 2
-            n = _front(src)
-            y = src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28)
-            base = (mid, y, 0.75)
-        elif fam == "wipe_counter":
-            src = self.fx[task["source"]]
-            p = np.array(obj_pos[task["object_id"]])
-            n = _front(src)
-            base = (p[0], src["position"][1] + n[1] * (src["size"][1] / 2 + 0.28), 0.75)
-        elif fam == "put_in_drawer":
-            # straight in front, between the mug and the drawer, just beyond the pulled-out front and its handle;
-            # parking beside the drawer instead puts the elbow into whatever appliance flanks the counter
-            c = self.fx[task["fixture"]]
-            n = _front(c)
-            p = np.array(obj_pos[task["object_id"]])
-            lx = drawer_x(c, self.twin["fixtures"])
-            yaw = c.get("yaw", 0.0)
-            mug_lx = np.cos(yaw) * (p[0] - c["position"][0]) + np.sin(yaw) * (p[1] - c["position"][1])
-            along = (lx + mug_lx) / 2
-            out = c["size"][1] / 2 + DRAWER_OPEN_PUT + 0.07 + 0.14  # front + handle bar + base column + margin
-            base = (c["position"][0] + np.cos(yaw) * along, c["position"][1] + np.sin(yaw) * along + n[1] * out, 0.75)
-        elif fam == "open_fridge":
-            # beside the door's free edge and out of its swing (the hinge is on the fixture's left edge), facing the
-            # front like the cabinet door tasks
-            f = self.fx[task["fixture"]]
-            n = _front(f)
-            sx, sy = f["size"][0], f["size"][1]
-            yaw = f.get("yaw", 0.0)
-            lx, out = sx / 2 + FRIDGE_BASE_ALONG, sy / 2 + FRIDGE_BASE_OUT
-            base = (f["position"][0] + np.cos(yaw) * lx + n[0] * out,
-                    f["position"][1] + np.sin(yaw) * lx + n[1] * out, 0.75)
-            return base, float(np.degrees(np.arctan2(-n[1], -n[0])) - FRIDGE_BASE_YAW)
-        else:
-            c = self.fx[task["fixture"]]
-            n = _front(c)
-            sx, sy = c["size"][0], c["size"][1]
-            if fam in ("open_drawer", "close_drawer"):
-                lx, lz = drawer_x(c, self.twin["fixtures"]), robot_drawer_z()
-                along = 0.0
-                h = 0.72
-            else:
-                # stand just left of the handle (away from the hinge), outside the door's swing, far enough out
-                # that the far end of the handle arc stays within reach of the tilted-down grasp
-                lx, lz = sx / 2 - 0.02 - door_w(c, self.twin["fixtures"]) + 0.06, 0.53
-                along = -0.1
-                h = 0.65
-            yaw = c.get("yaw", 0.0)
-            hx = c["position"][0] + np.cos(yaw) * (lx + along)
-            hy = c["position"][1] + np.sin(yaw) * (lx + along) + n[1] * (sy / 2 + h)
-            base = (hx, hy, 0.75)
-        return base, float(np.degrees(np.arctan2(-n[1], -n[0])))
+        """Base pose in front of the fixture the task works at (kept as `self.anchor`), facing it, on any wall."""
+        xy = obj_pos[task["object_id"]][:2] if "object_id" in task else None
+        if task["family"] == "unload_dishwasher":
+            xy = task["start"][:2]  # the object starts in the rack, but the base stands on the side of the counter spot
+        base, yaw, self.anchor = base_pose(self.twin, task, xy, self.mobile, self.arm)
+        return base, yaw
+
+    def base_pose(self) -> np.ndarray:
+        """Base x, y, yaw in the room frame (the parked pose when the base is fixed)."""
+        return self.base0 + self.data.qpos[self.badr] if self.mobile else self.base0.copy()
 
     def body_pos(self, name: str) -> np.ndarray:
         return self.data.body(name).xpos.copy()
@@ -163,7 +166,8 @@ class SimEnv:
         """How the expert holds an object it cannot grip by the body: xy offset from the body centre to the grasp
         point, the yaw for ik.down (fingers close across the wall or the handle) and the eef height. A bowl and a
         plate are pinched by the rim nearest the robot, the bowl 2 cm under its lip, the plate with the pads just
-        above its bottom disc; a pan by its handle, 1.7 cm out from the ring. None for objects held by the body."""
+        above its bottom disc; a pan by its handle, 1.7 cm out from the ring; a spatula across its width with the pad
+        tips 3 mm over the top it lies on. None for objects held by the body."""
         o = self.objs[oid]
         cid, p = o["catalog_id"], self.body_pos(oid)
         radius, sz = min(o["size"][0], o["size"][1]) / 2, o["size"][2]
@@ -176,19 +180,40 @@ class SimEnv:
         if cid in HANDLE_HELD:  # the handle runs along +x from the ring (object_xml ignores the twin yaw); the pads
             # sit at its root, the thickest part; the pan tips and hangs from the handle during the carry
             return {"off": np.array([radius + HANDLE_ROOT, 0.0]), "yaw": 0.0, "z": p[2] + sz / 2 - 0.008}
+        if cid in THIN_HELD:  # lying flat, too thin to hold from above the body: the pads close across the short
+            # side with their tips PAD_CLEAR over the top it lies on (object_xml ignores the twin yaw, so that is x)
+            across = 0 if o["size"][0] < o["size"][1] else 1
+            return {"off": np.zeros(2), "yaw": np.pi / 2 if across == 0 else 0.0,
+                    "z": p[2] - sz / 2 + self.pad_reach() + PAD_CLEAR}
         return None
 
+    def pad_reach(self) -> float:
+        """How far the fingers' collision geoms reach past the eef site along the approach axis: 23 mm on the
+        procedural fingers, about 10 mm on the Menagerie hand. Read from the model so both arms use one rule."""
+        m, d = self.model, self.data
+        R, e = d.site("eef").xmat.reshape(3, 3), d.site("eef").xpos
+        reach = 0.0
+        for i in range(m.ngeom):
+            if m.body(m.geom_bodyid[i]).name not in ("finger_l", "finger_r") or not m.geom_contype[i]:
+                continue
+            c, h = m.geom_aabb[i][:3], m.geom_aabb[i][3:]
+            G = d.geom_xmat[i].reshape(3, 3)
+            for s in np.array(np.meshgrid(*[(-1, 1)] * 3)).T.reshape(-1, 3):
+                reach = max(reach, float((R.T @ (d.geom_xpos[i] + G @ (c + s * h) - e))[2]))
+        return reach
+
     def place_point(self, task: dict) -> np.ndarray:
-        tgt = self.fx[task["target"]]
-        hh = self.obj_half_h(task["object_id"])
-        top = self._top(tgt) if tgt["type"] != "sink" else max(
-            self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
-        if tgt["type"] == "sink":
-            return np.array([tgt["position"][0], tgt["position"][1], top + hh + 0.05])
-        return np.array([task["target_x"], tgt["position"][1], top + hh + 0.012])
+        return place_point(self.twin, task)
 
     def pull_axis(self, task: dict) -> np.ndarray:
+        if task["family"] == "turn_on_faucet":  # the lever is pushed from in front of the counter run the sink is set in
+            return _front(self.anchor)
         return _front(self.fx[task["fixture"]])
+
+    def run_yaw(self) -> float:
+        """Yaw of the run the task works at: 0 on the hero kitchen's north wall, so grasp yaws written for it
+        (fingers across the counter, hand along it) turn with the fixture on any other wall."""
+        return float(self.anchor.get("yaw", 0.0))
 
     def place_point_top(self, task: dict) -> float:
         return self._top(self.fx[task["source"]])
@@ -206,6 +231,27 @@ class SimEnv:
         xy = tray.xpos[:2] + n[:2] * (mid - along)  # keep the drawer's own x; the counter centre is not the drawer
         return np.array([xy[0], xy[1], tray.xpos[2] + half[2] + self.obj_half_h(task["object_id"]) + 0.01])
 
+    def _rack_spot(self, task: dict):
+        """(xy, z of an object's base) in the middle of the part of the rack that is out past the dishwasher front,
+        computed from the twin (before the model exists)."""
+        from arrival.sim.scene import RACK_Z
+
+        return np.array(rack_spot(self.fx[task["fixture"]])), RACK_Z + 0.01
+
+    def rack_place_point(self, task: dict) -> np.ndarray:
+        xy, z = self._rack_spot(task)
+        return np.array([xy[0], xy[1], z + self.obj_half_h(task["object_id"]) + 0.01])
+
+    def counter_place_point(self, task: dict) -> np.ndarray:
+        """Set-down spot on the counter for unload_dishwasher: where the object started in the twin."""
+        p = task["start"]
+        return np.array([p[0], p[1], self._top(self.fx[task["source"]]) + self.obj_half_h(task["object_id"]) + 0.012])
+
+    def flap_geometry(self, task: dict):
+        """Hinge axis point, handle site and the door body rotation for a bottom-hinged door."""
+        b = self.data.body(task["joint"])
+        return b.xpos.copy(), self.site_pos(task["handle"]), b.xmat.reshape(3, 3).copy()
+
     def door_geometry(self, task: dict):
         b = self.data.body(f'{task["fixture"]}_door')
         return b.xpos.copy(), self.site_pos(f'{task["fixture"]}_door_handle'), b.xmat.reshape(3, 3).copy()
@@ -213,11 +259,15 @@ class SimEnv:
     # ---- stepping ----
     def state(self) -> np.ndarray:
         q = self.data.qpos
-        return np.array(list(q[self.qadr]) + [float(np.mean(q[self.fadr]))], dtype=np.float32)
+        return np.array(list(q[self.qadr]) + [float(np.mean(q[self.fadr]))] + list(self.base_pose()), dtype=np.float32)
 
     def step(self, action: np.ndarray) -> None:
+        """action: 7 arm targets, gripper opening, and optionally base x, y, yaw in the room frame (held when
+        absent or when the base is fixed)."""
         self.data.ctrl[:7] = action[:7]
         self.data.ctrl[7:9] = action[7]
+        if self.mobile and len(action) >= STATE_DIM:
+            self.data.ctrl[self.bact] = np.asarray(action[8:11], dtype=float) - self.base0
         before = self.body_pos(self.task["object_id"])[:2] if self.task["family"] == "wipe_counter" else None
         for _ in range(SUBSTEPS):
             mujoco.mj_step(self.model, self.data)
@@ -256,15 +306,23 @@ class SimEnv:
     # ---- physics success ----
     def success(self, task: dict) -> tuple[bool, dict]:
         fam = task["family"]
+        if fam == "move_on_table":  # resting on the table top within 6 cm of the target spot, nearly still
+            oid = task["object_id"]
+            p = self.body_pos(oid)
+            v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
+            err = float(np.linalg.norm(p[:2] - np.asarray(task["target_xy"])))
+            resting = abs(p[2] - (self._top(self.fx[task["target"]]) + self.obj_half_h(oid))) < 0.025
+            return bool(err < 0.06 and resting and v < 0.05), {
+                "object_pos": p.round(4).tolist(), "object_speed": round(v, 4), "target_error_m": round(err, 4)}
         if fam in ("counter_to_sink", "counter_to_counter"):
             oid = task["object_id"]
             p = self.body_pos(oid)
             v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
             tgt = self.fx[task["target"]]
-            (cx, cy, _), (sx, sy, _) = tgt["position"], tgt["size"]
-            inside = abs(p[0] - cx) < sx / 2 - 0.01 and abs(p[1] - cy) < sy / 2 - 0.01
+            (lx, ly), (sx, sy, _) = to_local(p[:2], tgt), tgt["size"]
+            inside = abs(lx) < sx / 2 - 0.01 and abs(ly) < sy / 2 - 0.01
             if tgt["type"] == "sink":
-                top = max(self._top(f) for f in self.twin["fixtures"] if f["type"] == "counter")
+                top = max(self._top(f) for f in self.twin["fixtures"] if is_counter_host(f))
                 ok = inside and p[2] < top and v < 0.05
             else:
                 ok = inside and abs(p[2] - (self._top(tgt) + self.obj_half_h(oid))) < 0.025 and v < 0.05
@@ -286,15 +344,35 @@ class SimEnv:
             p = self.body_pos(oid)
             v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
             src = self.fx[task["source"]]
-            (cx, cy, _), (sx, sy, _) = src["position"], src["size"]
-            on_top = (abs(p[0] - cx) < sx / 2 and abs(p[1] - cy) < sy / 2
+            (lx, ly), (sx, sy, _) = to_local(p[:2], src), src["size"]
+            on_top = (abs(lx) < sx / 2 and abs(ly) < sy / 2
                       and abs(p[2] - (self._top(src) + self.obj_half_h(oid))) < 0.025)
             return bool(on_top and self.wiped >= WIPE_MIN and v < 0.05), {
                 "object_pos": p.round(4).tolist(), "wiped_m": round(self.wiped, 3)}
+        if fam == "load_dishwasher":
+            oid = task["object_id"]
+            p = self.body_pos(oid)
+            v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
+            tray = self.data.geom(f'{task["fixture"]}_rack_tray')
+            half = self.model.geom(f'{task["fixture"]}_rack_tray').size
+            local = tray.xmat.reshape(3, 3).T @ (p - tray.xpos)
+            inside = abs(local[0]) < half[0] - 0.02 and abs(local[1]) < half[1] - 0.02
+            resting = abs(local[2] - (half[2] + self.obj_half_h(oid))) < 0.03
+            return bool(inside and resting and v < 0.05), {"object_pos": p.round(4).tolist(), "object_speed": round(v, 4)}
+        if fam == "unload_dishwasher":
+            oid = task["object_id"]
+            p = self.body_pos(oid)
+            v = float(np.linalg.norm(self.data.joint(oid).qvel[:3]))
+            c = self.fx[task["source"]]
+            (lx, ly), (sx, sy, _) = to_local(p[:2], c), c["size"]
+            inside = abs(lx) < sx / 2 - 0.01 and abs(ly) < sy / 2 - 0.01
+            ok = inside and abs(p[2] - (self._top(c) + self.obj_half_h(oid))) < 0.025 and v < 0.05
+            return bool(ok), {"object_pos": p.round(4).tolist(), "object_speed": round(v, 4)}
         jn = task["joint"]
         q = float(self.data.joint(jn).qpos[0])
         ok = {"open_drawer": q > 0.15, "open_door": q > np.radians(60), "open_fridge": q > FRIDGE_OPEN,
-              "close_drawer": q < 0.03, "close_door": q < np.radians(5)}[fam]
+              "close_drawer": q < 0.03, "close_door": q < np.radians(5),
+              "open_oven": q > FLAP_OPEN, "open_dishwasher": q > FLAP_OPEN, "turn_on_faucet": q > FAUCET_ON}[fam]
         return bool(ok), {"joint": jn, "qpos": round(q, 4)}
 
 
@@ -310,11 +388,14 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
         env.safety.reset()
         states, actions, frames, people = [], [], {c: [] for c in env.cameras}, []
         tail = 0
+        max_steps = max(max_steps, len(getattr(policy, "plan", ())) + 100)  # a base drive, plus waits for people
         for t in range(max_steps):
             obs = env.obs()
-            a = policy.act(obs)
+            a = np.asarray(policy.act(obs), dtype=float)
+            if len(a) < STATE_DIM:  # arm-only policies: the base holds where it is
+                a = np.concatenate([a, obs["state"][len(a):STATE_DIM]])
             states.append(obs["state"])
-            actions.append(np.asarray(a, dtype=np.float32))
+            actions.append(a.astype(np.float32))
             for c in env.cameras:
                 frames[c].append(obs[c])
             if preview is not None:
@@ -337,26 +418,75 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
 def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path = "out", people: int = 2,
             policy_name: str = "scripted", res: int = 128, seed: int = 0, save_preview: bool = False,
             planner_name: str = "rule", cache_path: str | Path | None = None,
-            split: str = "train", use_generated_instructions: bool = False,
-            log=print) -> dict:
-    """Collect `episodes` attempts; failed attempts are dropped and counted."""
+            split: str = "train", use_generated_instructions: bool = False, base: str = "fixed",
+            shard: tuple[int, int] | None = None, resume: bool = False, arm: str = "procedural", log=print) -> dict:
+    """Collect `episodes` attempts; failed attempts are dropped and counted. A task whose stand spot or reach the
+    pre-flight rejects never runs (`skipped_unreachable`, counted per rejected variation), and one whose env build
+    or rollout raises is logged with its reason, counted as `skipped_error` and never written, so a bad geometry
+    costs a task, not the run. base="mobile" gives the arm a driven base (MAN-3), which also admits the
+    counter_to_counter variations a fixed base cannot reach. arm="menagerie" swaps in the real Franka asset
+    (`python scripts/fetch_menagerie.py`); the dataset and report say which arm made them.
+    shard=(i, n) runs only block i of n of the `episodes` tasks (arrival/jobs/shards.py) and writes under
+    <out_dir>/shards/<i>of<n>/, so n processes cover the run with no overlap; `arrival merge-shards` joins them.
+    Every run journals each finished task; resume=True continues from that journal (a different run's journal is
+    refused with a ShardError) and the result is the dataset an uninterrupted run would have written."""
+    from arrival.jobs.shards import Journal, shard_dir, shard_range
     from arrival.sim.export import SimDatasetWriter
-    from arrival.sim.policy import ScriptedExpert, VLAClient, VLMPlanner
+    from arrival.sim.policy import ScriptedExpert, VLAClient, VLANotConfigured, VLMPlanner
     from arrival.sim.tasks import finish_task, make_tasks
 
     out_dir = Path(out_dir)
     room = twin["room_id"]
+    pre: dict = {}
     tasks = make_tasks(twin, families, episodes, seed=seed, people=people,
-                       split=split, use_generated_instructions=use_generated_instructions, log=log)
-    for t in tasks:
+                       split=split, use_generated_instructions=use_generated_instructions, mobile=base == "mobile", log=log,
+                       preflight=pre, arm=arm)
+    lo, hi = shard_range(len(tasks), *shard) if shard else (0, len(tasks))
+    if shard:
+        out_dir = shard_dir(out_dir, *shard)
+    skips = [{"stage": "preflight", **r} for r in pre["reasons"]]  # what never ran and why
+    errors = 0
+    for t in tasks[lo:hi]:
         finish_task(t)
     policy = ScriptedExpert() if policy_name == "scripted" else VLAClient()
     planner = VLMPlanner(log=log, cache_path=cache_path) if planner_name == "vlm" else None
-    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"))
+    from arrival.export.provenance import run_record
+
+    prov = run_record(twin, seed=seed, generator="mujoco_scripted_ik", policy=policy_name, planner=planner_name,
+                      episodes=episodes, families=list(families), people=people, res=res, split=split)
+    fingerprint = {"room": room, "families": list(families), "episodes": episodes, "seed": seed, "people": people,
+                   "policy": policy_name, "planner": planner_name, "split": split,
+                   "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res,
+                   "shard": list(shard) if shard else None}
+    journal = Journal(out_dir / "progress" / f"{room}_sim.jsonl")
+    done = journal.start(fingerprint, resume)
+    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"), provenance=prov,
+                              base=base, resume=bool(done), arm=arm)
+    per: dict = {}
+    prior_seconds = 0.0
+    if done:
+        writer.restore([r["episode"] for r in done if r["outcome"] == "ok"], [r["stats"] for r in done if r["outcome"] == "ok"])
+        for r in done:
+            prior_seconds += r["seconds"]
+            if r["outcome"] == "skip":
+                errors += 1
+                skips.append({"stage": r["stage"], "task_id": r["task_id"], "family": r["family"], "reason": r["reason"]})
+                continue
+            fam = per.setdefault(r["family"], {"attempts": 0, "successes": 0, "human_contacts": 0,
+                                               "fridge_visits": 0, "door_contacts": 0})
+            fam["attempts"] += 1
+            fam["successes"] += r["outcome"] == "ok"
+            fam["human_contacts"] += r["human_contact"]
+            fam["fridge_visits"] += r["fridge_visit"]
+            fam["door_contacts"] += r["door_contact"]
+        log(f"[sim] resume: {len(done)} of {hi - lo} tasks already done, {len(writer.episodes)} episodes kept")
+    finished = {r["task_id"] for r in done}
     t0 = time.perf_counter()
-    per = {}
     preview = [] if save_preview else None
-    for i, task in enumerate(tasks):
+    for i, task in enumerate(tasks[lo:hi]):
+        if task["task_id"] in finished:
+            continue
+        t_task = time.perf_counter()
         if planner is not None:
             obj_ids = [o["id"] for o in twin.get("objects", [])]
             fx_ids = [f["id"] for f in twin.get("fixtures", [])]
@@ -381,11 +511,28 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             if plan.get("target") and plan["target"] in fx_ids and "target" in task:
                 task["target"] = plan["target"]
             log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
-        env = SimEnv(twin, task, res=res, overview=save_preview and i == 0)
+        stage = "build"
         try:
-            ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
-        finally:
-            env.close()  # idempotent; frees both GL renderers when the policy or the episode raises
+            env = SimEnv(twin, task, res=res, overview=save_preview and i == 0, base=base, arm=arm)
+            stage = "rollout"
+            try:
+                if env.people_note:
+                    log(f"[sim] {task['task_id']}: {env.people_note}")
+                ep = run_episode(env, policy, task, preview=preview if i == 0 else None)
+            finally:
+                env.close()  # idempotent; frees both GL renderers when the policy or the episode raises
+        except VLANotConfigured:
+            raise
+        except Exception as e:  # noqa: BLE001 - one bad geometry must cost this task, not the run; nothing is written for it
+            if isinstance(e, OSError) and policy_name == "vla":  # the policy server did not answer: not this task's fault
+                raise
+            errors += 1
+            skips.append({"stage": stage, "task_id": task["task_id"], "family": task["family"],
+                          "reason": one_line(e)})
+            log(f"[sim] {task['task_id']}: SKIP at {stage}: {skips[-1]['reason']}")
+            journal.append({"task_id": task["task_id"], "outcome": "skip", "family": task["family"], "stage": stage,
+                            "reason": skips[-1]["reason"], "seconds": round(time.perf_counter() - t_task, 3)})
+            continue
         fam = per.setdefault(task["family"], {"attempts": 0, "successes": 0, "human_contacts": 0,
                                               "fridge_visits": 0, "door_contacts": 0})
         fam["attempts"] += 1
@@ -396,28 +543,50 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
         tag = "DROP human_contact" if contact else ("OK " if ep["success"] else "MISS")
         log(f"[sim] {task['task_id']}: {tag} {ep['detail']} ik_err={ep['ik_error'] if ep['ik_error'] is None else round(ep['ik_error'], 4)} "
             f"min_human_d={ep['safety']['min_human_distance_m']}" + (" fridge_visit" if ep["fridge_visit"] else ""))
-        if ep["success"] and not contact:
+        kept = ep["success"] and not contact
+        if kept:
             fam["successes"] += 1
             writer.add_episode(ep, task)
+        journal.append({"task_id": task["task_id"], "outcome": "ok" if kept else ("contact" if contact else "miss"),
+                        "family": task["family"], "human_contact": contact, "fridge_visit": int(ep["fridge_visit"]),
+                        "door_contact": ep["safety"]["door_contact"], "seconds": round(time.perf_counter() - t_task, 3),
+                        **({"episode": writer.episodes[-1], "stats": writer.stats[-1]} if kept else {})})  # after the files
         if save_preview and i == 0:
             _write_preview(out_dir / "previews", room, preview, ep)
             preview = None  # up to ~200 MB of overview frames; not needed past the first episode
-    seconds = time.perf_counter() - t0
-    info = writer.finish(len(tasks))
+    seconds = prior_seconds + time.perf_counter() - t0
+    attempts = sum(f["attempts"] for f in per.values())  # tasks that ran to the physics check; a skipped one is not an attempt
+    skipped = {"skipped_unreachable": pre["rejected"], "skipped_error": errors,
+               "skipped": pre["rejected"] + errors, "skip_reasons": skips[:SKIP_REASONS_KEPT]}
+    shard_info = ({"index": shard[0], "count": shard[1], "task_range": [lo, hi], "total_tasks": len(tasks),
+                   "episodes": episodes, "seed": seed, "families": list(families), "people": people,
+                   "policy": policy_name, "planner": planner_name, "split": split,
+                   "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res}) if shard else None
+    info = writer.finish(attempts, skipped, {"shard": shard_info} if shard else None)
     succ = sum(f["successes"] for f in per.values())
     report = {"room_id": room, "generator": "mujoco_scripted_ik", "policy": policy_name,
-              "planner": planner_name, "attempts": len(tasks),
-              "successes": succ, "dropped": len(tasks) - succ, "seconds": round(seconds, 2),
+              "planner": planner_name, "attempts": attempts, **skipped,
+              "successes": succ, "dropped": attempts - succ, "seconds": round(seconds, 2),
               "demos_per_hour": round(succ / seconds * 3600, 1) if seconds else 0.0,
               "human_contacts": sum(f["human_contacts"] for f in per.values()),
               "fridge_visits": sum(f["fridge_visits"] for f in per.values()),
               "door_contacts": sum(f["door_contacts"] for f in per.values()),
               "families": {k: {**v, "success_rate": round(v["successes"] / v["attempts"], 3)} for k, v in per.items()},
-              "people": people, "resolution": res, "physics_checked_success": True, "grasp": "friction"}
+              "people": people, "resolution": res, "physics_checked_success": True, "grasp": "friction",
+              "base": base, "arm": arm, **({"shard": shard_info} if shard else {}), **({"resumed_tasks": len(done)} if done else {})}
     rp = out_dir / "reports" / f"{room}_sim.json"
     rp.parent.mkdir(parents=True, exist_ok=True)
     rp.write_text(json.dumps(report, indent=2))
     return {"dataset": writer.root, "report": rp, "report_data": report, "info": info}
+
+
+def one_line(e: BaseException) -> str:
+    """An exception as one line: its type, message and the innermost frame it came from."""
+    import traceback
+
+    frames = traceback.extract_tb(e.__traceback__)
+    at = f" (at {Path(frames[-1].filename).name}:{frames[-1].lineno})" if frames else ""
+    return f"{type(e).__name__}: {e}{at}"[:300]
 
 
 def _write_preview(d: Path, room: str, frames: list, ep: dict) -> None:

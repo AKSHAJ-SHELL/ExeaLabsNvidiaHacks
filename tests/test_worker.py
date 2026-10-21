@@ -1,7 +1,9 @@
 import http.client
 import io
 import json
+import os
 import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -81,8 +83,18 @@ def test_scan_json_job_becomes_dataset_zip(tmp_path):
     out = tmp_path / "out"
     scan = (REPO / "scans" / "hero_kitchen" / "scan.json").read_bytes()
     job = create_job(out / "jobs", "hero_kitchen.json", data=scan)
-    st = run_once(out, episodes=2, families=["counter_to_sink"], people=1, res=64, log=QUIET)
+    from arrival.jobs.limits import Limits
+
+    # in a child process under a wall-clock limit, the way `arrival work` runs it
+    st = run_once(out, limits=Limits(max_job_seconds=600), isolate=True, episodes=2, families=["counter_to_sink"],
+                  people=1, res=64, log=QUIET)
     assert st["status"] == "done", st
+    info = json.loads((Path(st["dataset_dir"]) / "meta" / "info.json").read_text())
+    u = st["usage"]  # metering: measured units, no price
+    assert u["frames"] == info["total_frames"] > 0 and u["episodes_attempted"] == 2
+    assert u["episodes_succeeded"] == st["successes"] and u["wall_seconds"] > 0 and set(u["stage_seconds"]) >= {"sim", "zip"}
+    assert u["zip_bytes"] == (out / "jobs" / job["id"] / "dataset.zip").stat().st_size and u["dataset_bytes"] > 0
+    assert len((out / "usage" / "jobs.jsonl").read_text().splitlines()) == 1
     assert st["room_id"] == f"hero_kitchen_{job['id']}"
     assert st["stage"] == "zip" and st["error"] is None and st["attempts"] == 2 and st["successes"] >= 1
     assert (Path(st["twin_dir"]) / "twin.json").is_file()
@@ -154,7 +166,7 @@ def test_status_is_never_read_half_written(tmp_path):
     t.start()
     try:
         reads, t0 = 0, time.perf_counter()
-        while time.perf_counter() - t0 < 0.5:
+        while reads <= 100 or time.perf_counter() - t0 < 0.5:
             assert read_job(tmp_path, status["id"])["id"] == status["id"]
             reads += 1
     finally:
@@ -201,6 +213,9 @@ def test_work_requeues_jobs_left_running(tmp_path):
     out = tmp_path / "out"
     job = create_job(out / "jobs", "broken.json", data=b"not json")
     write_status(out / "jobs" / job["id"], {**job, "status": "running", "stage": "sim"})
+    status_json = out / "jobs" / job["id"] / "status.json"
+    long_ago = time.time() - 3600  # no lock and no sign of life for an hour: a killed legacy worker
+    os.utime(status_json, (long_ago, long_ago))
     assert work(out, once=True, log=QUIET) == 1  # reclaimed, then failed on the corrupt upload
     st = json.loads((out / "jobs" / job["id"] / "status.json").read_text())
     assert st["status"] == "failed"

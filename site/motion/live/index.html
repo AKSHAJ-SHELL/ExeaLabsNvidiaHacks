@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arrival motion: embed demo</title>
+<style>
+  :root{--paper:#F1EBDD;--ink:#141414;--signal:#E5481F}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font:400 17px/1.5 "DM Mono",ui-monospace,Menlo,monospace}
+  main{max-width:1100px;margin:0 auto;padding:32px 20px 120px}
+  h1{font:300 56px/1.05 Georgia,serif;margin:0 0 8px}
+  h2{font:500 13px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;margin:56px 0 12px;border-top:2px solid var(--ink);padding-top:14px}
+  p{max-width:62ch;margin:0 0 16px}
+  iframe{display:block;width:100%;aspect-ratio:16/9;border:2px solid var(--ink);background:var(--paper)}
+  .row{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+  button{font:inherit;font-size:14px;letter-spacing:.06em;text-transform:uppercase;background:transparent;color:var(--ink);border:2px solid var(--ink);padding:8px 14px;cursor:pointer}
+  button:hover,button:focus-visible{background:var(--ink);color:var(--paper)}
+  .tall{height:240vh;position:relative}
+  .tall .sticky{position:sticky;top:12px}
+  code{background:rgba(20,20,20,.07);padding:1px 5px}
+  @media (prefers-color-scheme:dark){:root{--paper:#F1EBDD;--ink:#141414}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Arrival motion</h1>
+  <p>Every piece below is the same HTML+GSAP composition that Hyperframes renders to video, exported live. Open this file from a web server (iframes need http, not file://, for the video clips in the pitch).</p>
+
+  <h2>1 / Intro, looping, autoplay</h2>
+  <iframe id="intro" data-motion src="intro.html?loop=1" title="Arrival title sequence"></iframe>
+  <div class="row">
+    <button data-for="intro" data-do="play">play</button>
+    <button data-for="intro" data-do="pause">pause</button>
+    <button data-for="intro" data-do="hold">jump to settled sheet</button>
+    <button data-for="intro" data-do="seek:1.5">seek 1.5 s</button>
+  </div>
+
+  <h2>2 / Pipeline, scroll-linked (scroll down)</h2>
+  <div class="tall" id="chapter">
+    <div class="sticky">
+      <iframe id="pipe" data-motion src="pipeline.html?autoplay=0" data-motion-scrub="#chapter" data-motion-range="0.12,0.88" title="Scan, twin, simulate, dataset"></iframe>
+    </div>
+  </div>
+
+  <h2>3 / Chapter wipes (transparent WebM over the page)</h2>
+  <div class="row">
+    <button id="w1">ink line sweep</button>
+    <button id="w2">paper fold</button>
+    <button id="w3">registration cross</button>
+  </div>
+  <p id="log">Click a wipe: the callback fires when the plate fully covers the page.</p>
+
+  <h2>4 / Pitch, on play-in-view</h2>
+  <iframe id="pitch" data-motion src="pitch.html?autoplay=0" data-motion-play-in-view title="Arrival launch video"></iframe>
+</main>
+<script src="../motion-embed.js"></script>
+<script>
+  document.querySelectorAll("button[data-for]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var m = document.getElementById(b.dataset.for)._motion, d = b.dataset.do;
+      if (d.indexOf("seek:") === 0) m.seek(parseFloat(d.slice(5))); else m[d]();
+    });
+  });
+  [["w1", "../wipe-ink.webm"], ["w2", "../wipe-fold.webm"], ["w3", "../wipe-cross.webm"]].forEach(function (a) {
+    document.getElementById(a[0]).addEventListener("click", function () {
+      ArrivalMotion.wipe(a[1], function () { document.getElementById("log").textContent = "covered at " + new Date().toLocaleTimeString() + ": swap the chapter now"; });
+    });
+  });
+</script>
+</body>
+</html>

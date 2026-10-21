@@ -13,7 +13,7 @@ _spec.loader.exec_module(check_docs)
 @pytest.fixture
 def repo_copy(tmp_path):
     dst = tmp_path / "repo"
-    shutil.copytree(REPO, dst, ignore=shutil.ignore_patterns(".git", ".venv", "out", "__pycache__", "*.egg-info"))
+    shutil.copytree(REPO, dst, ignore=shutil.ignore_patterns(".git", ".venv", "out", "__pycache__", "*.egg-info", "menagerie"))
     return dst
 
 
@@ -31,10 +31,10 @@ def test_exit_codes(repo_copy, capsys):
 
 def test_reports_invented_flag_broken_link_and_missing_test(repo_copy, capsys):
     readme = repo_copy / "README.md"
-    readme.write_text(readme.read_text() + (
+    readme.write_text(readme.read_text(encoding="utf-8") + (
         "\n```bash\npython -m arrival sim --episodes 2 --warp-speed 9\n```\n"
         "\nSee [the guide](docs/NO-SUCH-GUIDE.md).\n"
-        "\nRun `tests/test_cli.py::test_no_such_thing_exists`.\n"))
+        "\nRun `tests/test_cli.py::test_no_such_thing_exists`.\n"), encoding="utf-8")
     assert check_docs.main(["--root", str(repo_copy)]) == 1
     lines = capsys.readouterr().out.strip().splitlines()
     assert len(lines) == 3
@@ -72,3 +72,24 @@ def test_label_sentence_must_match_writer_constants(tmp_path):
     good = "`python -m arrival demo` writes data (`arrival_physically_valid: false`)."
     assert len(check_docs.check_labels(doc, tmp_path, bad, consts)) == 1
     assert check_docs.check_labels(doc, tmp_path, good, consts) == []
+
+
+@pytest.mark.parametrize("heading", ["## Status", "# Status", "##\tStatus"])
+def test_planned_paths_are_allowed_but_links_still_resolve(tmp_path, heading):
+    text = ("## Code to-do before submission\n\nAdd `arrival/jobs/shards.py` later.\n"
+            f"[guide](missing.md)\n{heading}\n\nSee `arrival/jobs/shards.py` now.\n")
+    assert check_docs.check_paths(tmp_path, tmp_path / "README.md", text, {}) == [
+        "README.md:4: broken link missing.md",
+        "README.md:7: path does not exist `arrival/jobs/shards.py`",
+    ]
+
+
+@pytest.mark.parametrize("fence", ["```", "~~~~"])
+def test_fenced_headings_do_not_change_planned_sections(tmp_path, fence):
+    for heading, example_heading, planned in [
+        ("## Status", "## Code to-do", False),
+        ("## Code to-do", "# Status", True),
+    ]:
+        text = f"{heading}\n\n{fence}markdown\n{example_heading}\n{fence}\n\n`arrival/jobs/shards.py`\n"
+        problems = check_docs.check_paths(tmp_path, tmp_path / "README.md", text, {})
+        assert problems == ([] if planned else ["README.md:7: path does not exist `arrival/jobs/shards.py`"])

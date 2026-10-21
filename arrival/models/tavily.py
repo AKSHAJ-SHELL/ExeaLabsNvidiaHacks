@@ -7,9 +7,10 @@ Falls back to TavilyNotConfigured when no API key is available.
 from __future__ import annotations
 
 import json
-import os
 import urllib.request
-from pathlib import Path
+
+from arrival import config as settings
+from arrival.config import load_dotenv  # noqa: F401  (kept importable from here)
 
 DEFAULT_BASE_URL = "https://api.tavily.com/search"
 
@@ -18,28 +19,10 @@ class TavilyNotConfigured(RuntimeError):
     pass
 
 
-def load_dotenv(paths: list[Path] | None = None) -> None:
-    """Tiny stdlib .env reader: KEY=VALUE lines, '#' comments, optional quotes; existing vars win."""
-    paths = paths or [Path.cwd() / ".env", Path(__file__).resolve().parents[2] / ".env"]
-    for path in paths:
-        if not path.is_file():
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.removeprefix("export ").split("=", 1)
-            key, value = key.strip(), value.strip().strip("'\"")
-            if key and key not in os.environ:
-                os.environ[key] = value
-
-
 def config() -> dict:
-    if not os.environ.get("TAVILY_API_KEY"):
-        load_dotenv()
     return {
-        "api_key": os.environ.get("TAVILY_API_KEY"),
-        "base_url": os.environ.get("TAVILY_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
+        "api_key": settings.get("TAVILY_API_KEY"),
+        "base_url": settings.get("TAVILY_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
     }
 
 

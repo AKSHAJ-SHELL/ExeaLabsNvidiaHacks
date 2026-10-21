@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
+import shutil
 import threading
 import time
-import uuid
 from pathlib import Path
 from typing import BinaryIO
 
-MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+from arrival.jobs.limits import MAX_UPLOAD_BYTES, QueueFull
+
 CHUNK = 1 << 20
 
 
@@ -24,14 +26,35 @@ def check_upload_size(content_length: int, limit: int = MAX_UPLOAD_BYTES) -> boo
 
 
 def new_job_id() -> str:
-    return "job_" + uuid.uuid4().hex[:8]
+    """``job_`` + 128 random bits, so an id is a capability: it cannot be guessed or enumerated."""
+    return "job_" + secrets.token_hex(16)
+
+
+def count_active(jobs_root: Path) -> int:
+    """Jobs that are ``queued`` or ``running`` (unreadable status files are not counted)."""
+    jobs_root = Path(jobs_root)
+    n = 0
+    for d in jobs_root.iterdir() if jobs_root.is_dir() else []:
+        try:
+            st = json.loads((d / "status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        n += isinstance(st, dict) and st.get("status") in ("queued", "running")
+    return n
 
 
 def create_job(jobs_root: Path, filename: str, data: bytes | None = None,
-               src: BinaryIO | None = None, offset: int = 0, length: int = 0) -> dict:
+               src: BinaryIO | None = None, offset: int = 0, length: int = 0, max_queue: int = 0,
+               extra_status: dict | None = None, adopt: dict[str, Path] | None = None) -> dict:
     """Write ``<jobs_root>/<id>/upload.bin`` (from ``data``, or ``length`` bytes of ``src`` at ``offset``,
-    copied in chunks) and ``status.json``; return the status."""
+    copied in chunks) and ``status.json``; return the status. ``adopt`` maps a name to a prepared folder that is
+    moved to ``<id>/<name>`` before the status exists, so a worker never sees a queued job without it;
+    ``extra_status`` keys are merged into the status. With ``max_queue`` > 0, raise ``QueueFull`` when that
+    many jobs are already queued or running. The count is not atomic with the write, so concurrent uploads can
+    overshoot the limit by a few; it bounds the queue, it is not an exact gate."""
     jobs_root = Path(jobs_root)
+    if max_queue and count_active(jobs_root) >= max_queue:
+        raise QueueFull(f"queue is full: {max_queue} jobs are queued or running")
     job_id = new_job_id()
     job_dir = jobs_root / job_id
     job_dir.mkdir(parents=True, exist_ok=False)
@@ -48,7 +71,10 @@ def create_job(jobs_root: Path, filename: str, data: bytes | None = None,
                     break
                 out.write(chunk)
                 left -= len(chunk)
+    for name, folder in (adopt or {}).items():
+        shutil.move(str(folder), str(job_dir / name))
     status = {
+        **(extra_status or {}),
         "id": job_id,
         "status": "queued",
         "created_unix": int(time.time()),
