@@ -21,6 +21,16 @@ Same keys as the report schema in `docs/04-contracts.md`. `local_cpu` is `$0, me
 
 `cosmos` has no pricing entry and stays unmeasured.
 
+For a generated-versus-teleop **USD per demo** comparison, the usage file must also identify the measured room and
+task. Product totals without a scope still appear in the dollars table, but are not divided by a task's successes:
+
+```json
+{"scope": {"room": "hero_kitchen", "task": "counter_to_sink"}, "gpu_hour": 2}
+```
+
+Use `"task": "all_tasks"` only when the usage covers the entire room-level report. Record units for this scope only;
+the report divides their priced total by the matching generated success count.
+
 ## Teleop baseline
 
 `out/teleop_baseline.json` (or `--baseline`):
@@ -30,6 +40,6 @@ Same keys as the report schema in `docs/04-contracts.md`. `local_cpu` is `$0, me
  "setup_assumptions": ["one operator", "VR rig owned"], "cost_basis_usd": 50}
 ```
 
-`n_success` is an integer >= 1, `operator_seconds_total` > 0, `cost_basis_usd` >= 0 is the total operator and setup cost, `setup_assumptions` a non-empty string or list. Anything else raises `CostError` naming the field. With no baseline the output says `comparison not measured` and carries no ratio. With one, the comparison uses the baseline room's report rows (the baseline task's family when the sim report has one, else the room total) and prints both sample sizes. Generated seconds are local wall time of the generate call, teleop seconds are operator time. Generated USD per demo is null without a usage file, and marked estimate unless every priced product is measured.
+`n_success` is an integer >= 1, `operator_seconds_total` > 0, `cost_basis_usd` >= 0 is the total operator and setup cost, `setup_assumptions` a non-empty string or list. Anything else raises `CostError` naming the field. With no baseline the output says `comparison not measured` and carries no ratio. With one, the comparison uses the baseline room's report rows (the baseline task's family when the sim report has one, else the room total) and prints both sample sizes. Generated seconds are local wall time of the generate call, teleop seconds are operator time. Generated USD per demo is null without a matching usage scope, and marked estimate unless every priced product is measured.
 
 The report fields `teleop_baseline` and `dollars` follow the existing schema; `arrival/eval/report.py` is unchanged.
