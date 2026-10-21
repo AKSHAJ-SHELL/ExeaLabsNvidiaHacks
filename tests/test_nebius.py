@@ -305,7 +305,8 @@ def test_status_record_names_the_failure_stage(nebius, monkeypatch, tmp_path):
 def test_local_backend_records_attempts_and_a_failed_marker(tmp_path, monkeypatch):
     def command(cfg, i, out):
         return [sys.executable, "-c", f"import pathlib; p = pathlib.Path(r'{out}') / 'shards' / '{i}of{cfg.shards}'; "
-                                      "p.mkdir(parents=True, exist_ok=True); (p / 'x.txt').write_text('x')"]
+                                      "m = p / 'datasets' / 'hero_kitchen_sim' / 'meta'; m.mkdir(parents=True, exist_ok=True); "
+                                      "(m / 'info.json').write_text('{}'); (m / 'episodes.jsonl').write_text('')"]
 
     def kill(i):
         raise KeyboardInterrupt  # stop before the merge, which these stand-in shards cannot pass
