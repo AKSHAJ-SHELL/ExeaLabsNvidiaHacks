@@ -107,6 +107,19 @@ def _fake_run(tmp_path, count=3, total=6, drop=()):
     return tmp_path
 
 
+@pytest.mark.parametrize("name,content,match", [
+    ("episodes.jsonl", '{broken}\n', "episodes.jsonl: line 1 is not JSON"),
+    ("episodes.jsonl", '[]\n', "episodes.jsonl: line 1 must be a JSON object"),
+    ("info.json", '{broken}', "info.json: invalid JSON"),
+])
+def test_merge_reports_corrupt_shard_metadata(tmp_path, name, content, match):
+    src = _fake_run(tmp_path / "source", count=1, total=1)
+    (src / "shards" / "0of1" / "datasets" / "room_sim" / "meta" / name).write_text(content)
+    with pytest.raises(ShardError, match=match):
+        merge_shards([src / "shards"], tmp_path / "merged")
+    assert not (tmp_path / "merged").exists()
+
+
 def test_merge_synthetic_shards_reindexes_everything_and_validates(tmp_path):
     src, out = _fake_run(tmp_path / "src", drop=(1,)), tmp_path / "merged"
     res = merge_shards([src / "shards"], out)  # the folder holding <i>of<n>
