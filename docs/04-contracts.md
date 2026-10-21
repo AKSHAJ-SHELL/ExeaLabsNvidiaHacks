@@ -289,9 +289,9 @@ main_group:
       pos: [1.475, 0.4, 0.46]
 ```
 
-Wall `pos` is the segment midpoint at half height: `[ (start.x+end.x)/2, (start.y+end.y)/2, height/2 ]`. Wall `size` is `[length, thickness, height]` for walls whose long axis is X, and `[thickness, length, height]` for walls whose long axis is Y. Floor `size` is `[width, depth, 0.02]` from the wall bounding box, `pos` at the bbox center with z `0`. When the twin has `floors` with corners, the bounding box of those corners is used instead.
+Wall `pos` is the segment midpoint at half height, so the wall box is centred on the scanned line (it is not shifted toward the interior by half the thickness): `[ (start.x+end.x)/2, (start.y+end.y)/2, height/2 ]`. Wall `size` is `[length, thickness, height]` for walls whose long axis is X, and `[thickness, length, height]` for walls whose long axis is Y. Floor `size` is `[width, depth, 0.02]` from the wall bounding box, `pos` at the bbox center with z `0`. When the twin has `floors` with corners, the bounding box of those corners is used instead.
 
-Counter synthesis (only when the scan has a sink or stove whose centre is more than 0.3 m from every counter footprint and whose own footprint is more than 0.05 m from every counter, so a stove built in between two counters gets none): emit a counter of size `[max(fixture.size[0] + 0.4, 1.2), 0.65, 0.92]`, centered on the fixture's x,y, with z `0.46`. The authored sample already has counters, so this branch is covered by a unit test with a sink-only bundle, not by the hero scan.
+Counter synthesis (only when the scan has a sink or stove whose centre is more than 0.3 m from every counter footprint and whose own footprint is more than 0.05 m from every counter, so a stove built in between two counters gets none): emit a counter of size `[max(fixture.size[0] + 1.2, 1.8), 0.65, 0.92]`, centered on the fixture's x,y, with z `0.46`. The authored sample already has counters, so this branch is covered by a unit test with a sink-only bundle, not by the hero scan.
 
 Do not emit backing walls.
 
