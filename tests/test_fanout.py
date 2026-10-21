@@ -71,3 +71,9 @@ def test_gives_up_after_max_attempts_and_refuses_other_settings(tmp_path):
 def test_nebius_stub_is_not_a_backend():
     with pytest.raises(NotImplementedError):
         NebiusBackendStub().submit(CFG, 0)
+
+
+@pytest.mark.parametrize("run_id", ["", "..", "../escape", "a/b", "/tmp/escape", "a" * 65])
+def test_run_id_cannot_escape_scratch_or_storage(run_id):
+    with pytest.raises(ShardError, match="run_id"):
+        FanoutConfig(run_id, 2)

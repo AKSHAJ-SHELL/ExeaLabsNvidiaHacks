@@ -11,6 +11,7 @@ Only `LocalBackend` exists and is tested: shards are local subprocesses and a di
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -36,6 +37,11 @@ class FanoutConfig:
     res: int = 128
     seed: int = 0
     scans: str = "scans"
+
+    def __post_init__(self) -> None:
+        # The run id becomes both a scratch-directory component and an object-storage prefix.
+        if not isinstance(self.run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", self.run_id):
+            raise ShardError("run_id must be 1-64 letters, digits, underscores or hyphens, starting with a letter or digit")
 
     def sim_args(self, i: int) -> list[str]:
         return ["sim", "--room", self.room, "--families", self.families, "--episodes", str(self.episodes),
