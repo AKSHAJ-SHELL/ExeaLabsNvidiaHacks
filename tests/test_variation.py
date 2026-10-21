@@ -233,3 +233,20 @@ def test_dataset_with_bad_mask_keeps_original_videos(dataset, tmp_path):
     assert summary["rejected"] == summary["requests"] == 16
     assert summary["ok"] == 0 and not (dst / variation.VIDEO_DIR).exists()
     assert validate(dst) == []
+
+
+@pytest.mark.parametrize("result", [(None, {}), (np.zeros((2, 2, 3), np.uint8), None),
+                                     (np.zeros((2, 2, 3), np.uint8), {"bad": object()})])
+def test_malformed_backend_result_fails_frames_without_aborting_copy(dataset, tmp_path, result):
+    class Client:
+        name, model, version = "local_stub", "test", "1"
+
+        def __call__(self, frame, episode, index):
+            return result
+
+    dst = tmp_path / "copy"
+    summary = variation.vary_dataset(dataset, dst, client=Client())
+    assert summary["failed"] == summary["requests"] == 16
+    assert summary["ok"] == 0
+    assert all(row["status"] == "failed" and row["reason"] for row in rows(dst))
+    assert validate(dst) == []
