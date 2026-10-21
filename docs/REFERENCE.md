@@ -455,7 +455,7 @@ The modality config is `configs/gr00t/arrival_panda_config.py` (arm trained as r
 
 ### Appearance variation (offline)
 
-`python -m arrival.render.variation SRC_DATASET NEW_COPY_DIR [--backend local_stub|cosmos] [--seed N] [--fraction 0.1]` copies a sim dataset and restyles about 10% of its frames; the source is untouched. Writes `meta/arrival_variation.jsonl`, `meta/arrival_variation_summary.json`, `variation_videos/`, and sets `arrival_appearance_variation` in the copy's `info.json` to `cosmos` (only after a real Cosmos success), `local_stub` or `none`. `cosmos` reads `COSMOS_URL`; without it every selected frame is reported as skipped and stays original. Added latency and cost are reported as null. See [ref/SIM-7a.md](ref/SIM-7a.md).
+`python -m arrival.render.variation SRC_DATASET NEW_COPY_DIR [--backend local_stub|cosmos] [--seed N] [--fraction 0.1]` copies a sim dataset and restyles about 10% of its frames; the source is untouched. Writes `meta/arrival_variation.jsonl`, `meta/arrival_variation_summary.json`, `variation_videos/`, and sets `arrival_appearance_variation` in the copy's `info.json` to `cosmos` (only after a real Cosmos success), `local_stub` or `none`. `cosmos` reads `COSMOS_URL`; without it every selected frame is reported as skipped and stays original. The summary reports backend call seconds and added stage wall seconds; cost stays null without endpoint billing data. See [ref/SIM-7a.md](ref/SIM-7a.md).
 
 ## Known gaps
 

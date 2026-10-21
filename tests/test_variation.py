@@ -133,7 +133,7 @@ def test_local_stub_differs_keeps_geometry_and_source_untouched(dataset, tmp_pat
     assert digest(dataset) == before and validate(dataset) == []
     assert validate(dst) == []
     assert s["arrival_appearance_variation"] == "local_stub" and s["ok"] == s["requests"] == 16
-    assert s["added_latency_s"] is None and s["cost_usd"] is None
+    assert s["added_latency_s"] >= s["backend_latency_s"] > 0 and s["cost_usd"] is None
     assert json.loads((dst / "meta" / "info.json").read_text())["arrival_appearance_variation"] == "local_stub"
     rs = rows(dst)
     assert all(r["backend"] == "local_stub" and r["status"] == "ok" and r["edge_corr"] >= 0.6 for r in rs)
@@ -157,6 +157,7 @@ def test_cosmos_mock_server_pairs_ids_and_label(dataset, tmp_path):
         srv.shutdown()
         srv.server_close()
     assert s["arrival_appearance_variation"] == "cosmos" and s["ok"] == 16 and s["failed"] == 0
+    assert s["added_latency_s"] >= s["backend_latency_s"] > 0 and s["cost_usd"] is None
     rs = rows(tmp_path / "c")
     assert all(r["variant_id"] == r["original_id"] + "_v" and r["model"] == "mock-cosmos" and r["latency_ms"] > 0
                for r in rs)

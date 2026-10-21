@@ -215,6 +215,8 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     fps = info.get("fps", 20) if fps is None else fps
     if type(fps) is not int or fps < 1:
         raise ValueError("fps must be a positive integer")
+
+    stage_start = time.perf_counter()
     shutil.copytree(src, dst)
     cli = client if client is not None else (CosmosClient() if backend == "cosmos" else LocalStub(seed))
     counts = {"selected": 0, "ok": 0, "rejected": 0, "failed": 0, "skipped": 0}
@@ -273,11 +275,14 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
             write_video(dst / VIDEO_DIR / key / vid.name, np.stack(frames), fps)
     label = "cosmos" if cosmos_ok else ("local_stub" if backend == "local_stub" and counts["ok"] else "none")
     (dst / "meta" / SIDECAR).write_text("".join(json.dumps(r) + "\n" for r in rows))
+    backend_latency_s = round(sum(r["latency_ms"] or 0 for r in rows) / 1000, 3)
     summary = {"arrival_appearance_variation": label, "backend_requested": backend, "seed": seed,
                "fraction": fraction, "requests": counts.pop("selected"), **counts,
                "cosmos_model": cli.model if cli.name == "cosmos" and cosmos_ok else None,
-               "added_latency_s": None, "cost_usd": None,
-               "note": "frames not ok stay original; added latency and cost are unmeasured end to end"}
+               "backend_latency_s": backend_latency_s,
+               "added_latency_s": round(time.perf_counter() - stage_start, 3), "cost_usd": None,
+               "note": "frames not ok stay original; added latency includes copy, backend calls and video writes; "
+                       "USD is unknown without endpoint billing data"}
     (dst / "meta" / SUMMARY).write_text(json.dumps(summary, indent=2))
     info["arrival_appearance_variation"] = label
     (dst / "meta" / "info.json").write_text(json.dumps(info, indent=2))
