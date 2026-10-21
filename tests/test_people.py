@@ -293,3 +293,17 @@ def test_open_fridge_with_walkers_succeeds_without_contact(twin):
         ep = run_episode(env, ScriptedExpert(), task)
         assert ep["success"], (seed, ep["detail"])
         assert not ep["safety"]["human_contact"] and not ep["safety"]["door_contact"], seed
+
+
+def test_walkers_keep_out_of_the_door_the_robot_opens(twin):
+    """`keep` discs (the swing of the cabinet door the arm works) hold no stop, free point or via point of a walker's
+    loop; without them the same seeds do put a waypoint there (open_door lost episodes to a walker standing at the
+    counter stop in front of counter_a_door)."""
+    hinge, radius, base, floor = np.array([2.18, 0.72]), 0.75, (1.455, 1.375), (0.4, 1.3, 3.6, 2.7)
+    inside = lambda w: [p for path in w.paths for p in path if np.linalg.norm(p - hinge) < radius]
+    without = 0
+    for seed in range(40):
+        kw = dict(seed=seed, base_xy=base, front_y=1.024, fixtures=twin["fixtures"], fridge_visit=False)
+        without += bool(inside(Walkers(2, floor, **kw)))
+        assert not inside(Walkers(2, floor, keep=[(hinge, radius)], **kw)), seed
+    assert without > 0
