@@ -204,6 +204,11 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     select_frames(0, 0, seed, fraction)  # reject invalid fractions before copying the dataset
     if dst.resolve().is_relative_to(src.resolve()):
         raise ValueError("destination must be outside the source dataset")
+
+    if type(edge_min) not in (int, float) or not math.isfinite(edge_min) or not -1 <= edge_min <= 1:
+        raise ValueError("edge_min must be a finite correlation threshold between -1 and 1")
+    if type(mask_max) not in (int, float) or not math.isfinite(mask_max) or mask_max < 0:
+        raise ValueError("mask_max must be a finite, nonnegative change threshold")
     if dst.exists():
         raise FileExistsError(f"{dst} exists; the copy directory must be new")
     info = json.loads((src / "meta" / "info.json").read_text())
