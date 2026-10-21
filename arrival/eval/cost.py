@@ -219,6 +219,8 @@ def compare(rows: list[dict], dol: dict, tele: dict | None) -> dict:
         return {"measured": False, "reason": "no teleop baseline"}
     reps = [r for r in rows if r["source"] == "report" and r["room"] == tele["room"]]
     fam = [r for r in reps if r["family"] == tele["task"]]
+    if not fam and tele["task"] != "all_tasks":
+        return {"measured": False, "reason": f"no generated reports for task {tele['task']!r} in room {tele['room']!r}"}
     gen = fam or [r for r in reps if r["family"] is None]
     n = sum(r["successes"] or 0 for r in gen)
     if n == 0:
