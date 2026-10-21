@@ -13,6 +13,7 @@ services:
       - arrival-out:/app/out
     environment:
       ARRIVAL_MAX_QUEUE: "20"
+      ARRIVAL_RETENTION_HOURS: "${ARRIVAL_RETENTION_HOURS:-24}"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status != 200)"]
       interval: 15s
@@ -22,12 +23,13 @@ services:
 
   worker:
     build: .
-    command: python -m arrival work --max-job-seconds 900 --retention-hours 24
+    command: python -m arrival work --max-job-seconds 900
     volumes:
       - arrival-out:/app/out
     environment:
       ARRIVAL_MAX_EPISODES: "20"
       ARRIVAL_MAX_PEOPLE: "2"
+      ARRIVAL_RETENTION_HOURS: "${ARRIVAL_RETENTION_HOURS:-24}"
     depends_on:
       - web
     restart: unless-stopped

@@ -9,7 +9,9 @@ docker compose up --build -d
 python scripts/smoke_hosted.py http://127.0.0.1:8000 --wait 600 --require-healthz
 ```
 
-`web` serves the page and the upload API with `--public` (a visitor sees only their own jobs, server paths are hidden) and `--behind-proxy` (it trusts `X-Forwarded-Proto` and `X-Forwarded-For`). `worker` drains the queue and deletes finished jobs after 24 hours. Both share the `arrival-out` volume, so uploads, jobs and datasets survive a restart.
+`web` serves the page and the upload API with `--public` (a visitor sees only their own jobs, server paths are hidden) and `--behind-proxy` (it trusts `X-Forwarded-Proto` and `X-Forwarded-For`). `worker` drains the queue and, by default, deletes finished jobs after 24 hours. Both share the `arrival-out` volume, so uploads, jobs and datasets survive a restart.
+
+Both containers read the same `ARRIVAL_RETENTION_HOURS` setting, so the page states the worker's actual deletion window. It defaults to 24 hours; set `ARRIVAL_RETENTION_HOURS=0` to keep finished jobs until the uploader deletes them.
 
 ## Before it faces the internet
 
