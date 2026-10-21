@@ -18,6 +18,7 @@ ENV = {
     "max_people": ("ARRIVAL_MAX_PEOPLE", 1),
     "max_job_seconds": ("ARRIVAL_MAX_JOB_SECONDS", 1),
     "max_queue": ("ARRIVAL_MAX_QUEUE", 1),
+    "max_job_bytes": ("ARRIVAL_MAX_JOB_MB", 1024 * 1024),
     "retention_hours": ("ARRIVAL_RETENTION_HOURS", 1),
 }
 
@@ -37,6 +38,7 @@ class Limits:
     max_people: int = 4  # simulated people per job
     max_job_seconds: float = 1800.0  # wall clock per job; 0 runs the job in-process with no timeout
     max_queue: int = 20  # queued + running jobs; a new upload beyond this is refused (0 = unlimited)
+    max_job_bytes: int = 0  # address-space cap for a job's child process, Linux only (child.py); 0 = off
     retention_hours: float | None = None  # finished jobs older than this are deleted by the worker sweep; None keeps them
     stale_seconds: float = 120.0  # a running job whose worker has not heartbeat this long is requeued
 

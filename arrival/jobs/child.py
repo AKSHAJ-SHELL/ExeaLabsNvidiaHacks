@@ -15,10 +15,26 @@ from arrival.jobs.limits import Limits
 from arrival.jobs.worker import _read_status, process
 
 
+def apply_memory_cap(max_bytes: int, platform: str | None = None, resource=None) -> bool:
+    """Cap this process's address space (``RLIMIT_AS``) at ``max_bytes``. Linux only, and only when ``max_bytes`` > 0:
+    anywhere else (macOS does not enforce RLIMIT_AS/RLIMIT_DATA) it does nothing and returns False. A job that
+    allocates past the cap gets ``MemoryError`` and fails like any other stage error. The cap counts address space,
+    not resident memory, so set it well above what a job really uses."""
+    if not max_bytes or max_bytes <= 0 or (platform or sys.platform) != "linux":
+        return False
+    if resource is None:
+        import resource
+    _, hard = resource.getrlimit(resource.RLIMIT_AS)
+    cap = max_bytes if hard in (-1, resource.RLIM_INFINITY) else min(max_bytes, hard)
+    resource.setrlimit(resource.RLIMIT_AS, (cap, hard))
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     job_dir, out_dir, raw = (argv if argv is not None else sys.argv[1:])[:3]
     opts = json.loads(raw)
     limits = Limits(**opts.pop("limits", {}))
+    apply_memory_cap(limits.max_job_bytes)
     status = _read_status(Path(job_dir))
     if status is None:
         print(f"[work] {job_dir}: no readable status.json", file=sys.stderr)
