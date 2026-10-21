@@ -104,10 +104,43 @@ def test_no_drawer_or_door_task_where_the_base_cannot_stand():
     fams = ["open_drawer", "open_door", "close_drawer", "close_door"]
     tasks = make_tasks(twin, fams, 40, seed=0)
     used = {t["fixture"] for t in tasks}
-    assert "storage_b" not in used and {"storage_sink", "storage_a"} <= used  # storage_b is in the corner of the U
+    assert {"storage_sink", "storage_a"} <= used  # storage_b is in the corner of the U: its doors stand along the run
+    assert {t["family"] for t in tasks if t["fixture"] == "storage_b"} <= {"open_door", "close_door"}
     fx = {f["id"]: f for f in twin["fixtures"]}
     for t in tasks:
+        if t.get("base_shift"):
+            continue  # stands off the rule's spot; test_corner_cabinet_... checks that one
         c = fx[t["fixture"]]
         along, out = front_stand(c, t["family"], twin["fixtures"])
         spot = to_world((along, c["size"][1] / 2 + out), c)
         assert min(_rect_distance(list(spot), f) for f in twin["fixtures"]) >= BASE_CLEAR, t["task_id"]
+
+
+def test_corner_cabinet_door_stands_along_its_run_but_the_blocked_drawer_and_outside_fridge_stay_rejected():
+    """u_kitchen_42's storage_b has the sink run on its stand spot: its doors take a spot 0.25 m along the run (the
+    wide fallback grid) and open and close in the sim; its drawer is pulled from in front of the sink, so it stays
+    rejected, and rotated_kitchen's fridge, whose free-edge side is outside the room, stays rejected too."""
+    from arrival.sim.collect import SimEnv, run_episode
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.tasks import finish_task
+
+    twin = compile_twin(load_room("u_kitchen_42", SCANS))
+    pre: dict = {}
+    corner = []
+    for fam in ("open_door", "close_door", "open_drawer", "close_drawer"):
+        pre_f: dict = {}
+        tasks = make_tasks(twin, [fam], 24, seed=5, log=lambda *_: None, preflight=pre_f)
+        corner += [t for t in tasks if t.get("fixture") == "storage_b"]
+        pre["rejected"] = pre.get("rejected", 0) + pre_f["rejected"]
+        pre.setdefault("reasons", []).extend(pre_f["reasons"])
+    assert {t["family"] for t in corner} == {"open_door", "close_door"}
+    assert all(t["base_shift"] == [0.25, 0.0] for t in corner)
+    assert pre["rejected"] == 2 and all("sink" in r["reason"] for r in pre["reasons"])
+    for fam in ("open_door", "close_door"):
+        t = finish_task(next(t for t in corner if t["family"] == fam))
+        ep = run_episode(SimEnv(twin, t, res=32), ScriptedExpert(), t)
+        assert ep["success"], fam
+    room = compile_twin(load_room("rotated_kitchen", SCANS))
+    pre = {}
+    assert not make_tasks(room, ["open_fridge"], 4, seed=5, log=lambda *_: None, preflight=pre)
+    assert pre["families"] == ["open_fridge"] and "outside the room" in pre["reasons"][0]["reason"]
