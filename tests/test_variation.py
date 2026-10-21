@@ -84,6 +84,17 @@ def test_bad_fraction_rejected_before_copy(tmp_path, fraction):
     assert not dst.exists()
 
 
+@pytest.mark.parametrize("option,value", [
+    ("edge_min", float("nan")), ("edge_min", 1.1), ("edge_min", True),
+    ("mask_max", float("nan")), ("mask_max", -0.1), ("mask_max", float("inf")),
+])
+def test_invalid_geometry_thresholds_rejected_before_copy(tmp_path, option, value):
+    dst = tmp_path / "copy"
+    with pytest.raises(ValueError, match=option):
+        variation.vary_dataset(tmp_path / "missing", dst, **{option: value})
+    assert not dst.exists()
+
+
 def test_bad_frame_count_is_rejected():
     with pytest.raises(ValueError, match="n_frames"):
         variation.select_frames(0, -1, 0)
