@@ -258,7 +258,7 @@
       99
      ],
      "issue": 42,
-     "note": "Replaces #49, #75 and #77."
+     "note": "Replaces #49, #75 and #77. Corner-cabinet doors on the U-kitchen are now accepted by a wider stand-spot search; its drawers and the rotated kitchen fridge stay rejected."
     },
     {
      "id": "L2",
@@ -551,7 +551,7 @@
       107
      ],
      "issue": 26,
-     "note": "Replaces #25. The 34 MB meshes are fetched by script and stay out of git."
+     "note": "Replaces #25. The 34 MB meshes are fetched by script and stay out of git. The close-door push standoff is retuned for the real hand: 14 of 14 on seed 5 with no people. Not measured over other seeds, rooms or people."
     },
     {
      "id": "L26",
@@ -572,7 +572,8 @@
      "owner_kind": "laptop",
      "size": "M",
      "priority": "nice",
-     "issue": 24
+     "issue": 24,
+     "note": "On feat/demo-site with no pull request yet. Walkers also keep out of the door hinge disc (open_door 8 of 8 on seeds 0 to 3, was 7 of 8 on one), and fridges can be right-hinged with hinge: \"right\". Yield ignores the arm links. The hero fridge with a right hinge is rejected by the pre-flight because its free edge is in the corner."
     },
     {
      "id": "L28",

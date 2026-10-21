@@ -84,7 +84,7 @@ Pull requests against main. All are merged into feat/demo-site and none is on ma
 
 | id | what | size | priority | status | PRs or issue |
 |---|---|---|---|---|---|
-| L1 | Fixtures on any wall (#49, #75, #77 folded into one PR) Replaces #49, #75 and #77. | M | must | Shipped | #99 |
+| L1 | Fixtures on any wall (#49, #75, #77 folded into one PR) Replaces #49, #75 and #77. Corner-cabinet doors on the U-kitchen are now accepted by a wider stand-spot search; its drawers and the rotated kitchen fridge stay rejected. | M | must | Shipped | #99 |
 | L2 | Failed task skips instead of crashing; pre-flight reach check | S | must | Shipped | #99 |
 | L3 | Worker hard limits: subprocess timeout, size caps, stage-tagged errors | M | must | Shipped | #96 |
 | L4 | Harden the web app for public hosting | M | must | Shipped | #97 |
@@ -108,9 +108,9 @@ Pull requests against main. All are merged into feat/demo-site and none is on ma
 | L22 | Secrets handling: single config loader, .env.example, redaction, arrival doctor | S | should | Shipped | #97, #114 |
 | L23 | Static demo-site export | S | should | Shipped | #102 |
 | L24 | Oven, dishwasher and faucet families on the any-wall chain Replaces #27. | M | nice | Shipped | #106 |
-| L25 | Real Menagerie Franka behind --arm menagerie Replaces #25. The 34 MB meshes are fetched by script and stay out of git. | M | nice | Shipped | #107 |
+| L25 | Real Menagerie Franka behind --arm menagerie Replaces #25. The 34 MB meshes are fetched by script and stay out of git. The close-door push standoff is retuned for the real hand: 14 of 14 on seed 5 with no people. Not measured over other seeds, rooms or people. | M | nice | Shipped | #107 |
 | L26 | Thin-object (spatula) pinch grasp, in counter_to_sink and wipe, both arms | M | nice | Shipped | #117 |
-| L27 | People pass: yield and stop from the safety distance, counter-use pause, 3D head and arm clearance check | M | nice | Shipped | issue #24 |
+| L27 | People pass: yield and stop from the safety distance, counter-use pause, 3D head and arm clearance check On feat/demo-site with no pull request yet. Walkers also keep out of the door hinge disc (open_door 8 of 8 on seeds 0 to 3, was 7 of 8 on one), and fridges can be right-hinged with hinge: "right". Yield ignores the arm links. The hero fridge with a right hinge is rejected by the pre-flight because its free edge is in the corner. | M | nice | Shipped | issue #24 |
 | L28 | Multi-room summary command (real rooms wait on P2) | S | nice | Shipped | #102 |
 | L29 | Frozen evaluation trials: replay the same trials for any policy and keep every run | M | should | Shipped | #109 |
 | L30 | Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress | M | should | Shipped | issue #68 |
@@ -171,9 +171,12 @@ Physical rooms, a LiDAR iPhone, or a human.
 ### Known limits
 
 - The GR00T loader has not read our dataset since the latest fixes; only our own validator and the offline conformance check have (G1).
-- The mobile base (L13) is behind `--base mobile` and the real Franka behind `--arm menagerie`; the defaults are still the fixed Panda-style arm. Door grasps with the real meshes are not retuned.
-- A corner fixture whose only stand spot is outside the room stays unreachable with a fixed base; the reach planner (L17) would replace the horizontal-envelope pre-flight.
-- The web page was checked with curl and tests only, not in a browser. Uploads are processed by local workers that share one `out/` folder.
+- The mobile base (L13) is behind `--base mobile` and the real Franka behind `--arm menagerie`; the defaults are still the fixed Panda-style arm. The Menagerie arm was measured over all families only at seed 5 with no people.
+- In a 28-episode 224 px run, `close_door` episodes 4, 14 and 24 are still flagged by the quality check for a joint at its limit. Every alternative grasp either missed the handle or put a finger into the door front.
+- With a fixed base, drawers on the U-kitchen's corner cabinet and the rotated kitchen's fridge stay unreachable and are skipped. The reach planner checks the arm's IK, not collisions.
+- The expert's fridge push heading ignores the fixture's yaw, and walker yield ignores the arm links.
+- The memory cap (`ARRIVAL_MAX_JOB_MB`) was never measured on Linux.
+- The web page was checked with curl, tests and scripts, not in a browser. Uploads are processed by local workers that share one `out/` folder.
 - No real kitchen has been scanned and run end to end, and nothing has trained on the data.
 
 ## Get started (5 minutes)
