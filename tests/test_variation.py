@@ -76,6 +76,19 @@ def test_selection_deterministic_and_ten_percent():
     assert abs(sum(map(len, a)) / (2 * N) - 0.10) <= 0.02
 
 
+@pytest.mark.parametrize("fraction", [-0.1, 1.1, float("nan"), float("inf")])
+def test_bad_fraction_rejected_before_copy(tmp_path, fraction):
+    dst = tmp_path / "copy"
+    with pytest.raises(ValueError, match="fraction"):
+        variation.vary_dataset(tmp_path / "missing", dst, fraction=fraction)
+    assert not dst.exists()
+
+
+def test_bad_frame_count_is_rejected():
+    with pytest.raises(ValueError, match="n_frames"):
+        variation.select_frames(0, -1, 0)
+
+
 def test_local_stub_differs_keeps_geometry_and_source_untouched(dataset, tmp_path):
     before = digest(dataset)
     dst = tmp_path / "copy"
