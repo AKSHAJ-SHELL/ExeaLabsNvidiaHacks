@@ -4,8 +4,8 @@
  "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site",
  "counts": {
   "done": 22,
-  "review": 28,
-  "todo": 2,
+  "review": 29,
+  "todo": 1,
   "blocked": 18,
   "total": 70
  },
@@ -331,7 +331,8 @@
      "pr": [
       98
      ],
-     "issue": 30
+     "issue": 30,
+     "note": "Demo video and gif regenerated and the README status rows checked; the open-door row now states its measured rate."
     },
     {
      "id": "L8",
@@ -587,6 +588,17 @@
      "pr": [
       109
      ]
+    },
+    {
+     "id": "L30",
+     "title": "Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "should",
+     "issue": 68,
+     "pr": [],
+     "note": "On feat/demo-site with no pull request yet: DELETE /jobs/<id>, cancel and delete buttons, episode progress, optional Linux memory cap (not measured on Linux)."
     }
    ]
   },
@@ -603,17 +615,6 @@
      "size": "M",
      "priority": "nice",
      "issue": 24
-    },
-    {
-     "id": "L30",
-     "title": "Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress",
-     "status": "todo",
-     "owner_kind": "laptop",
-     "size": "M",
-     "priority": "should",
-     "issue": 68,
-     "pr": [],
-     "note": "Left out of L3, L18 and L19 and listed in the build log as not done."
     }
    ]
   },
@@ -629,7 +630,8 @@
      "owner_kind": "gpu",
      "size": "M",
      "priority": "must",
-     "issue": 63
+     "issue": 63,
+     "note": "Offline slice done: 28 of 28 episodes at 224 px, validator passes, loader check passes with 4 warnings. GR00T itself has not loaded the data."
     },
     {
      "id": "G2",
@@ -637,7 +639,8 @@
      "status": "blocked",
      "owner_kind": "gpu",
      "size": "M",
-     "priority": "must"
+     "priority": "must",
+     "note": "Wire-format golden test and the 8-float and 11-float schemas are done. The shim has not run against a real GR00T server."
     },
     {
      "id": "G3",
@@ -664,7 +667,8 @@
      "owner_kind": "gpu",
      "size": "L",
      "priority": "must",
-     "issue": 63
+     "issue": 63,
+     "note": "Dockerfile.gpu, scripts/run_finetune.sh and the train, eval-policy and serve-policy targets are written and never run on a GPU. Unverified items are listed in the build log."
     },
     {
      "id": "G6",
@@ -673,7 +677,8 @@
      "owner_kind": "gpu",
      "size": "M",
      "priority": "must",
-     "issue": 69
+     "issue": 69,
+     "note": "Offline checker scripts/check_layout.py compares layout.yaml with the twin. Loading in real RoboCasa is not checked."
     },
     {
      "id": "G7",
@@ -707,7 +712,8 @@
      "owner_kind": "cloud",
      "size": "L",
      "priority": "must",
-     "issue": 66
+     "issue": 66,
+     "note": "Fan-out client with a local backend, done-markers, retry and resume is built and tested. No Nebius client exists."
     },
     {
      "id": "C2",
