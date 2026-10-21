@@ -196,6 +196,8 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
             state = backend.poll(job_id)
             if state == RUNNING:
                 continue
+            if state not in (SUCCEEDED, FAILED):
+                raise ShardError(f"job {job_id} returned unknown state {state!r}")
             del running[job_id]
             if state == SUCCEEDED:
                 backend.fetch_result(job_id, shard_prefix(cfg, i))

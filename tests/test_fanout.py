@@ -89,3 +89,13 @@ def test_bad_fanout_controls_fail_before_submitting(controls, tmp_path):
         run_fanout(be, CFG, tmp_path / "out", **controls, log=quiet)
     assert be.submissions == []
     assert not be.exists("r1/run.json")
+
+def test_unknown_backend_state_does_not_count_as_a_failed_attempt(tmp_path):
+    class UnknownBackend(LocalBackend):
+        def poll(self, job_id):
+            return "queued"
+
+    be = UnknownBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    with pytest.raises(ShardError, match="unknown state 'queued'"):
+        run_fanout(be, CFG, tmp_path / "out", poll_seconds=0, log=quiet)
+    assert be.submissions == [(0, 1), (1, 1)]
