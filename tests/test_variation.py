@@ -76,6 +76,16 @@ def test_selection_deterministic_and_ten_percent():
     assert abs(sum(map(len, a)) / (2 * N) - 0.10) <= 0.02
 
 
+def test_destination_inside_source_is_refused_before_copy(tmp_path):
+    src = tmp_path / "source"
+    src.mkdir()
+    (src / "keep").write_text("original")
+    with pytest.raises(ValueError, match="outside the source"):
+        variation.vary_dataset(src, src / "nested")
+    assert (src / "keep").read_text() == "original"
+    assert not (src / "nested").exists()
+
+
 @pytest.mark.parametrize("fraction", [-0.1, 1.1, float("nan"), float("inf")])
 def test_bad_fraction_rejected_before_copy(tmp_path, fraction):
     dst = tmp_path / "copy"
