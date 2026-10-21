@@ -7,10 +7,10 @@ Nothing here reaches the network or reads anything but the files it is pointed a
 None, never a guess: a wheel install has no git checkout (set ARRIVAL_GIT_SHA at build time), and a twin compiled
 from an in-memory bundle has no input file, only the hash of the normalized bundle.
 
-Object provenance is a separate, per-object label (OBJECT_PROVENANCE): `detected` for something a sensor or model
-found in the scan, `authored` for a person-written entry in scan.json, `default_synthetic` for the catalog objects
-`place_default_objects` puts on a counter because RoomPlan sees no small objects. Only `default_synthetic` and
-`authored` exist today; nothing in the pipeline detects objects yet, so `detected` is reserved, never emitted.
+Object provenance is a separate, per-object label (OBJECT_PROVENANCE): `detected` for something
+`arrival.twin.detect` found in uploaded RGB-D frames, `authored` for a person-written entry in scan.json,
+`default_synthetic` for the catalog objects `place_default_objects` puts on a counter because RoomPlan sees no small
+objects and no detection found any.
 """
 
 from __future__ import annotations

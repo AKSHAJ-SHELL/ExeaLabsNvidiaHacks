@@ -743,7 +743,8 @@
      "owner_kind": "cloud",
      "size": "M",
      "priority": "should",
-     "issue": 60
+     "issue": 60,
+     "note": "Offline slice built: detection client, back-projection into the room, merge across frames and the worker's labelled fallback, tested on rendered frames with hand-written replies. The real model call is blocked on Token Factory credentials."
     },
     {
      "id": "C5",
