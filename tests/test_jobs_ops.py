@@ -520,3 +520,68 @@ def test_cost_report_reads_job_metering_from_status_and_ledger(tmp_path):
     empty = cost.build(tmp_path / "nothing")
     assert empty["metering"]["jobs"] == 0 and empty["metering"]["wall_seconds"] is None
     assert "Worker metering" not in cost.markdown(empty)
+
+
+# ---- per-episode progress and the optional memory cap ----------------------------------------------------------------
+
+def test_progress_log_counts_finished_sim_tasks(tmp_path):
+    from arrival.jobs.worker import progress_log
+
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "k.json", data=b"{}")
+    d, st = claim_next(jobs_of(out))
+    seen = []
+    hook = progress_log(d, st, 3, seen.append)
+    assert status_of(out, job)["progress"] == {"done": 0, "total": 3}
+    for line in ("[sim] t0: planned by rule -> {}", "[sim] t0: OK door ik_err=0.1", "[sim] t1: MISS x",
+                 "[sim] t2: SKIP at env: why", "[sim] t3: DROP human_contact y"):
+        hook(line)
+    assert len(seen) == 5 and status_of(out, job)["progress"] == {"done": 3, "total": 3}  # capped; planner line ignored
+
+
+def test_claim_clears_old_progress(tmp_path):
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "k.json", data=b"{}")
+    path = jobs_of(out) / job["id"] / "status.json"
+    st = json.loads(path.read_text())
+    st["progress"] = {"done": 2, "total": 2}
+    path.write_text(json.dumps(st))
+    claim_next(jobs_of(out))
+    assert status_of(out, job)["progress"] is None
+
+
+def test_memory_cap_off_by_default_and_on_other_platforms():
+    from arrival.jobs.child import apply_memory_cap
+
+    class Boom:
+        def __getattr__(self, name):
+            raise AssertionError("resource must not be touched")
+
+    assert Limits().max_job_bytes == 0
+    assert apply_memory_cap(0, platform="linux", resource=Boom()) is False
+    assert apply_memory_cap(1 << 30, platform="darwin", resource=Boom()) is False
+
+
+def test_memory_cap_env_and_linux_call_with_a_fake_resource():
+    from arrival.jobs.child import apply_memory_cap
+
+    assert Limits.from_env({"ARRIVAL_MAX_JOB_MB": "512"}).max_job_bytes == 512 * 1024 * 1024
+    calls = []
+
+    class Fake:
+        RLIMIT_AS = 9
+        RLIM_INFINITY = -1
+        getrlimit = staticmethod(lambda which: (-1, -1))
+        setrlimit = staticmethod(lambda which, pair: calls.append((which, pair)))
+
+    assert apply_memory_cap(1 << 30, platform="linux", resource=Fake) is True
+    assert calls == [(9, (1 << 30, -1))]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="RLIMIT_AS is enforced on Linux only (not measured here)")
+def test_memory_cap_makes_a_big_allocation_fail():
+    code = ("from arrival.jobs.child import apply_memory_cap\n"
+            "assert apply_memory_cap(512*1024*1024)\n"
+            "try:\n    bytearray(2*1024**3)\nexcept MemoryError:\n    print('capped')\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    assert "capped" in r.stdout, r.stderr

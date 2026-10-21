@@ -562,7 +562,7 @@ def test_error_pages_are_html_for_browsers_and_json_for_the_api(server):
 
 def test_unsupported_methods_are_405_with_allow(server):
     srv, _ = server
-    for method in ("PUT", "DELETE", "PATCH", "OPTIONS"):
+    for method in ("PUT", "PATCH", "OPTIONS"):
         status, _, resp = _fetch(srv, "/jobs", method=method)
         assert status == 405 and "POST" in resp.getheader("Allow"), method
 
@@ -817,3 +817,64 @@ def test_doctor_disk_and_mujoco_levels(tmp_path, monkeypatch):
     c = doctor.check_mujoco()
     assert c.status == "warn" and "pip install" in c.detail
     assert doctor.exit_code([c]) == 0 and doctor.exit_code([doctor.Check("x", "fail", "")]) == 1
+
+
+# ---- DELETE /jobs/<id>: cancel or delete, owner only ---------------------------------------------------------------
+
+def _set_status(out, jid, **kw):
+    path = out / "jobs" / jid / "status.json"
+    st = json.loads(path.read_text())
+    st.update(kw)
+    path.write_text(json.dumps(st))
+
+
+def test_delete_job_owner_only_and_404_for_everyone_else(make):
+    srv, out = make(rate_limit=0)
+    _, a, resp_a = _post(srv, [("scan", "a.json", TINY)])
+    cookie_a = _cookie(resp_a)
+    _, b, resp_b = _post(srv, [("scan", "b.json", TINY)])
+    cookie_b = _cookie(resp_b)
+    jid = a["id"]
+    _set_status(out, jid, status="done", finished_at=1)
+    (out / "jobs" / jid / "dataset.zip").write_bytes(b"PK")
+    unknown = "/jobs/job_" + "0" * 16
+    for headers in ({}, {"Cookie": cookie_b}, {"Cookie": "arrival_client=" + "0" * 32}):
+        code, body, _ = _fetch(srv, f"/jobs/{jid}", headers, method="DELETE")
+        assert code == 404
+        assert body == _fetch(srv, unknown, headers, method="DELETE")[1]  # same answer as an id that does not exist
+    assert _fetch(srv, unknown, {"Cookie": cookie_a}, method="DELETE")[0] == 404
+    assert (out / "jobs" / jid).is_dir()
+    code, body, _ = _fetch(srv, f"/jobs/{jid}", {"Cookie": cookie_a}, method="DELETE")
+    assert code == 200 and json.loads(body) == {"id": jid, "result": "deleted"}
+    assert not (out / "jobs" / jid).exists() and (out / "jobs" / b["id"]).is_dir()
+
+
+def test_delete_cancels_queued_and_running_jobs(make):
+    srv, out = make(rate_limit=0)
+    _, a, resp = _post(srv, [("scan", "a.json", TINY)])
+    cookie = {"Cookie": _cookie(resp)}
+    code, body, _ = _fetch(srv, f"/jobs/{a['id']}", cookie, method="DELETE")
+    assert code == 200 and json.loads(body)["result"] == "cancelled"
+    assert json.loads((out / "jobs" / a["id"] / "status.json").read_text())["status"] == "cancelled"
+    _, b, resp = _post(srv, [("scan", "b.json", TINY)])
+    cookie = {"Cookie": _cookie(resp)}
+    _set_status(out, b["id"], status="running", stage="sim")
+    code, body, _ = _fetch(srv, f"/jobs/{b['id']}", cookie, method="DELETE")
+    assert code == 202 and json.loads(body)["result"] == "cancelling"
+    assert (out / "jobs" / b["id"] / "cancel.requested").exists() and (out / "jobs" / b["id"]).is_dir()
+
+
+def test_index_shows_retention_note_buttons_for_owner_only_and_progress(make, monkeypatch):
+    monkeypatch.delenv("ARRIVAL_RETENTION_HOURS", raising=False)
+    srv, out = make(rate_limit=0)
+    _, a, resp = _post(srv, [("scan", "a.json", TINY)])
+    _, page, _ = _fetch(srv, "/", {"Cookie": _cookie(resp)})
+    assert b"data-job-action='cancel'" in page and b"kept until the person who uploaded" in page
+    _, page, _ = _fetch(srv, "/")
+    assert b"data-job-action='" not in page
+    monkeypatch.setenv("ARRIVAL_RETENTION_HOURS", "24")
+    _, page, _ = _fetch(srv, "/")
+    assert b"deleted 24 hours after" in page
+    _set_status(out, a["id"], status="running", stage="sim", progress={"done": 3, "total": 8})
+    _, page, _ = _fetch(srv, "/")
+    assert b"sim: 3/8 episodes" in page

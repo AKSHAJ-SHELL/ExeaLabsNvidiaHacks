@@ -179,6 +179,13 @@ JS = """
     timer = setInterval(function () { if (!document.hidden) refreshJobs(); }, 2500);
   }
   watch();
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('button[data-job-action]') : null;
+    if (!b) return;
+    if (b.dataset.jobAction === 'delete' && !confirm('Delete this job and its dataset? This cannot be undone.')) return;
+    b.disabled = true;
+    fetch('/jobs/' + b.dataset.jobId, {method: 'DELETE', headers: {Accept: 'application/json'}}).then(refreshJobs, refreshJobs);
+  });
   var form = q('#upload'); if (!form) return;
   var file = form.querySelector('input[type=file]'), drop = q('.drop'), msg = q('#msg'), bar = q('progress'), name = q('#fname');
   function say(t, c) { msg.textContent = t; msg.className = c || ''; }
@@ -252,6 +259,9 @@ def _stage_bar(status: dict) -> str:
         segs.append(f"<i class='{cls}' title='{name}'></i>")
     label = {"done": "complete", "queued": "waiting for worker", "failed": f"failed at {stage or 'start'}"}.get(
         st, f"{stage or 'starting'} ({idx + 1}/{len(STAGES)})" if idx >= 0 else "starting")
+    prog = status.get("progress")
+    if st == "running" and stage == "sim" and isinstance(prog, dict) and prog.get("total"):
+        label = f"sim: {prog.get('done', 0)}/{prog['total']} episodes ({idx + 1}/{len(STAGES)})"
     return f"<div class='stages' role='img' aria-label='{esc(label)}'>{''.join(segs)}</div><div class='stage-label'>{esc(label)}</div>"
 
 
@@ -462,9 +472,17 @@ class Handler(BaseHTTPRequestHandler):
         self._guard(route)
 
     def _method_not_allowed(self):
-        self._error(405, extra={"Allow": "GET, HEAD, POST"})
+        self._error(405, extra={"Allow": "GET, HEAD, POST, DELETE"})
 
-    do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _method_not_allowed
+    def do_DELETE(self):
+        def route():
+            parts = self.path.split("?", 1)[0].strip("/").split("/")
+            if len(parts) != 2 or parts[0] != "jobs" or not JOB_ID_RE.match(parts[1]):
+                return self._not_found()
+            return self._delete_job(parts[1])
+        self._guard(route)
+
+    do_PUT = do_PATCH = do_OPTIONS = _method_not_allowed
 
     # ---- pages ---------------------------------------------------------
     def _task_counts(self, room: str):
@@ -557,9 +575,20 @@ class Handler(BaseHTTPRequestHandler):
             f"<div class='warn'>{esc(PLACEHOLDER_NOTE)}</div>"
             "<h2>Rooms</h2>" + cards
             + "<h2>Upload a scan</h2><div class='card'>" + upload + "</div>"
-            + "<h2>Jobs</h2><div id='jobs'>" + self._jobs_table() + "</div>"
+            + "<h2>Jobs</h2>" + self._retention_note() + "<div id='jobs'>" + self._jobs_table() + "</div>"
         )
         self._html(200, "Arrival", body)
+
+    @staticmethod
+    def _retention_note() -> str:
+        try:
+            hours = Limits.from_env().retention_hours
+        except ValueError:
+            hours = None
+        keep = (f"Finished jobs and their datasets are deleted {hours:g} hours after they finish."
+                if hours else "Finished jobs are kept until the person who uploaded them deletes them.")
+        return (f"<p class='muted'>{keep} Download a dataset before then. The Cancel and Delete buttons "
+                "appear only for jobs uploaded from this browser.</p>")
 
     def _jobs(self) -> list[dict]:
         root = self.out_dir / "jobs"
@@ -595,6 +624,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = ""
             eps = ("" if s.get("attempts") is None
                    else f"{esc(s.get('successes'))}/{esc(s.get('attempts'))}")
+            mine = self._owner() is not None and s.get("owner") == self._owner()
+            if mine:
+                verb, label = (("delete", "Delete") if st in ("done", "failed", "cancelled") else ("cancel", "Cancel"))
+                result += (f" <button type='button' data-job-action='{verb}' data-job-id='{esc(jid)}'>{label}</button>")
             kind = {"done": "ok", "failed": "bad", "running": "run"}.get(st, "")
             active = " data-active" if st in ("queued", "running") else ""
             rows.append(
@@ -817,6 +850,33 @@ class Handler(BaseHTTPRequestHandler):
         if status is None:
             return self._json(404, {"error": "job not found"})
         self._json(200, self._public_status(status))
+
+    def _delete_job(self, job_id: str):
+        """Cancel (queued or running) or delete (finished) a job, for the browser that uploaded it only. Any other
+        caller, and an unknown id, gets the same 404."""
+        from arrival.jobs.retention import FINISHED, JobBusy, delete_job
+        from arrival.jobs.worker import cancel_job
+
+        status = read_job(self.out_dir / "jobs", job_id)
+        owner = self._owner()
+        if status is None or owner is None or status.get("owner") != owner:
+            return self._json(404, {"error": "job not found"})
+        if status.get("status") in FINISHED:
+            try:
+                res = delete_job(self.out_dir, job_id)
+            except JobBusy as e:
+                return self._json(409, {"error": str(e)})
+            if res is None:
+                return self._json(404, {"error": "job not found"})
+            return self._json(200, {"id": job_id, "result": "deleted"})
+        res = cancel_job(self.out_dir / "jobs", job_id)
+        if res is None:
+            return self._json(404, {"error": "job not found"})
+        if res == "cancelling":
+            return self._json(202, {"id": job_id, "result": "cancelling"})
+        if res == "cancelled":
+            return self._json(200, {"id": job_id, "result": "cancelled"})
+        return self._json(409, {"error": f"job is {res}; try again"})
 
     def _job_realism(self, job_id: str, artifact: str):
         status = read_job(self.out_dir / "jobs", job_id)

@@ -43,6 +43,9 @@ MAX_REQUEUES = 2  # a job whose worker died this many times fails instead of loo
 USAGE_LEDGER = ("usage", "jobs.jsonl")  # under out/: one JSON line per finished job, survives gc
 
 
+SIM_TASK_RE = re.compile(r"^\[sim\] \S+: (?:OK|MISS|DROP|SKIP)\b")  # the line collect logs when one task finishes
+
+
 class JobCancelled(Exception):
     """Raised at a stage boundary when cancel_job asked for this running job to stop."""
 
@@ -174,6 +177,22 @@ def _stage(job_dir: Path, status: dict, stage: str, log, meter: Meter | None = N
     log(f"[work] {status['id']}: {stage}")
 
 
+def progress_log(job_dir: Path, status: dict, total: int, log):
+    """Wrap ``log`` so each finished sim task (an ``[sim] <task>: OK|MISS|DROP|SKIP`` line from ``collect``) bumps
+    ``status["progress"] = {"done", "total"}`` and rewrites status.json. ``total`` is the requested episode count, which
+    is also the task count, so ``done`` is capped at it."""
+    status["progress"] = {"done": 0, "total": int(total)}
+    _write_status(job_dir, status)
+
+    def hook(msg=""):
+        log(msg)
+        if SIM_TASK_RE.match(str(msg)):
+            p = status["progress"]
+            p["done"] = min(p["done"] + 1, p["total"])
+            _write_status(job_dir, status)
+    return hook
+
+
 # ---- claiming, heartbeat, stale reaping -------------------------------------------------------------------------
 
 def _create_lock(path: Path, owner: str) -> bool:
@@ -281,7 +300,8 @@ def claim_next(jobs_root: Path, worker: str | None = None) -> tuple[Path, dict] 
         st.update({"status": "running", "stage": None, "started_at": int(time.time()), "finished_at": None,
                    "error": None, "room_id": None, "twin_dir": None, "dataset_dir": None, "zip": None,
                    "attempts": None, "successes": None, "skipped": None, "error_kind": None,
-                   "error_reasons": None, "realism": None, "usage": None, "worker": worker})
+                   "error_reasons": None, "realism": None, "usage": None, "progress": None,
+                   "worker": worker})
         if st.get("frames"):
             st["frames"].update(consumed=False, used_for=None)
         return job_dir, _write_status(job_dir, st)
@@ -429,7 +449,8 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
         _stage(job_dir, status, "sim", log, meter)
         from arrival.sim.collect import collect
 
-        res_ = collect(twin, list(families), episodes, out_dir, people=people, res=res, seed=seed, log=log)
+        res_ = collect(twin, list(families), episodes, out_dir, people=people, res=res, seed=seed,
+                       log=progress_log(job_dir, status, episodes, log))
         r = res_["report_data"]
         status.update({"dataset_dir": str(res_["dataset"]), "attempts": r["attempts"], "successes": r["successes"],
                        "skipped": r["skipped"]})
