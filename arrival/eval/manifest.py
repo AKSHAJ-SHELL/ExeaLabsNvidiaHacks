@@ -30,7 +30,7 @@ def make_manifest(twin: dict, families: list[str], episodes: int, seed: int = 0,
     tasks, omitted = [], []
     for i, family in enumerate(families):
         batch = make_tasks(twin, [family], episodes, seed=seed + EVAL_SEED_BASE + i,
-                           people=people, holdout=holdout, mobile=base == "mobile", log=log)
+                           people=people, holdout=holdout, mobile=base == "mobile", log=log, arm=arm)
         tasks.extend(finish_task(t) for t in batch)
         if not batch:
             omitted.append(family)

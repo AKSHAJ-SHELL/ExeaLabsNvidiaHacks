@@ -11,11 +11,13 @@ from arrival.catalog.objects import GRASPABLE, PICKABLE, TABLE_MOVABLE
 from arrival.sim.scene import is_table
 from arrival.tasks.propose import LIGHTING, POSE_OFFSETS, WORDINGS, top_z
 from arrival.sim.preflight import DISHWASHER_SIDE, check_task
+from arrival.sim.reach import find_shift
 from arrival.twin.compile import is_counter_host, to_local, to_world
 
 TABLE_MOVE = 0.35  # how far along the table edge move_on_table carries the object (m)
 TABLE_REACH = 0.44  # objects further than this from the robot's table edge are out of reach for a fixed base
-# (preflight.REACH 0.745 from a base 0.28 m out, with the object 0.175 m along the edge from the base)
+# (a 0.745 m horizontal reach from a base 0.28 m out, with the object 0.175 m along the edge from the base); a
+# candidate filter only, the IK pre-flight (arrival.sim.reach) decides
 TARGET_GAP = 0.04  # clear space between the object at its target and any other object on the table (m)
 BASE_CLEAR = 0.25  # the base column (r 0.12 + plate) must stay this far from furniture and walls
 REACH = 0.78  # max horizontal eef reach from the arm base used when placing the base
@@ -129,14 +131,15 @@ def _start_variants(twin: dict, v: dict) -> list:
 
 def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: int = 0, holdout: bool = False,
                split: str = "train", use_generated_instructions: bool = False,
-               mobile: bool = False, log=print, preflight: dict | None = None) -> list[dict]:
+               mobile: bool = False, log=print, preflight: dict | None = None, arm: str = "procedural") -> list[dict]:
     """n task variations cycling through the requested families. Every candidate variation first passes the
-    geometric pre-flight (`arrival.sim.preflight.check_task`: stand spot inside the room and clear of walls and
-    fixtures, pick and place points within the arm's horizontal reach); a rejected one is logged with its reason and
-    never becomes a task, and a family left with none is skipped. mobile=True means the base drives (MAN-3): a
+    pre-flight (`arrival.sim.preflight.check_task`: stand spot inside the room and clear of walls and fixtures, the
+    expert's waypoints within `arm`'s reach by an IK solve). When the stand rule's spot fails, the reach planner
+    (`arrival.sim.reach.find_shift`) looks for a nearby spot that works and the variation keeps it as `base_shift`;
+    one with none is logged with its reason and never becomes a task, and a family left with none is skipped. mobile=True means the base drives (MAN-3): a
     counter_to_counter target may then be any counter of the same run, not only one within 1 m of the object, and the
     pre-flight checks the drive's stand spot and path. When `preflight` is a dict it is filled with
-    {"rejected": count, "families": [skipped families], "reasons": [{"family", "reason"}, ...]}.
+    {"rejected": count, "shifted": count, "families": [skipped families], "reasons": [{"family", "reason"}, ...]}.
     holdout=False draws the training set: wording HOLDOUT_WORDING (families with 4 templates) and HOLDOUT_OFFSET
     are excluded. holdout=True draws only those; families with 3 templates keep all 3 either way.
     use_generated_instructions draws from the Nemotron cache (or the template fallback) for `split` instead."""
@@ -146,7 +149,7 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
     sinks = [f for f in twin["fixtures"] if f["type"] == "sink"]
     pools: dict[str, list[dict]] = {}
     pre = preflight if preflight is not None else {}
-    pre.update({"rejected": 0, "families": [], "reasons": []})
+    pre.update({"rejected": 0, "shifted": 0, "families": [], "reasons": []})
     for fam in families:
         pool = []
         if fam in ("counter_to_sink", "counter_to_counter"):
@@ -231,8 +234,15 @@ def make_tasks(twin: dict, families: list[str], n: int, seed: int = 0, people: i
         kept = []
         for v in pool:
             why = None
-            for xy in _start_variants(twin, v):  # every start pose the offsets can give must be reachable
-                why = why or check_task(twin, {"family": fam, **v}, xy, mobile)
+            starts = _start_variants(twin, v)
+            for xy in starts:  # every start pose the offsets can give must be reachable
+                why = why or check_task(twin, {"family": fam, **v}, xy, mobile, arm)
+            shift = find_shift(twin, {"family": fam, **v}, starts, mobile, arm) if why else None
+            if shift is not None:
+                pre["shifted"] += 1
+                log(f"[sim] family {fam}: variation {v.get('object_id') or v['fixture']} stands {shift[0]:+.2f} m "
+                    f"along and {shift[1]:+.2f} m out from the usual spot: {why}")
+                v, why = {**v, "base_shift": list(shift)}, None
             if why is None:
                 kept.append(v)
             else:
