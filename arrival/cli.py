@@ -425,9 +425,13 @@ def cmd_work(a) -> int:
         print(f"unknown families {bad} (choose from {', '.join(SIM_FAMILIES)})" if bad else "--episodes must be >= 1",
               file=sys.stderr)
         return EXIT_USAGE
+    if a.retries is not None and a.retries < 0:
+        print("--retries must be >= 0", file=sys.stderr)
+        return EXIT_USAGE
     try:  # ARRIVAL_* variables first, then the flags
         limits = Limits.from_env().replace(max_episodes=a.max_episodes, max_people=a.max_people,
-                                           max_job_seconds=a.max_job_seconds, retention_hours=a.retention_hours)
+                                           max_job_seconds=a.max_job_seconds, retention_hours=a.retention_hours,
+                                           job_retries=a.retries)
         n = work(Path(a.out), once=a.once, poll=a.poll, limits=limits, episodes=a.episodes, families=fams,
                  people=a.people, res=a.res, seed=a.seed)
     except LimitError as e:
@@ -630,6 +634,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "0 = run in-process with no timeout)")
     w.add_argument("--retention-hours", type=float,
                    help="also delete finished jobs older than this while working (env ARRIVAL_RETENTION_HOURS; default keep)")
+    w.add_argument("--retries", type=int,
+                   help="queue a failed job again up to this many times (env ARRIVAL_JOB_RETRIES, default 2; 0 = never); "
+                        "a bad upload, an unusable room or a timeout is not retried")
     w.set_defaults(fn=cmd_work)
     g = sub.add_parser("gc", help="delete finished jobs older than --max-age-hours (upload, twin, dataset, zip)")
     g.add_argument("--max-age-hours", type=float, required=True)

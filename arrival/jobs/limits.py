@@ -2,6 +2,7 @@
 
 ``Limits()`` holds the defaults; ``Limits.from_env()`` overrides them from ``ARRIVAL_*`` variables. A limit of 0
 (or unset retention) means "not enforced" and is never the default for upload size, episodes, people or queue length.
+``job_retries`` is a count, not a ceiling: 0 means a failed job is never retried.
 This module imports nothing heavy so the web server can use it.
 """
 
@@ -20,6 +21,7 @@ ENV = {
     "max_queue": ("ARRIVAL_MAX_QUEUE", 1),
     "max_job_bytes": ("ARRIVAL_MAX_JOB_MB", 1024 * 1024),
     "retention_hours": ("ARRIVAL_RETENTION_HOURS", 1),
+    "job_retries": ("ARRIVAL_JOB_RETRIES", 1),
 }
 
 
@@ -41,6 +43,7 @@ class Limits:
     max_job_bytes: int = 0  # address-space cap for a job's child process, Linux only (child.py); 0 = off
     retention_hours: float | None = None  # finished jobs older than this are deleted by the worker sweep; None keeps them
     stale_seconds: float = 120.0  # a running job whose worker has not heartbeat this long is requeued
+    job_retries: int = 2  # a failed attempt goes back to the queue at most this many times; 0 = never retry
 
     def check_request(self, episodes: int, people: int) -> None:
         """Raise ``LimitError`` if one job's sim options exceed the ceilings."""

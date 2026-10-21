@@ -1,5 +1,5 @@
-"""Worker limits, concurrent claiming, retention and usage metering. Offline, no sim: jobs here are corrupt uploads or
-fake child processes, so each test costs well under a second."""
+"""Worker limits, concurrent claiming, retry, retention and usage metering. Offline, no sim: jobs here are corrupt
+uploads, fake child processes or a stand-in for the sim, so each test costs well under a second."""
 
 import http.client
 import json
@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -18,8 +19,8 @@ from arrival.jobs import worker
 from arrival.jobs.limits import LimitError, Limits, QueueFull
 from arrival.jobs.queue import count_active, create_job, read_job, write_status
 from arrival.jobs.retention import JobBusy, delete_job, gc
-from arrival.jobs.worker import (CANCEL, LOCK, Heartbeat, build_usage, cancel_job, claim_next, process, reap_stale,
-                                 release, run_once, work)
+from arrival.jobs.worker import (CANCEL, LOCK, Heartbeat, UnsupportedLayout, UnusableDataset, build_usage, cancel_job,
+                                 claim_next, process, reap_stale, release, retryable, run_once, work)
 from arrival.web.app import make_server
 
 REPO = Path(__file__).resolve().parents[1]
@@ -57,12 +58,13 @@ def dead_pid():
 def test_limits_defaults_env_and_ceilings():
     lim = Limits.from_env({})
     assert lim.max_upload_bytes == 200 * 1024 * 1024 and lim.max_episodes == 100 and lim.max_people == 4
-    assert lim.max_job_seconds == 1800 and lim.max_queue == 20 and lim.retention_hours is None
+    assert lim.max_job_seconds == 1800 and lim.max_queue == 20 and lim.retention_hours is None and lim.job_retries == 2
     env = {"ARRIVAL_MAX_UPLOAD_MB": "1.5", "ARRIVAL_MAX_EPISODES": "3", "ARRIVAL_MAX_PEOPLE": "2",
-           "ARRIVAL_MAX_JOB_SECONDS": "9.5", "ARRIVAL_MAX_QUEUE": "7", "ARRIVAL_RETENTION_HOURS": "24"}
+           "ARRIVAL_MAX_JOB_SECONDS": "9.5", "ARRIVAL_MAX_QUEUE": "7", "ARRIVAL_RETENTION_HOURS": "24",
+           "ARRIVAL_JOB_RETRIES": "0"}
     lim = Limits.from_env(env)
     assert (lim.max_upload_bytes, lim.max_episodes, lim.max_people) == (int(1.5 * 1024 * 1024), 3, 2)
-    assert (lim.max_job_seconds, lim.max_queue, lim.retention_hours) == (9.5, 7, 24.0)
+    assert (lim.max_job_seconds, lim.max_queue, lim.retention_hours, lim.job_retries) == (9.5, 7, 24.0, 0)
     lim.check_request(3, 2)
     with pytest.raises(LimitError, match="episodes 4"):
         lim.check_request(4, 1)
@@ -177,6 +179,7 @@ def test_job_over_wall_clock_limit_is_killed_and_recorded_with_its_stage(tmp_pat
                   child_cmd=[sys.executable, "-c", STAGE_THEN_HANG])
     assert time.monotonic() - t0 < 30  # killed at ~1 s, not after the child's 120 s sleep
     assert st["status"] == "failed" and st["stage"] == "sim"
+    assert st["job_attempts"] == 1 and "retry_errors" not in st  # a timeout is not retried: the limit is per job
     assert st["error"] == "TimeoutError: job exceeded the 1 s wall-clock limit during stage 'sim'"
     disk = status_of(out, job)
     assert disk["status"] == "failed" and disk["finished_at"] and disk["usage"]["wall_seconds"] >= 1.0
@@ -188,12 +191,16 @@ def test_job_over_wall_clock_limit_is_killed_and_recorded_with_its_stage(tmp_pat
     assert run_once(out, limits=Limits(max_job_seconds=0), log=QUIET)["id"] == nxt["id"]
 
 
-def test_child_that_dies_is_recorded_not_left_running(tmp_path):
+def test_child_that_dies_is_retried_then_recorded_not_left_running(tmp_path):
     out = tmp_path / "out"
-    create_job(jobs_of(out), "k.json", data=b"{}")
-    st = run_once(out, limits=Limits(max_job_seconds=30), isolate=True, log=QUIET,
-                  child_cmd=[sys.executable, "-c", "import sys; sys.exit(7)"])
+    job = create_job(jobs_of(out), "k.json", data=b"{}")
+    kw = dict(limits=Limits(max_job_seconds=30, job_retries=1), isolate=True, log=QUIET,
+              child_cmd=[sys.executable, "-c", "import sys; sys.exit(7)"])
+    st = run_once(out, **kw)
+    assert st["status"] == "queued" and st["error"] is None and "code 7" in st["retry_errors"][0]
+    st = run_once(out, **kw)
     assert st["status"] == "failed" and "WorkerProcessError" in st["error"] and "code 7" in st["error"]
+    assert st["job_attempts"] == 2 and status_of(out, job)["status"] == "failed" and run_once(out, **kw) is None
 
 
 def test_real_child_process_runs_a_job_to_its_own_failure_once(tmp_path):
@@ -375,6 +382,175 @@ def test_cancel_kills_a_job_running_in_a_child_process(tmp_path):
     assert time.monotonic() - t0 < 30
     assert st["status"] == "cancelled" and st["error"] is None
     assert not (jobs_of(out) / job["id"] / CANCEL).exists()
+
+
+# ---- automatic retry -------------------------------------------------------------------------------------------
+
+HERO_SCAN = (REPO / "scans" / "hero_kitchen" / "scan.json").read_bytes()
+
+
+def fake_sim(monkeypatch, plan, invalid=()):
+    """Stand in for the sim and the dataset validator, so a job runs every stage without MuJoCo. ``plan(n)`` is what the
+    n-th sim run of a room does: an exception to raise, or report fields over a full success ({} = every episode
+    succeeds). The validator returns ``invalid``. Returns {room_id: sim runs so far}."""
+    runs, lock = {}, threading.Lock()
+
+    def collect(twin, families, episodes, out_dir, log=print, **_):
+        with lock:
+            n = runs[twin["room_id"]] = runs.get(twin["room_id"], 0) + 1
+        outcome = plan(n)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        ds = Path(out_dir) / "datasets" / f"{twin['room_id']}_sim"
+        (ds / "meta").mkdir(parents=True, exist_ok=True)
+        (ds / "meta" / "info.json").write_text(json.dumps({"total_frames": 10}))
+        report = {"attempts": episodes, "successes": episodes, "skipped": 0, "skipped_unreachable": 0,
+                  "skipped_error": 0, "skip_reasons": [], **outcome}
+        return {"dataset": ds, "report_data": report}
+
+    monkeypatch.setitem(sys.modules, "arrival.sim.collect", types.SimpleNamespace(collect=collect))
+    monkeypatch.setattr("arrival.export.validate.validate", lambda ds: list(invalid))
+    return runs
+
+
+def test_retryable_tells_the_uploads_faults_from_the_machines():
+    from arrival.scan.bundle import ScanBundleError
+
+    for e in (OSError(28, "No space left on device"), MemoryError(), RuntimeError("renderer lost its context"),
+              ImportError("no mujoco on this worker")):
+        assert retryable(e), e
+    for e in (ValueError("x"), json.JSONDecodeError("x", "", 0), ScanBundleError("x"), LimitError("x"),
+              UnsupportedLayout("x"), UnusableDataset("x"), KeyboardInterrupt(), SystemExit(1)):
+        assert not retryable(e), e
+
+
+def test_a_transient_failure_is_retried_and_the_job_then_succeeds(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "k.json", data=HERO_SCAN)
+    fake_sim(monkeypatch, lambda n: OSError(28, "No space left on device") if n == 1 else {})
+    written = []  # every status this worker writes, as a client polling the job could see it
+    write = worker.write_status
+    monkeypatch.setattr(worker, "write_status", lambda d, s: written.append(s["status"]) or write(d, s))
+    first = run_once(out, log=QUIET)
+    assert first["status"] == "queued" and first["job_attempts"] == 1 and first["error"] is None
+    assert first["retry_errors"] == ["OSError: [Errno 28] No space left on device"]
+    assert first["stage"] is None and first["finished_at"] is None and first["worker"] is None
+    assert "failed" not in written  # the capture app stops polling at "failed"; a job that will run again never shows it
+    assert status_of(out, job) == first and not (jobs_of(out) / job["id"] / LOCK).exists()
+    second = run_once(out, log=QUIET)
+    assert second["status"] == "done" and second["job_attempts"] == 2 and second["error"] is None
+    assert second["retry_errors"] == first["retry_errors"] and Path(second["zip"]).is_file()
+    assert run_once(out, log=QUIET) is None
+    ledger = [json.loads(x) for x in (out / "usage" / "jobs.jsonl").read_text().splitlines()]
+    assert [(x["job_attempts"], x["status"]) for x in ledger] == [(1, "failed"), (2, "done")]  # one line per attempt
+
+
+CRASH_ONCE = ("import sys, json; from pathlib import Path; p = Path(sys.argv[1]) / 'status.json'; "
+              "s = json.loads(p.read_text())\nif s['job_attempts'] == 1: sys.exit(9)\n"
+              "s.update(status='done', stage='zip'); p.write_text(json.dumps(s))")
+
+
+def test_a_child_that_dies_once_is_retried_and_the_next_attempt_finishes(tmp_path):
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "k.json", data=b"{}")
+    kw = dict(limits=Limits(max_job_seconds=30), isolate=True, log=QUIET, child_cmd=[sys.executable, "-c", CRASH_ONCE])
+    first = run_once(out, **kw)  # killed, as by the OOM killer: the parent records it and queues the job again
+    assert first["status"] == "queued" and first["job_attempts"] == 1
+    assert first["retry_errors"][0].startswith("WorkerProcessError") and "code 9" in first["retry_errors"][0]
+    second = run_once(out, **kw)
+    assert second["status"] == "done" and second["job_attempts"] == 2 and status_of(out, job)["status"] == "done"
+
+
+@pytest.mark.parametrize("retries", [0, 1, 2])
+def test_retries_run_out_and_the_job_fails_with_its_last_error_and_attempts(tmp_path, monkeypatch, retries):
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "k.json", data=HERO_SCAN)
+    fake_sim(monkeypatch, lambda n: RuntimeError(f"renderer lost its context ({n})"))
+    limits = Limits(job_retries=retries)
+    states = [run_once(out, limits=limits, log=QUIET)["status"] for _ in range(retries + 1)]
+    assert states == ["queued"] * retries + ["failed"] and run_once(out, limits=limits, log=QUIET) is None
+    st = status_of(out, job)
+    assert st["job_attempts"] == retries + 1 and st["stage"] == "sim" and st["finished_at"]
+    assert st["error"] == f"RuntimeError: renderer lost its context ({retries + 1})"
+    assert st.get("retry_errors", []) == [f"RuntimeError: renderer lost its context ({n})" for n in range(1, retries + 1)]
+    assert f"({retries + 1})" in (jobs_of(out) / job["id"] / "error.txt").read_text()  # the last attempt's traceback
+
+
+@pytest.mark.parametrize("case, error", [
+    ("not_json", "JSONDecodeError: "), ("invalid_scan", "ScanBundleError: units must be 'meters'"),
+    ("over_limit", "LimitError: upload is"), ("unsupported_layout", "unsupported layout: "),
+    ("no_successes", "UnusableDataset: no successful episodes"), ("invalid_dataset", "UnusableDataset: dataset invalid")])
+def test_bad_input_and_failures_a_rerun_would_repeat_are_not_retried(tmp_path, monkeypatch, case, error):
+    out = tmp_path / "out"
+    data = {"not_json": b"not json", "invalid_scan": b'{"schema_version": "1", "units": "feet"}'}.get(case, HERO_SCAN)
+    job = create_job(jobs_of(out), "k.json", data=data)
+    report = {"unsupported_layout": {"attempts": 0, "successes": 0}, "no_successes": {"successes": 0}}.get(case, {})
+    runs = fake_sim(monkeypatch, lambda n: report, invalid=["episode 0 has no frames"] if case == "invalid_dataset" else ())
+    limits = Limits(max_upload_bytes=100) if case == "over_limit" else Limits()
+    st = run_once(out, limits=limits, log=QUIET)
+    assert st["id"] == job["id"] and st["status"] == "failed" and st["error"].startswith(error)
+    assert st["job_attempts"] == 1 and "retry_errors" not in st and run_once(out, limits=limits, log=QUIET) is None
+    assert sum(runs.values()) == (0 if case in ("not_json", "invalid_scan", "over_limit") else 1)
+
+
+def test_a_job_queued_for_a_retry_stays_locked_until_its_worker_lets_go(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "k.json", data=HERO_SCAN)
+    fake_sim(monkeypatch, lambda n: OSError("flaky disk") if n == 1 else {})
+    d, st = claim_next(jobs_of(out), "w1")
+    assert process(d, st, out, log=QUIET)["status"] == "queued" and (d / LOCK).exists()  # w1 has not released it yet
+    assert claim_next(jobs_of(out), "w2") is None and reap_stale(jobs_of(out), 120, log=QUIET) == 0
+    release(d)
+    d2, st2 = claim_next(jobs_of(out), "w2")
+    assert (st2["id"], st2["worker"], st2["job_attempts"]) == (job["id"], "w2", 2)
+    assert process(d2, st2, out, log=QUIET)["status"] == "done"
+
+
+def test_racing_workers_run_each_attempt_of_a_retried_job_once(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    ids = {create_job(jobs_of(out), f"k{i}.json", data=HERO_SCAN)["id"] for i in range(4)}
+    runs = fake_sim(monkeypatch, lambda n: OSError("flaky disk") if n == 1 else {})
+    start = threading.Barrier(3)
+
+    def racer(name):
+        start.wait()
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline and any(status_of(out, {"id": i})["status"] in ("queued", "running")
+                                                  for i in ids):
+            if run_once(out, worker=name, log=QUIET) is None:
+                time.sleep(0.01)
+
+    ts = [threading.Thread(target=racer, args=(f"w{i}",)) for i in range(3)]
+    [t.start() for t in ts]
+    [t.join(timeout=90) for t in ts]
+    for s in (status_of(out, {"id": i}) for i in ids):
+        assert (s["status"], s["job_attempts"], s["retry_errors"]) == ("done", 2, ["OSError: flaky disk"]), s
+    assert sorted(runs.values()) == [2] * len(ids)  # one failed and one good sim run per job: no attempt ran twice
+
+
+def test_a_cancel_request_stops_a_retry(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "k.json", data=HERO_SCAN)
+
+    def cancel_then_fail(n):
+        cancel_job(jobs_of(out), job["id"])  # the uploader cancels while the sim runs, then the sim fails
+        return OSError("flaky disk")
+
+    fake_sim(monkeypatch, cancel_then_fail)
+    st = run_once(out, log=QUIET)
+    assert st["status"] == "failed" and st["error"] == "OSError: flaky disk" and "retry_errors" not in st
+    assert run_once(out, log=QUIET) is None
+
+
+def test_work_cli_takes_retries_from_the_env_then_the_flag(tmp_path, monkeypatch):
+    from arrival.cli import main
+
+    seen = {}
+    monkeypatch.setattr("arrival.jobs.worker.work", lambda out, **kw: seen.update(kw) or 0)
+    monkeypatch.setenv("ARRIVAL_JOB_RETRIES", "5")
+    assert main(["work", "--once", "--out", str(tmp_path)]) == 0 and seen["limits"].job_retries == 5
+    assert main(["work", "--once", "--retries", "0", "--out", str(tmp_path)]) == 0 and seen["limits"].job_retries == 0
+    assert main(["work", "--once", "--retries", "-1", "--out", str(tmp_path)]) == 2
 
 
 # ---- retention -------------------------------------------------------------------------------------------------
