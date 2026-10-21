@@ -200,6 +200,8 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     if backend not in ("cosmos", "local_stub"):
         raise ValueError(f"unknown backend {backend!r}")
     select_frames(0, 0, seed, fraction)  # reject invalid fractions before copying the dataset
+    if dst.resolve().is_relative_to(src.resolve()):
+        raise ValueError("destination must be outside the source dataset")
     if dst.exists():
         raise FileExistsError(f"{dst} exists; the copy directory must be new")
     shutil.copytree(src, dst)
