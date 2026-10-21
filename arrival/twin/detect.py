@@ -10,15 +10,16 @@ and no credentials is left unread: nothing is ever guessed. Only frames in the `
 held-out frames the realism stage scores never shape the twin.
 
 Each accepted box is back-projected with the frame's depth, intrinsics and pose (`arrival.scan.rgbd.unproject`).
-Over each counter or table the points at object height, less those on a wall or the counter's backsplash strip, are
-split into connected groups, and a group counts only if it could be the catalog object standing on that top
-(`locate`); the one whose centre projects nearest the box centre gives x, y, and z sits the catalog-size object on the
-top. Its footprint must then lie over the top, clear of walls and of other fixtures, a sink's faucet strip included
-(`clearance`). Within a frame, two boxes on one spot are one object; across frames a hit joins the nearest object of
-its label within DEDUP_M, never one holding its own frame. A box that is not placed is listed in `rejected` with its
-reason (`unsupported_label`, `low_confidence`, `bad_box`, `no_depth`, `no_support`, `nothing_above_top`,
-`too_wide`, `not_standing`, `flat_surface`, `off_top`, `against_wall`, `on_fixture`, `same_object`); nothing is
-dropped silently.
+Over each counter or table the points at object height, less those within WALL_STRIP_M of a wall's face in the twin and
+those on the backsplash strip of a counter or storage worktop, are split into connected groups, and a group counts
+only if it could be the catalog object standing on that top (`locate`); the one whose centre projects nearest the box
+centre gives x, y, and z sits the catalog-size object on the top. Its footprint must then lie over the top, clear of
+walls and of other fixtures, a sink's faucet strip included (`clearance`). Within a frame, two boxes on one spot are one
+object; across frames a hit joins the nearest object of its label within DEDUP_M, never one holding its own frame, and
+the merged position must pass `clearance` again, since the mean of two clear spots can fall in a keep-out (the free
+space around a sink is not convex). A box that is not placed is listed in `rejected` with its reason
+(`unsupported_label`, `low_confidence`, `bad_box`, `no_depth`, `no_support`, `nothing_above_top`, `too_wide`,
+`not_standing`, `flat_surface`, `off_top`, `against_wall`, `on_fixture`, `same_object`); nothing is dropped silently.
 """
 
 from __future__ import annotations
@@ -159,6 +160,14 @@ def _over(pts: np.ndarray, f: dict) -> np.ndarray:
     return (np.abs(c * dx + s * dy) <= f["size"][0] / 2) & (np.abs(-s * dx + c * dy) <= f["size"][1] / 2)
 
 
+def has_backsplash(f: dict) -> bool:
+    """Whether top f stands against a wall with a backsplash at its back: a counter or a RoomPlan storage worktop
+    (`is_counter_host`), not a table or an island. The scene draws one on an island too, which a real island lacks."""
+    from arrival.twin.compile import is_counter_host
+
+    return is_counter_host(f) and not f.get("island") and f.get("default_config_name") != "dining"
+
+
 def _wall_distance(pts: np.ndarray, w: dict) -> np.ndarray:
     """Horizontal distance from points to a wall's centre line."""
     a, b = np.asarray(w["start"], float), np.asarray(w["end"], float)
@@ -168,11 +177,11 @@ def _wall_distance(pts: np.ndarray, w: dict) -> np.ndarray:
 
 
 def _backdrop(pts: np.ndarray, f: dict, twin: dict) -> np.ndarray:
-    """Points that belong to a wall or to the backsplash at the back of counter f (local -y; +y is its front)."""
+    """Points that belong to a wall or to the backsplash at the back of top f (local -y; +y is its front)."""
     near = np.zeros(len(pts), bool)
     for w in twin.get("walls", []):
         near |= _wall_distance(pts, w) < float(w.get("thickness", 0.0)) / 2 + WALL_STRIP_M
-    if f.get("type") == "counter" and not f.get("island") and f.get("source_category") != "table":
+    if has_backsplash(f):
         yaw = float(f.get("yaw", 0.0))
         dx, dy = pts[:, 0] - f["position"][0], pts[:, 1] - f["position"][1]
         near |= -math.sin(yaw) * dx + math.cos(yaw) * dy < -f["size"][1] / 2 + BACK_STRIP_M
@@ -396,7 +405,8 @@ def detect_objects(frames_dir, twin: dict, bundle: dict | None = None, client: D
 def merge(hits: list[dict], twin: dict, rejected: list | None = None) -> list[dict]:
     """One twin object per cluster of same-label hits (greedy, highest confidence first): a hit joins the nearest
     cluster centre within DEDUP_M that has no hit from its own frame, since one frame never shows one object twice.
-    A cluster whose centre has no counter or table under it is not placed; its hits go to `rejected` as `no_support`."""
+    A cluster whose centre has no counter or table under it, or fails `clearance` there, is not placed; its hits go to
+    `rejected` with that reason (`no_support`, `off_top`, `against_wall`, `on_fixture`)."""
     clusters: list[list[dict]] = []
     for h in sorted(hits, key=lambda h: (-float(h["confidence"]), h["frame"])):
         near = [(math.dist(h["position"][:2], np.mean([x["position"][:2] for x in c], axis=0)), k)
@@ -414,10 +424,11 @@ def merge(hits: list[dict], twin: dict, rejected: list | None = None) -> list[di
         size = list(OBJECT_SPECS[label][1])
         xy = np.mean([x["position"][:2] for x in c], axis=0)
         support = support_under(xy, twin, below_z=float(np.mean([x["position"][2] for x in c])))
-        if support is None:
+        why = "no_support" if support is None else clearance(xy, label, support, twin)
+        if why:
             if rejected is not None:
                 rejected += [{"frame": x["frame"], "label": label, "box": x["box"], "confidence": x["confidence"],
-                              "reason": "no_support"} for x in c]
+                              "reason": why} for x in c]
             continue
         z = _top(support) + size[2] / 2
         n = 1

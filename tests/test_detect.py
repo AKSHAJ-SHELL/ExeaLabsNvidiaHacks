@@ -135,6 +135,18 @@ def test_merge_keeps_objects_one_frame_shows_apart(room):
     assert all(o["detection"]["frames"] == ["f000", "f001"] for o in out)
 
 
+def test_merged_position_must_clear_the_keep_outs(room):
+    # each view of the cup is clear of the sink, one beside it and one in front of it, but their mean falls on the
+    # sink's corner: the space around a sink is not convex, so the merged position is checked again
+    hits = [_hit("f000", 1.265, 0.62, "cup"), _hit("f001", 1.31, 0.69, "cup")]
+    support = detect.support_under((1.29, 0.65), room[1])
+    assert [detect.clearance(h["position"][:2], "cup", support, room[1]) for h in hits] == [None, None]
+    assert detect.clearance((1.2875, 0.655), "cup", support, room[1]) == "on_fixture"
+    rejected = []
+    assert detect.merge(hits, room[1], rejected) == []
+    assert [(r["frame"], r["reason"]) for r in rejected] == [("f000", "on_fixture"), ("f001", "on_fixture")]
+
+
 def test_merge_joins_views_of_one_object_and_picks_the_nearest_cluster(room):
     # one mug seen 8 cm apart in two frames is one object, as DEDUP_M intends
     (one,) = detect.merge([_hit("f000", 3.20, 0.45), _hit("f001", 3.28, 0.45)], room[1])
@@ -346,3 +358,107 @@ def test_upload_worker_places_detections_or_labelled_defaults(tmp_path, monkeypa
         assert "objects: 1 detected" in page and "invented" not in page
     else:
         assert f"objects: {objects['counts']['default_synthetic']} default_synthetic (invented, not scanned)" in page
+
+
+def _render(tmp_path, twin, objects, eyes, target, blocks=None):
+    """Frames of `twin` holding `objects`, one per eye looking at `target`, in the fixture manifest's layout. Returns
+    each frame's pixel box around each of `blocks` (default the objects; each a centre `position` and a `size`)."""
+    from arrival.eval.realism import look_at, render_twin
+
+    scene = json.loads(json.dumps(twin))
+    scene["objects"] = objects
+    manifest = json.loads((FIXTURES / "empty" / rgbd.MANIFEST_NAME).read_text(encoding="utf-8"))
+    manifest["room_id"] = twin["room_id"]
+    (tmp_path / "rgb").mkdir(parents=True)
+    (tmp_path / "depth").mkdir()
+    K = np.array([[110.0, 0, 64], [0, 110.0, 48], [0, 0, 1]])
+    boxes = {}
+    for fr, eye in zip(manifest["frames"], eyes):
+        pose = look_at(eye, target)
+        rgb, depth = render_twin(scene, K, pose, (96, 128))
+        Image.fromarray(rgb).save(tmp_path / fr["rgb"])
+        Image.fromarray(np.round(depth * 1000).astype(np.uint16)).save(tmp_path / fr["depth"])
+        fr["camera_to_room"] = (pose @ np.diag([1.0, -1.0, -1.0, 1.0])).ravel().tolist()
+        boxes[fr["id"]] = []
+        for o in objects if blocks is None else blocks:
+            h = np.asarray(o["size"]) / 2
+            c = np.array([[o["position"][0] + sx * h[0], o["position"][1] + sy * h[1], o["position"][2] + sz * h[2]]
+                          for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)])
+            uv, _ = rgbd.project(c, K, np.asarray(fr["camera_to_room"]).reshape(4, 4))
+            boxes[fr["id"]].append([uv[:, 0].min(), uv[:, 1].min(), uv[:, 0].max(), uv[:, 1].max()])
+    (tmp_path / rgbd.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
+    return boxes
+
+
+def _eyes(x, y, z, front):
+    """Three viewpoints in front of x, y, z: straight on and from either side, looking down at it."""
+    fx, fy = front
+    return [(x + fx * 0.7, y + fy * 0.7, z + 0.5), (x + fx * 0.6 + fy * 0.5, y + fy * 0.6 - fx * 0.5, z + 0.45),
+            (x + fx * 0.65 - fy * 0.55, y + fy * 0.65 + fx * 0.55, z + 0.45)]
+
+
+@pytest.fixture
+def u_room():
+    from arrival.scan.bundle import load_room
+    from arrival.twin.compile import compile_twin
+
+    bundle = load_room("u_kitchen_42", REPO / "tests" / "fixtures" / "scans")
+    twin = compile_twin(bundle)
+    twin["objects"] = []
+    return bundle, twin
+
+
+SPLASH_FACE = 0.012  # the scene's backsplash reaches this far over the back of a counter top (scene.counter_xml)
+WALL_FACE = 0.025  # hero_kitchen's walls are 2 cm thick in the twin; the scene draws them 5 cm thick
+
+
+def _against(spot, r, gap):
+    """Centre x, y of an object of radius r standing `gap` from the backsplash, the east wall, or both, of hero
+    counter_b (back at y 0.075, east end at the wall x 4.0), or from the backsplash of u_kitchen_42's storage_b
+    (a RoomPlan storage cabinet facing -y, back at y 3.72)."""
+    back, east = 0.075 + SPLASH_FACE + r + gap, 4.0 - WALL_FACE - r - gap
+    return {"splash": (3.4, back), "wall": (east, 0.4), "corner": (east, back),
+            "storage_splash": (6.9, 3.72 - SPLASH_FACE - r - gap)}[spot]
+
+
+@pytest.mark.parametrize("gap", [0.01, 0.03])
+@pytest.mark.parametrize("spot", ["splash", "wall", "corner", "storage_splash"])
+def test_objects_just_in_front_of_a_backsplash_or_wall_are_placed(room, u_room, tmp_path, spot, gap):
+    # the wall and backsplash strips drop points near those faces; an object 1 to 3 cm in front of them keeps enough
+    bundle, twin = u_room if spot.startswith("storage") else room
+    front = (0, -1) if spot.startswith("storage") else (0, 1)
+    top = 0.9 if spot.startswith("storage") else 0.92
+    for label in ("mug", "bottle", "bowl"):
+        size = list(detect.OBJECT_SPECS[label][1])
+        x, y = _against(spot, size[0] / 2, gap)
+        want = [x, y, top + size[2] / 2]
+        o = {"id": f"{label}_1", "catalog_id": label, "label": label, "size": size, "position": want, "yaw": 0.0}
+        boxes = _render(tmp_path / label, twin, [o], _eyes(x, y, top + 0.03, front), (x, y, top + 0.03))
+        for pad in (0, 6):
+            fake = FakeClient({f: {"objects": [{"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad],
+                                                "confidence": 0.9}]} for f, (b,) in boxes.items()})
+            res = detect.detect_objects(tmp_path / label, twin, bundle, client=fake, log=lambda *_: None)
+            assert len(res["objects"]) == 1, (label, pad, res["rejected"])
+            got = res["objects"][0]["position"]
+            assert math.dist(got[:2], want[:2]) < XY_TOL and abs(got[2] - want[2]) < Z_TOL, (label, pad, got, want)
+
+
+@pytest.mark.parametrize("region,lo,hi", [
+    ("splash_mid", (6.85, 3.66, 0.9), (6.95, 3.74, 1.06)),
+    ("splash_end", (7.36, 3.64, 0.9), (7.46, 3.74, 1.06)),
+    ("splash_long", (6.6, 3.62, 0.9), (7.2, 3.74, 1.2)),
+])
+def test_storage_worktop_backsplash_places_nothing(u_room, tmp_path, region, lo, hi):
+    # u_kitchen_42's worktops are RoomPlan storage cabinets, which the scene builds with a backsplash like a counter
+    bundle, twin = u_room
+    assert detect.has_backsplash(next(f for f in twin["fixtures"] if f["id"] == "storage_b"))
+    c = [(a + b) / 2 for a, b in zip(lo, hi)]
+    block = {"position": c, "size": [b - a for a, b in zip(lo, hi)]}
+    boxes = {f: b for f, (b,) in _render(tmp_path, twin, [], _eyes(*c, (0, -1)), c, [block]).items()}
+    for label in ("mug", "cup", "bottle", "book", "apple", "remote", "bowl"):
+        for pad in (0, 4, 10):
+            fake = FakeClient({f: {"objects": [{"label": label, "box": [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad],
+                                                "confidence": 0.9}]} for f, b in boxes.items()})
+            res = detect.detect_objects(tmp_path, twin, bundle, client=fake, log=lambda *_: None)
+            assert res["objects"] == [], (region, label, pad, res["objects"])
+
