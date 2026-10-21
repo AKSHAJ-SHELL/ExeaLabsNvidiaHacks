@@ -199,9 +199,11 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     select_frames(0, 0, seed, fraction)  # reject invalid fractions before copying the dataset
     if dst.exists():
         raise FileExistsError(f"{dst} exists; the copy directory must be new")
+    info = json.loads((src / "meta" / "info.json").read_text())
+    fps = info.get("fps", 20) if fps is None else fps
+    if type(fps) is not int or fps < 1:
+        raise ValueError("fps must be a positive integer")
     shutil.copytree(src, dst)
-    info = json.loads((dst / "meta" / "info.json").read_text())
-    fps = fps or int(info.get("fps", 20))
     cli = client if client is not None else (CosmosClient() if backend == "cosmos" else LocalStub(seed))
     counts = {"selected": 0, "ok": 0, "rejected": 0, "failed": 0, "skipped": 0}
     consecutive = 0
