@@ -145,6 +145,19 @@ def test_unknown_usage_product_raises(tmp_path):
         cost.load_usage(_w(tmp_path / "u.json", {"tpu_hour": 1}))
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_cost_inputs_cannot_be_reported(tmp_path, bad):
+    with pytest.raises(cost.CostError, match="operator_seconds_total"):
+        cost.load_baseline(_w(tmp_path / "baseline.json", {**BASELINE, "operator_seconds_total": bad}))
+    with pytest.raises(cost.CostError, match="cost_basis_usd"):
+        cost.load_baseline(_w(tmp_path / "baseline.json", {**BASELINE, "cost_basis_usd": bad}))
+    with pytest.raises(cost.CostError, match="gpu_hour"):
+        cost.load_usage(_w(tmp_path / "usage.json", {"gpu_hour": bad}))
+    pricing = _w(tmp_path / "pricing.json", {"products": {"gpu_hour": {"usd_per_unit": bad}}})
+    with pytest.raises(cost.CostError, match="gpu_hour"):
+        cost.load_pricing(pricing)
+
+
 def test_empty_out_dir(tmp_path):
     text = cost.markdown(cost.build(tmp_path / "nothing"))
     assert "no reports" in text and "comparison not measured" in text
