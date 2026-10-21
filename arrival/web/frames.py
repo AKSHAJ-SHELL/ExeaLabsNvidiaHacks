@@ -154,7 +154,7 @@ def validate(root: Path) -> dict:
     for f in m.frames:
         open_image(f.rgb, rgb_wh, "rgb")
         if f.confidence is not None:
-            open_image(f.confidence, None, "confidence")
+            open_image(f.confidence, m.depth_size, "confidence")
         if m.depth_unit == "m":
             try:
                 head = np.load(f.depth, mmap_mode="r", allow_pickle=False)
