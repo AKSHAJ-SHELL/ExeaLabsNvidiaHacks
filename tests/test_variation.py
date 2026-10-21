@@ -85,6 +85,14 @@ def test_destination_inside_source_is_refused_before_copy(tmp_path):
     assert (src / "keep").read_text() == "original"
     assert not (src / "nested").exists()
 
+def test_custom_client_cannot_mislabel_backend(tmp_path):
+    src = tmp_path / "source"
+    src.mkdir()
+    dst = tmp_path / "copy"
+    with pytest.raises(ValueError, match="does not match requested"):
+        variation.vary_dataset(src, dst, backend="cosmos", client=variation.LocalStub())
+    assert not dst.exists()
+
 
 @pytest.mark.parametrize("fraction", [-0.1, 1.1, float("nan"), float("inf")])
 def test_bad_fraction_rejected_before_copy(tmp_path, fraction):
