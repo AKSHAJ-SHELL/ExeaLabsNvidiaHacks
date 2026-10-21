@@ -5,6 +5,11 @@ POST /act   {"video.ego_view": b64 PNG, "video.wrist": b64 PNG, "state.single_ar
         ->  {"action.single_arm": [[7] * T], "action.gripper": [[1] * T]}   (absolute joint targets, T >= 1)
 GET /health -> {"ok": true, ...}
 
+Two schemas. "arm" (default, fixed base): state and action steps are 8 floats, 7 arm joints + gripper. "mobile": 11
+floats, the same 8 plus the base x, y, yaw in the room frame, sent as "state.base" [3] and returned as "action.base"
+[[3] * T]. A sim state is always 11 wide; the arm schema drops the base columns on purpose (the server then returns 8
+wide chunks and the sim holds the base). Any other width is a ProtocolError.
+
 The keys match configs/gr00t/arrival_panda_config.py and the meta/modality.json of datasets written by `arrival sim`.
 """
 
@@ -19,7 +24,14 @@ VIDEO_KEYS = ("ego_view", "wrist")
 TASK_KEY = "annotation.human.task_description"
 ARM_DOF = 7
 ACTION_KEYS = ("action.single_arm", "action.gripper")
-ARM_SCHEMA_DIM = ARM_DOF + 1  # the only schema on the wire: 7 joint targets + 1 gripper = 8 floats per state and per action step
+BASE_DOF = 3
+SCHEMA_DIM = {"arm": ARM_DOF + 1, "mobile": ARM_DOF + 1 + BASE_DOF}  # 8 and 11 floats per state and per action step
+
+
+def _schema(schema: str) -> int:
+    if schema not in SCHEMA_DIM:
+        raise ProtocolError(f"unknown schema {schema!r}; choose from {sorted(SCHEMA_DIM)}")
+    return SCHEMA_DIM[schema]
 
 
 class ProtocolError(ValueError):
@@ -43,10 +55,16 @@ def decode_image(s: str) -> np.ndarray:
         raise ProtocolError(f"undecodable image: {e}") from e
 
 
-def encode_request(obs: dict, instruction: str) -> dict:
-    """obs has 'state' [8] and one frame per camera; the wrist frame is sent whenever the env has that camera."""
+def encode_request(obs: dict, instruction: str, schema: str = "arm") -> dict:
+    """obs has 'state' (8 or 11 floats) and one frame per camera; the wrist frame is sent whenever the env has it.
+    schema "arm" sends the first 8 state floats (an 11-float sim state loses its base columns); "mobile" needs 11."""
     state = np.asarray(obs["state"], dtype=float)
-    _check_dim("state", state.shape, ARM_SCHEMA_DIM)
+    dim = _schema(schema)
+    if state.ndim != 1 or state.shape[0] < dim or state.shape[0] not in SCHEMA_DIM.values():
+        raise ProtocolError(f"state must be 8 or 11 floats and at least the {dim} the {schema!r} schema needs "
+                            f"(7 joints + gripper{' + base x, y, yaw' if schema == 'mobile' else ''}), "
+                            f"got shape {list(state.shape)}")
+    state = state[:dim]
     if not np.isfinite(state).all():
         raise ProtocolError("state has non-finite values")
     for k in VIDEO_KEYS:
@@ -57,18 +75,14 @@ def encode_request(obs: dict, instruction: str) -> dict:
         raise ProtocolError("obs has no ego_view frame")
     body["state.single_arm"] = state[:ARM_DOF].tolist()
     body["state.gripper"] = state[ARM_DOF:ARM_DOF + 1].tolist()
+    if schema == "mobile":
+        body["state.base"] = state[ARM_DOF + 1:].tolist()
     body[TASK_KEY] = instruction
     return body
 
 
-def _check_dim(what: str, shape: tuple, n: int) -> None:
-    if len(shape) != 1 or shape[0] != n:
-        raise ProtocolError(f"{what} must be the {n}-float arm schema (7 joints + gripper), got shape {list(shape)}; "
-                            "no other schema (such as an 11-float mobile-base one) is defined")
-
-
 def decode_request(body: dict) -> dict:
-    """Server side: {'video': {name: HxWx3}, 'state': [8], 'instruction': str}; raises ProtocolError when malformed."""
+    """Server side: {'video': {name: HxWx3}, 'state': [8] or [11] with state.base, 'instruction': str}; raises ProtocolError when malformed."""
     if not isinstance(body, dict):
         raise ProtocolError("request is not a JSON object")
     video = {}
@@ -77,9 +91,10 @@ def decode_request(body: dict) -> dict:
             raise ProtocolError(f"missing video.{k}")
         video[k] = decode_image(body[f"video.{k}"])
     arm, grip = _vec(body, "state.single_arm", ARM_DOF), _vec(body, "state.gripper", 1)
+    parts = [arm, grip] + ([_vec(body, "state.base", BASE_DOF)] if "state.base" in body else [])
     if not isinstance(body.get(TASK_KEY), str):
         raise ProtocolError(f"missing {TASK_KEY}")
-    return {"video": video, "state": np.concatenate([arm, grip]), "instruction": body[TASK_KEY]}
+    return {"video": video, "state": np.concatenate(parts), "instruction": body[TASK_KEY]}
 
 
 def _vec(body: dict, key: str, n: int) -> np.ndarray:
@@ -95,20 +110,27 @@ def _vec(body: dict, key: str, n: int) -> np.ndarray:
 
 
 def encode_response(chunk: np.ndarray) -> dict:
-    """chunk [T,8] (7 arm targets + gripper) -> response body."""
+    """chunk [T,8] (7 arm targets + gripper) or [T,11] (plus base x, y, yaw) -> response body."""
     chunk = np.asarray(chunk, dtype=float)
-    if chunk.ndim != 2:
-        raise ProtocolError(f"chunk must be [T,{ARM_SCHEMA_DIM}], got shape {list(chunk.shape)}")
-    _check_dim("chunk row", chunk.shape[1:], ARM_SCHEMA_DIM)
-    return {"action.single_arm": chunk[:, :ARM_DOF].tolist(), "action.gripper": chunk[:, ARM_DOF:ARM_DOF + 1].tolist()}
+    if chunk.ndim != 2 or chunk.shape[1] not in SCHEMA_DIM.values():
+        raise ProtocolError(f"chunk must be [T,8] (arm schema) or [T,11] (mobile schema), got shape {list(chunk.shape)}")
+    out = {"action.single_arm": chunk[:, :ARM_DOF].tolist(), "action.gripper": chunk[:, ARM_DOF:ARM_DOF + 1].tolist()}
+    if chunk.shape[1] == SCHEMA_DIM["mobile"]:
+        out["action.base"] = chunk[:, ARM_DOF + 1:].tolist()
+    return out
 
 
-def decode_response(out: dict) -> np.ndarray:
-    """Response body -> chunk [T,8]; raises ProtocolError on missing keys, wrong shapes, non-finite values or T < 1."""
+def decode_response(out: dict, schema: str | None = None) -> np.ndarray:
+    """Response body -> chunk [T,8], or [T,11] when it carries action.base; schema (if given) says which is required.
+    Raises ProtocolError on missing keys, wrong shapes, non-finite values or T < 1."""
     if not isinstance(out, dict):
         raise ProtocolError("response is not a JSON object")
     parts = []
-    for key, n in zip(ACTION_KEYS, (ARM_DOF, 1)):
+    keys = ACTION_KEYS + (("action.base",) if "action.base" in out else ())
+    if schema is not None and len(keys) + 0 != (3 if schema == "mobile" else 2):
+        raise ProtocolError(f"the {schema!r} schema expects {_schema(schema)} floats per step but the server returned "
+                            f"{'11 (with action.base)' if len(keys) == 3 else '8 (no action.base)'}")
+    for key, n in zip(keys, (ARM_DOF, 1, BASE_DOF)):
         if key not in out:
             raise ProtocolError(f"response is missing {key}")
         try:
