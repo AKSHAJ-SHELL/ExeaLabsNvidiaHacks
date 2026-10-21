@@ -154,7 +154,7 @@ Checked-in `roomplan.json` does not have to rebuild every fixture. The authored 
 
 ## RGB-D scan frames
 
-`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. Only the format, the loader and a synthetic fixture exist; the iOS recorder that would write it is not built (needs a device). `POST /jobs` accepts a bundle as a zip in the `frames` field, validates it and stores it next to the job. The worker compares held-out frames with the compiled twin before adding synthetic objects (docs/REFERENCE.md, Uploaded-frame comparison).
+`arrival/scan/rgbd.py` (CAP-2a) defines and validates a bundle of RGB-D frames. The iOS app records it during a RoomPlan scan (`FrameRecorder.swift`, CAP-2; compiled and its writer round-trip tested on a Mac, never run on a phone), and tests use a synthetic fixture. `POST /jobs` accepts a bundle as a zip in the `frames` field, validates it and stores it next to the job. The worker compares held-out frames with the compiled twin before adding synthetic objects (docs/REFERENCE.md, Uploaded-frame comparison).
 
 Layout: `frames_manifest.json` plus the files it names, all relative paths inside the bundle folder (no absolute paths, no `..`).
 

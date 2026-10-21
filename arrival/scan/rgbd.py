@@ -1,5 +1,6 @@
 """CAP-2a: RGB-D scan-frame manifest (frames_manifest.json), strict loader, depth unprojection and a
-synthetic bundle generator for tests. The iOS recorder that would write these bundles is not built here.
+synthetic bundle generator for tests. The iOS app's recorder (ios/ArrivalCapture/ArrivalCapture/FrameRecorder.swift)
+writes these bundles; it compiles and its writer is tested on a Mac, but it has not run on a phone.
 
 Axes: an ARKit camera is x right, y up, z backward (it looks down -z). Image pixel (u, v) is column,
 row with v growing downward, so a pixel at depth d (metres along the optical axis) is the camera point
