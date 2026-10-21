@@ -21,11 +21,12 @@ OBJECT_SPECS = {
     "laptop": ("box", [0.30, 0.21, 0.02], 1.20, 0.6, "0.62 0.64 0.67 1"),  # closed; too wide to pinch, scenery
 }
 OBJECT_MAP = {label: label for label in OBJECT_SPECS}
-PICKABLE = ("mug", "cup", "sponge", "apple", "bottle", "book", "remote")  # fit the 10 cm gripper opening and are held by the body;
-# the 1 cm spatula sits under the grasp height the expert uses, so it is scenery until the grasp rule changes
+PICKABLE = ("mug", "cup", "sponge", "apple", "bottle", "book", "remote")  # fit the 10 cm gripper opening and are held by the body
 RIM_HELD = ("bowl", "plate")  # hollow, pinched by the rim nearest the robot (MAN-4)
 HANDLE_HELD = ("pan",)  # pinched across the handle, close to the body
-GRASPABLE = PICKABLE + RIM_HELD + HANDLE_HELD
+THIN_HELD = ("spatula",)  # 1 cm flat: pinched across its width with the pad tips just over the counter (L26)
+GRASPABLE = PICKABLE + RIM_HELD + HANDLE_HELD + THIN_HELD
+WIPE_TOOLS = ("sponge", "spatula")  # what wipe_counter drags along the top; the spatula scrapes it
 TABLE_MOVABLE = PICKABLE + ("bowl",)  # what move_on_table carries; the bowl is held by its rim (MAN-4)
 # What a scan with no objects gets on its table or counter, by the kind of room the fixtures say it is (L9).
 # A kitchen keeps the original five; an office does not hold a plate or a bowl.
