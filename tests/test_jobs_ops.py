@@ -71,6 +71,12 @@ def test_limits_defaults_env_and_ceilings():
     for bad in ("many", "-1", "nan", "inf"):
         with pytest.raises(LimitError, match="ARRIVAL_MAX_QUEUE"):
             Limits.from_env({"ARRIVAL_MAX_QUEUE": bad})
+    for var in ("ARRIVAL_MAX_EPISODES", "ARRIVAL_MAX_PEOPLE", "ARRIVAL_MAX_QUEUE"):
+        with pytest.raises(LimitError, match="whole number"):
+            Limits.from_env({var: "0.5"})
+    for var in ("ARRIVAL_MAX_UPLOAD_MB", "ARRIVAL_MAX_JOB_MB"):
+        with pytest.raises(LimitError, match="too small"):
+            Limits.from_env({var: "0.0000001"})
     assert lim.replace(max_episodes=None, max_people=1).max_people == 1  # None keeps the current value
     assert lim.replace(max_episodes=None).max_episodes == 3
 
