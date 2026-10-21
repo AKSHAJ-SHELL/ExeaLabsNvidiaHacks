@@ -161,6 +161,16 @@ def test_merge_refuses_incomplete_or_mixed_sets(tmp_path):
         merge_shards(sorted((_fake_run(tmp_path / "again") / "shards").iterdir()), tmp_path / "again" / "shards" / "0of3")
 
 
+def test_merge_refuses_episode_owned_by_another_shard(tmp_path):
+    src = tmp_path / "src"
+    _write_shard(src, 0, 2, 4, [2])  # task 2 belongs to shard 1
+    _write_shard(src, 1, 2, 4, [2, 3])
+    out = tmp_path / "merged"
+    with pytest.raises(ShardError, match="out-of-range task"):
+        merge_shards([src / "shards"], out)
+    assert not out.exists()
+
+
 def test_merge_shards_cli_exit_codes(tmp_path, capsys):
     src = _fake_run(tmp_path / "src")
     assert cli.main(["merge-shards", str(src), "--out", str(tmp_path / "o")]) == cli.EXIT_OK  # `src` holds shards/
