@@ -8,6 +8,7 @@ VLAClient       HTTP client for a GR00T N1.x policy server (GR00T_POLICY_URL); n
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import re
 import urllib.request
@@ -49,8 +50,18 @@ FRIDGE_PULL_STEPS = 10  # control steps per quarter of the hooked pull and per s
 FLAP_OUT = 0.12  # m: how far out along the door normal the hand backs off after letting a flap door go
 FAUCET_UNDER, FAUCET_PUSH = 0.045, 0.05  # m: closed fingers start this far below the lever tip, then travel up this far
 FLAP_TILTS = (0.0, 0.35, 0.7)  # rad below the door's horizontal for the hand on a flap-door bar; chosen per task
+ROLL_TRIES = (0.0, 0.2, -0.2, 0.4, -0.4)  # rad of wrist roll about the tool axis tried when a plan parks a joint on its stop
+MAX_REPLANS = 35  # (yaw, roll) combinations a re-plan may try
+YAW_TRIES = (0.0, 0.15, -0.15, 0.3, -0.3, 0.5, -0.5)  # rad of grasp yaw about the vertical, likewise
+LIMIT_PLAN_STEPS = 38  # a plan with a joint on its stop longer than this is re-planned off the stops (quality flags at 40)
+REPLAN_ACCEPT_STEPS = 30  # a re-plan this clear of the stops is taken at once; a longer one only as the best of all
 FLAP_RELEASE = 0.5  # rad; a bottom-hinged door is let go here and falls to its flat stop (its handle swings
 # toward the base as it opens, and past this angle the wrist would have to fold back under the arm)
+
+
+def _rz(a: float) -> np.ndarray:
+    c, s = np.cos(a), np.sin(a)
+    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1.0]])
 
 
 class ScriptedExpert(Policy):
@@ -402,7 +413,42 @@ class ScriptedExpert(Policy):
             plans.append(self._plan(env, [(p, None if R is None else R @ flip, *rest) for p, R, *rest in wps]))
         best_err = min(err for _, err, _ in plans)
         self.plan, self.ik_error, _ = min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])
+        if task["family"] != "close_door" and self._limit_run(env, self.plan) > LIMIT_PLAN_STEPS:
+            # The plan parks a joint on its stop for a stretch the quality check would flag (and a real arm would
+            # strain against). The grasp is free to yaw a little about the vertical (the bar is long and the hand
+            # closes on it), to roll a little about the tool axis and to take either jaw heading. Re-plan with
+            # those, smallest change first, and take the first that reaches as well and stays off the stops;
+            # failing that, the one with the shortest stretch if that is still clear of the check.
+            # close_door is left out: its push depends on the exact fingertip pose (a different yaw, roll or tilt
+            # misses the handle on counter_b, and the other jaw heading puts a finger 2.5 cm into the door front).
+            cands = sorted(itertools.product(YAW_TRIES, ROLL_TRIES), key=lambda t: abs(t[0]) + abs(t[1]))[:MAX_REPLANS]
+            best = None
+            for yaw, roll in cands:
+                for f in (np.eye(3), flip):
+                    pl = self._plan(env, [(p, None if R is None else _rz(yaw) @ R @ f @ _rz(roll), *rest)
+                                          for p, R, *rest in wps])
+                    run = self._limit_run(env, pl[0])
+                    if pl[1] <= self.ik_error + 0.005 and run < self._limit_run(env, self.plan):
+                        if best is None or run < best[0]:
+                            best = (run, pl)
+                        if run <= REPLAN_ACCEPT_STEPS:
+                            break
+                else:
+                    continue
+                break
+            if best is not None and best[0] <= LIMIT_PLAN_STEPS:
+                self.plan, self.ik_error, _ = best[1]
         self.t = 0
+
+    @staticmethod
+    def _limit_run(env, plan) -> int:
+        """Longest run of plan steps with any arm joint inside the quality check's band at its range limit."""
+        from arrival.export.quality import LIMIT_FRAC, longest_run
+
+        lo, hi = env.model.jnt_range[[env.model.dof_jntid[i] for i in env.dofadr]].T
+        q = np.asarray(plan)[:, :7]
+        band = LIMIT_FRAC * (hi - lo)
+        return max(longest_run(((q[:, j] <= lo[j] + band[j]) | (q[:, j] >= hi[j] - band[j]))) for j in range(7))
 
     @staticmethod
     def _plan(env, waypoints) -> tuple[list[np.ndarray], float, float]:
