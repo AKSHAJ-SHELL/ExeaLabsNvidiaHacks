@@ -99,10 +99,10 @@ def test_pick_and_place_points_must_be_within_reach(hero_twin):
 def test_preflight_rejection_is_counted_in_the_dataset_stats(ushape, tmp_path):
     res = collect(ushape, ["open_drawer", "open_door"], 2, tmp_path, people=0, res=32, log=QUIET)
     r, info = res["report_data"], res["info"]
-    assert r["skipped_unreachable"] == 2 and r["skipped_error"] == 0 and r["skipped"] == 2  # storage_b, both families
+    assert r["skipped_unreachable"] == 1 and r["skipped_error"] == 0 and r["skipped"] == 1  # storage_b's drawer; its door stands along the run
     assert {x["stage"] for x in r["skip_reasons"]} == {"preflight"}
     assert "storage_b" in r["skip_reasons"][0]["reason"] and "sink" in r["skip_reasons"][0]["reason"]
-    assert info["arrival_skipped_unreachable"] == 2 and info["arrival_attempts"] == r["attempts"] == 2
+    assert info["arrival_skipped_unreachable"] == 1 and info["arrival_attempts"] == r["attempts"] == 2
 
 
 # ---- tasks in the fixture's frame ----
@@ -243,7 +243,7 @@ def test_worker_finishes_a_partial_dataset_and_records_the_skips(tmp_path):
     out = tmp_path / "out"
     _upload(out, "u_kitchen_42")
     st = run_once(out, families=("open_drawer", "open_door"), episodes=2, people=0, res=32, log=QUIET)
-    assert st["status"] == "done" and st["successes"] == 2 and st["skipped"] == 2 and st["error_kind"] is None
+    assert st["status"] == "done" and st["successes"] == 2 and st["skipped"] == 1 and st["error_kind"] is None
     assert Path(st["zip"]).is_file()
 
 

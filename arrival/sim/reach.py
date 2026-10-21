@@ -26,9 +26,19 @@ TOL_HOVER_FAMILY = {"put_in_drawer": 0.01}  # its misses (1.3 and 4.0 cm) overla
 SHIFTS = sorted(((da, do) for do in (0.0, -0.06, 0.06, 0.12) for da in (0.0, 0.1, -0.1, 0.2, -0.2)),
                 key=lambda d: math.hypot(*d))[1:]
 # (along the fixture's local x, out from its face) in metres, nearest first; the rule's own spot (0, 0) is tried before these and left out
-STROKE = 0.15  # wipe_counter strokes run this far either side of the sponge, along the counter (policy.py)
+WIDE_SHIFTS = sorted(((da, do) for do in (0.0, -0.1, 0.1, -0.2, 0.2, 0.3) for da in (round(k * 0.05, 2) for k in range(-20, 21))
+                      if abs(da) > 0.2 or abs(do) > 0.12), key=lambda d: (math.hypot(*d), d))
+# the second grid, in the same frame: used only when no SHIFTS entry passes, so a fixture whose rule spot is in a wall
+# or on its neighbour (a corner cabinet beside the sink run, a fridge whose free edge is at the room's corner) can be
+# stood at from further along its own run. The planner's checks are the same; the expert's run decides the rest.
 IK_FAMILIES = ("counter_to_sink", "counter_to_counter", "move_on_table", "put_in_drawer", "wipe_counter",
                "load_dishwasher", "unload_dishwasher")  # the families whose hand targets come from the twin alone
+WIDE_FAMILIES = IK_FAMILIES + ("open_door", "close_door")
+# the families the second grid serves: the IK families (their reach is solved at each spot) and the cabinet door tasks,
+# whose handle is reached from beside the door (the corner cabinet of u_kitchen_42, 8 of 8 runs from 0.2 m along). A drawer
+# is pulled from straight in front of it (0 of 36 spots on the one drawer a sink blocks) and the fridge's hook-and-push
+# plan needs the free-edge side (IK misses it by 1.4 m from the hinge side), so those keep their rejection.
+STROKE = 0.15  # wipe_counter strokes run this far either side of the sponge, along the counter (policy.py)
 
 
 @lru_cache(maxsize=2)
@@ -174,13 +184,13 @@ def miss(errs: list[tuple[str, float]], family: str) -> tuple[int, str, float, f
 def find_shift(twin: dict, v: dict, starts: list, mobile: bool = False, arm: str = "procedural"
                ) -> tuple[float, float] | None:
     """The nearest SHIFTS entry (along the run, out from it) from which the pool variation `v` (with its "family")
-    passes `check_task` at every start in `starts`, or None. Only for IK_FAMILIES: the other families' stand spots
-    are fitted to the part they open."""
+    passes `check_task` at every start in `starts`, or None; then the WIDE_SHIFTS the same way. Only for WIDE_FAMILIES:
+    the other families' stand spots are fitted to the part they open."""
     from arrival.sim.preflight import check_task
 
-    if v["family"] not in IK_FAMILIES:
+    if v["family"] not in WIDE_FAMILIES:
         return None
-    for shift in SHIFTS:
+    for shift in (SHIFTS if v["family"] in IK_FAMILIES else []) + WIDE_SHIFTS:
         t = {**v, "base_shift": list(shift)}
         if all(check_task(twin, t, xy, mobile, arm) is None for xy in starts):
             return shift
