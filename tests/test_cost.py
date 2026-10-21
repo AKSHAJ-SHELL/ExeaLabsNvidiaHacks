@@ -194,6 +194,16 @@ def test_unreadable_report_is_a_cost_error_not_a_traceback(tmp_path):
         cost.collect_rows(tmp_path)
 
 
+@pytest.mark.parametrize("body", ['{"id":"first"}\n{bad}\n{"id":"last"}\n',
+                                  '{"id":"first"}\n{bad}\n'])
+def test_corrupt_committed_usage_line_is_not_silently_dropped(tmp_path, body):
+    ledger = tmp_path / "usage" / "jobs.jsonl"
+    ledger.parent.mkdir()
+    ledger.write_text(body)
+    with pytest.raises(cost.CostError, match="invalid JSON on line 2"):
+        cost.job_usage(tmp_path)
+
+
 @pytest.mark.parametrize("attempts,successes", [(2, 3), (-1, 0), (True, 1), (3, False)])
 def test_inconsistent_report_counts_cannot_produce_throughput(tmp_path, attempts, successes):
     _w(tmp_path / "reports" / "bad.json", {"room_id": "room", "attempts": attempts,

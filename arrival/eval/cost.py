@@ -109,14 +109,17 @@ def job_usage(out_dir: str | Path) -> dict[str, dict]:
     jobs: dict[str, dict] = {}
     ledger = out / "usage" / "jobs.jsonl"
     try:
-        lines = ledger.read_text(encoding="utf-8").splitlines() if ledger.is_file() else []
+        body = ledger.read_text(encoding="utf-8") if ledger.is_file() else ""
     except OSError as e:
         raise CostError(f"usage ledger {ledger}: cannot read ({type(e).__name__}: {e})") from e
-    for line in lines:
+    lines = body.splitlines()
+    for index, line in enumerate(lines):
         try:
             rec = json.loads(line)
-        except ValueError:
-            continue  # a line cut short by a crash; the rest of the ledger is still good
+        except ValueError as e:
+            if index == len(lines) - 1 and not body.endswith("\n"):
+                continue  # a kill may leave an incomplete final append
+            raise CostError(f"usage ledger {ledger}: invalid JSON on line {index + 1}") from e
         if isinstance(rec, dict) and isinstance(rec.get("id"), str):
             jobs[rec["id"]] = {"room_id": rec.get("room_id"), "attempts": rec.get("attempts"),
                                "successes": rec.get("successes"), **{k: rec.get(k) for k in METER_KEYS}}
