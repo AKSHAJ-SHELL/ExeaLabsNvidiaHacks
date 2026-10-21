@@ -86,11 +86,11 @@ def load_usage(path: str | Path) -> dict:
 
 def _row(source: str, room: str, family: str | None, attempts, successes, seconds, human_contacts=None,
          frames=None) -> dict:
-    ok = isinstance(attempts, int) and isinstance(successes, int)
+    ok = type(attempts) is int and type(successes) is int and 0 <= successes <= attempts
     secs = seconds if _num(seconds) and seconds > 0 else None
     return {"source": source, "room": room, "family": family, "attempts": attempts if ok else None,
             "successes": successes if ok else None, "seconds": secs, "human_contacts": human_contacts,
-            "frames": frames if isinstance(frames, int) and not isinstance(frames, bool) else None}
+            "frames": frames if type(frames) is int and frames >= 0 else None}
 
 
 METER_KEYS = ("wall_seconds", "episodes_attempted", "episodes_succeeded", "frames", "upload_bytes", "zip_bytes",

@@ -175,3 +175,12 @@ def test_unreadable_report_is_a_cost_error_not_a_traceback(tmp_path):
     (tmp_path / "reports" / "bad.json").write_text("{not json")
     with pytest.raises(cost.CostError):
         cost.collect_rows(tmp_path)
+
+
+@pytest.mark.parametrize("attempts,successes", [(2, 3), (-1, 0), (True, 1), (3, False)])
+def test_inconsistent_report_counts_cannot_produce_throughput(tmp_path, attempts, successes):
+    _w(tmp_path / "reports" / "bad.json", {"room_id": "room", "attempts": attempts,
+                                          "successes": successes, "seconds": 10})
+    row, = cost.collect_rows(tmp_path)
+    assert row["attempts"] is row["successes"] is None
+    assert row["drop_rate"] is row["demos_per_hour"] is None
