@@ -374,9 +374,58 @@ def test_public_mode_lists_only_own_jobs_and_hides_paths(make):
     assert st["owner"]
     st.update({"zip": "/srv/private/dataset.zip", "twin_dir": "/srv/private/twin", "dataset_dir": "/srv/private/ds"})
     path.write_text(json.dumps(st))
-    _, body, _ = _fetch(srv, f"/jobs/{a['id']}")
+    _, body, _ = _fetch(srv, f"/jobs/{a['id']}", {"Cookie": cookie_a})
     got = json.loads(body)
     assert got["id"] == a["id"] and "owner" not in got and "/srv/private" not in body.decode()
+
+
+def test_public_job_status_and_download_require_owner(make):
+    srv, out = make(public=True, rate_limit=0)
+    _, a, resp_a = _post(srv, [("scan", "alice.json", TINY)])
+    _, b, resp_b = _post(srv, [("scan", "bob.json", TINY)])
+    cookie_a, cookie_b = _cookie(resp_a), _cookie(resp_b)
+    job = out / "jobs" / a["id"]
+    status = json.loads((job / "status.json").read_text())
+    status["status"] = "done"
+    (job / "status.json").write_text(json.dumps(status))
+    (job / "dataset.zip").write_bytes(b"private dataset")
+
+    for path in (f"/jobs/{a['id']}", f"/jobs/{a['id']}/download"):
+        code, _, _ = _fetch(srv, path, {"Cookie": cookie_a})
+        assert code == 200
+        for headers in ({}, {"Cookie": cookie_b}, {"Cookie": "arrival_client=" + "0" * 32}):
+            code, body, _ = _fetch(srv, path, headers)
+            assert code == 404 and b"private dataset" not in body
+
+
+def test_public_uploaded_dataset_and_preview_require_owner(make):
+    srv, out = make(public=True, rate_limit=0)
+    _, a, resp_a = _post(srv, [("scan", "alice.json", TINY)])
+    _, _, resp_b = _post(srv, [("scan", "bob.json", TINY)])
+    cookie_a, cookie_b = _cookie(resp_a), _cookie(resp_b)
+    room = f"alice_{a['id']}"
+    job = out / "jobs" / a["id"]
+    status = json.loads((job / "status.json").read_text())
+    status["room_id"] = room
+    (job / "status.json").write_text(json.dumps(status))
+    dataset = out / "datasets" / f"{room}_sim"
+    dataset.mkdir(parents=True)
+    (dataset / "private.txt").write_bytes(b"private dataset")
+    preview = out / "previews" / f"{room}_sim_contact.png"
+    preview.parent.mkdir(parents=True)
+    preview.write_bytes(b"private preview")
+
+    for path, expected in ((f"/download/{room}_sim", b"private dataset"),
+                           (f"/previews/{preview.name}", b"private preview")):
+        code, body, _ = _fetch(srv, path, {"Cookie": cookie_a})
+        assert code == 200
+        if path.startswith("/download/"):
+            assert zipfile.ZipFile(io.BytesIO(body)).read(f"{room}_sim/private.txt") == expected
+        else:
+            assert expected in body
+        for headers in ({}, {"Cookie": cookie_b}):
+            code, body, _ = _fetch(srv, path, headers)
+            assert code == 404 and expected not in body
 
 
 def test_local_mode_lists_all_jobs(make):
