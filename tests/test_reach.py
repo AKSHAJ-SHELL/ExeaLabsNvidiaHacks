@@ -69,7 +69,7 @@ def test_base_shift_moves_the_stand_spot_in_the_fixtures_frame(rotated):
 
 def test_shifted_base_succeeds_where_the_rule_spot_misses(rotated):
     """mug_2 into the east run's drawer at the +0.08 m start offset: from the rule's spot the hand stops 2.5 cm short
-    over the mug and the episode misses; the planner's spot, 0.1 m along the run, succeeds."""
+    over the mug and the episode missed at one time; the planner's spot, 0.1 m along the run, must succeed."""
     v = next(t for t in make_tasks(rotated, ["put_in_drawer"], 8, seed=1, log=QUIET) if t["object_id"] == "mug_2")
     shift = find_shift(rotated, {k: x for k, x in v.items() if k != "base_shift"}, [v["start"][:2]])
     assert shift is not None
@@ -79,7 +79,8 @@ def test_shifted_base_succeeds_where_the_rule_spot_misses(rotated):
     for name, t in (("planner", copy.deepcopy(v)), ("rule", {k: x for k, x in copy.deepcopy(v).items() if k != "base_shift"})):
         t["start"] = [*_offset_start(src, o["position"], POSE_OFFSETS[1]), top_z(src) + 0.06]
         results[name] = run_episode(SimEnv(rotated, finish_task(t), res=16, cameras=()), ScriptedExpert(), t)["success"]
-    assert results == {"planner": True, "rule": False}
+    # the rule spot missed here before the any-wall and mobile-base work; it is not what this test pins any more
+    assert results["planner"] is True
 
 
 @pytest.mark.skipif(not menagerie.available(), reason=menagerie.FETCH_HINT)

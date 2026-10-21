@@ -43,6 +43,12 @@ HELP = """keys (type in the teleop window; with --no-viewer, in this terminal):
   q/e turn gripper   space open/close   enter judge the attempt   x give up the attempt   esc or ctrl-c quit"""
 
 
+def _full_action(a, state) -> np.ndarray:
+    """The dataset action carries base x, y, yaw after the gripper; an arm-only command holds the base where it is."""
+    a = np.asarray(a, dtype=np.float32)
+    return a if len(a) >= len(state) else np.concatenate([a, state[len(a):]]).astype(np.float32)
+
+
 class TeleopController:
     """End-effector target driven by keys; `action()` solves IK for it (warm-started from the arm's posture)."""
 
@@ -178,7 +184,7 @@ def run(twin: dict, frames: Iterable[list[str]], out_dir: str | Path = "out", op
                 a = ctl.action()
                 if record:
                     rec["states"].append(env.state())
-                    rec["actions"].append(np.asarray(a, dtype=np.float32))
+                    rec["actions"].append(_full_action(a, rec["states"][-1]))
                     for cam in rec["videos"]:
                         rec["videos"][cam].append(env.render(cam))
                 env.step(a)
@@ -193,7 +199,7 @@ def run(twin: dict, frames: Iterable[list[str]], out_dir: str | Path = "out", op
                     a = ctl.action()
                     if record:
                         rec["states"].append(env.state())
-                        rec["actions"].append(np.asarray(a, dtype=np.float32))
+                        rec["actions"].append(_full_action(a, rec["states"][-1]))
                         for cam in rec["videos"]:
                             rec["videos"][cam].append(env.render(cam))
                     env.step(a)
