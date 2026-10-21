@@ -1,6 +1,7 @@
-"""Twin JSON -> MJCF: walls, floor, counters with drawers, hinged cabinet doors and upper cabinets, sink basin
-with a faucet lever, stove with an oven door, fridge, dishwasher and microwave with hinged doors, free-body
-objects, people, Panda-like arm, cameras. Every moving part is a named joint with a handle site (part_names)."""
+"""Twin JSON -> MJCF: walls with their scanned doors, windows and openings (visual only), floor, counters with
+drawers, hinged cabinet doors and upper cabinets, sink basin with a faucet lever, stove with an oven door, fridge,
+dishwasher and microwave with hinged doors, free-body objects, people, Panda-like arm, cameras. Every moving part is
+a named joint with a handle site (part_names)."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import random
 
 from arrival.catalog.objects import object_spec
 from arrival.scan.bundle import ScanBundleError
+from arrival.scan.roomplan import PORTALS
 from arrival.sim import people, robot
 from arrival.twin.compile import COUNTER_HEIGHT, is_counter_host, to_local
 
@@ -30,8 +32,19 @@ UPPER_Z0, UPPER_H, UPPER_D, UPPER_DOOR_MAX = 1.56, 0.60, 0.32, 0.60  # wall cabi
 # reaches 1.50 m over the back of the counter when it drops into the sink, so the cabinets start above that
 DOOR_FLAT = 1.5  # bottom-hinged doors (oven, dishwasher) stop just short of horizontal
 TOP = "0.82 0.82 0.8 1"
-MATERIALS = {FRONT: "wood", TOP: "stone", SPLASH: "panel", WALL: "paint"}  # attached by colour in build_mjcf
+WALL_MIN_T = 0.05  # a wall is drawn at least this thick
+# doors, windows and openings (portals): white trim, a wood leaf, sky-tinted glass, a dark recess with shaded returns
+TRIM, LEAF, GLASS, RECESS, RETURN = ("0.96 0.95 0.92 1", "0.58 0.43 0.30 1", "0.62 0.74 0.84 1", "0.16 0.15 0.14 1",
+                                     "0.80 0.78 0.73 1")
+# attached by colour in build_mjcf
+MATERIALS = {FRONT: "wood", TOP: "stone", SPLASH: "panel", WALL: "paint", LEAF: "wood"}
 RACK_Z, RACK_OUT = 0.52, 0.45  # dishwasher upper rack: tray height and how far it slides out over the open door
+PORTAL_BAND = 0.05  # jamb, head and sill width, inside the scanned rectangle
+PORTAL_MIN = 0.15  # a portal narrower or lower than this once clipped to its wall is not drawn
+PORTAL_SNAP = 0.25  # a portal whose parent is not a scanned wall goes on the nearest wall this close to its centre
+FLOOR_SNAP = 0.05  # a door or opening whose bottom is this close to the floor starts on it
+PROUD = {"frame": 0.015, "sill": 0.03, "leaf": 0.006, "pane": 0.004, "recess": 0.002, "knob": 0.06}  # past each face
+KNOB_R, KNOB_Z, KNOB_IN = 0.025, 1.0, 0.07  # door knob: radius, height above the door bottom, inset from the latch jamb
 
 
 def _box(name, pos, size, rgba, extra=""):
@@ -593,6 +606,92 @@ def part_names(twin: dict) -> list[dict]:
     return parts
 
 
+def _seg_dist(p, w: dict) -> float:
+    """Horizontal distance from point p to a wall's segment."""
+    (x0, y0), (x1, y1) = w["start"], w["end"]
+    dx, dy = x1 - x0, y1 - y0
+    n = dx * dx + dy * dy
+    t = 0.0 if n < 1e-12 else min(max(((p[0] - x0) * dx + (p[1] - y0) * dy) / n, 0.0), 1.0)
+    return math.hypot(p[0] - x0 - t * dx, p[1] - y0 - t * dy)
+
+
+def portal_wall(p: dict, walls: list[dict]) -> dict | None:
+    """The wall a door, window or opening is drawn on: the one its `wall_id` names, else (an export without
+    `parentIdentifier`, or a parent that is not one of the walls) the wall whose segment passes nearest its centre,
+    within PORTAL_SNAP. None: no wall qualifies and the portal is not drawn."""
+    if p.get("wall_id") is not None:
+        for w in walls:
+            if w["id"] == p["wall_id"]:
+                return w
+    d, i = min(((_seg_dist(p["position"], w), i) for i, w in enumerate(walls)), default=(math.inf, -1))
+    return walls[i] if d <= PORTAL_SNAP else None
+
+
+def portal_xml(kind: str, k: int, p: dict, wall: dict) -> list[str]:
+    """Visual-only geoms for the k-th door, window or opening, named `{kind}{k}_{part}`, in the plane of `wall`: the
+    scanned rectangle is put on the wall's line and clipped to its length and height, and the frame sits inside it.
+    Every box runs through the wall and stands proud of both faces (PROUD), so it shows from either side without
+    knowing which one is the room. A closed door is two jambs, a head, a wood leaf and a knob; an open door and an
+    opening are jambs and a head around a dark recess (RoomPlan gives no hinge side, and a leaf swung into the room
+    would be something the arm and the walkers pass through); a window is jambs, a head, a sill, a pane and a mullion;
+    an opening that starts above the floor gets a sill too."""
+    (x0, y0), (x1, y1) = wall["start"], wall["end"]
+    length = math.hypot(x1 - x0, y1 - y0)
+    if length < PORTAL_MIN:
+        return []
+    ux, uy = (x1 - x0) / length, (y1 - y0) / length
+    (px, py, pz), w, h = p["position"], p["size"][0], p["size"][2]
+    u = (px - x0) * ux + (py - y0) * uy
+    u0, u1 = max(u - w / 2, 0.0), min(u + w / 2, length)
+    z0, z1 = max(pz - h / 2, 0.0), min(pz + h / 2, wall["height"])
+    if kind != "window" and z0 <= FLOOR_SNAP:
+        z0 = 0.0
+    if u1 - u0 < PORTAL_MIN or z1 - z0 < PORTAL_MIN:
+        return []
+    b, closed = PORTAL_BAND, kind == "door" and not p.get("is_open")
+    sill = kind == "window" or (kind == "opening" and z0 > 0.0)
+    trim = RETURN if kind == "opening" else TRIM
+    zs = z0 + b if sill else z0  # foot of the jambs and of the infill
+    parts = [("jamb0", u0, u0 + b, zs, z1, "frame", trim), ("jamb1", u1 - b, u1, zs, z1, "frame", trim),
+             ("head", u0 + b, u1 - b, z1 - b, z1, "frame", trim)]
+    if sill:
+        parts.append(("sill", u0, u1, z0, zs, "sill" if kind == "window" else "frame", trim))
+    if kind == "window":
+        um = (u0 + u1) / 2
+        parts += [("pane", u0 + b, u1 - b, zs, z1 - b, "pane", GLASS),
+                  ("mullion", um - b / 4, um + b / 4, zs, z1 - b, "frame", TRIM)]
+    elif closed:
+        parts.append(("leaf", u0 + b, u1 - b, z0, z1 - b, "leaf", LEAF))
+    else:
+        parts.append(("recess", u0 + b, u1 - b, zs, z1 - b, "recess", RECESS))
+    half_t, yaw = max(wall["thickness"], WALL_MIN_T) / 2, math.atan2(uy, ux)
+
+    def on_line(uc: float) -> tuple[float, float]:
+        return x0 + ux * uc, y0 + uy * uc
+
+    g = []
+    for part, ua, ub, za, zb, proud, rgba in parts:
+        g.append(_box(f"{kind}{k}_{part}", (*on_line((ua + ub) / 2), (za + zb) / 2),
+                      (ub - ua, 2 * (half_t + PROUD[proud]), zb - za), rgba, f'euler="0 0 {yaw}" {VIS}'))
+    if closed:  # one bar through the wall makes a knob on each face, by the latch jamb
+        (kx, ky), r = on_line(max(u1 - b - KNOB_IN, (u0 + u1) / 2)), half_t + PROUD["knob"]
+        kz = z0 + min(KNOB_Z, (z1 - b - z0) / 2)
+        g.append(f'<geom name="{kind}{k}_knob" type="cylinder" fromto="{kx + uy * r:.4f} {ky - ux * r:.4f} {kz:.4f} '
+                 f'{kx - uy * r:.4f} {ky + ux * r:.4f} {kz:.4f}" size="{KNOB_R}" rgba="{STEEL}" {VIS}/>')
+    return g
+
+
+def portals_xml(twin: dict) -> list[str]:
+    """The twin's doors, windows and openings (a RoomPlan export carries them; an authored scan has none), each on
+    its wall (portal_wall). Visual only: they change renders, never contacts, and a twin without any builds as
+    before."""
+    g = []
+    for key, kind in PORTALS:
+        for k, p in enumerate(twin.get(key) or []):
+            wall = portal_wall(p, twin["walls"])
+            if wall is not None:
+                g += portal_xml(kind, k, p, wall)
+    return g
 
 
 def assets_xml() -> str:
@@ -674,8 +773,9 @@ def build_mjcf(twin: dict, base_pos, base_yaw_deg: float = -90.0, object_pos: di
         L = math.hypot(x1 - x0, y1 - y0)
         yaw = math.atan2(y1 - y0, x1 - x0)
         world.append(f'<geom name="{w["id"]}" type="box" pos="{(x0 + x1) / 2} {(y0 + y1) / 2} {w["height"] / 2}" '
-                     f'size="{L / 2} {max(w["thickness"], 0.05) / 2} {w["height"] / 2}" euler="0 0 {yaw}" '
+                     f'size="{L / 2} {max(w["thickness"], WALL_MIN_T) / 2} {w["height"] / 2}" euler="0 0 {yaw}" '
                      f'rgba="{WALL}"/>')
+    world += portals_xml(twin)
     for f in fx:
         t = f["type"]
         if is_counter_host(f):
