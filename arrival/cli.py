@@ -560,7 +560,7 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--resume", action="store_true",
                    help="continue a killed run from its progress journal instead of starting over (same settings)")
     m.add_argument("--dart", type=float, default=0.0, metavar="RAD",
-                   help="DART: drive the arm with smooth noise of this std (rad) on the joint targets while the dataset "
+                   help="DART: drive the arm with smooth noise, typical std RAD (each episode uses 0.4x to 1.6x), on the joint targets while the dataset "
                         "keeps the clean targets, so a policy sees off-plan states labelled with the way back; "
                         "0 (default) is off, 0.02 to 0.05 is a useful range. Recorded in the dataset provenance")
     m.add_argument("--tavily", action="store_true", help="Enrich digital twin and VLM planning with Tavily appliance research")

@@ -383,6 +383,7 @@ def robot_drawer_z() -> float:
 
 
 EXEC_NOISE_TAU = 10.0  # steps (0.5 s): how long a joint-noise excursion lasts
+EXEC_NOISE_SPREAD = (0.4, 1.6)  # each episode draws its noise level from this range times --dart, for a spread of off-plan states
 EXEC_NOISE_NEAR_GRIP = 0.25  # noise scale within 12 steps of a gripper command: a grasp needs a steady arm
 GRIP_WINDOW = 12
 
@@ -396,12 +397,14 @@ def _grip_events(plan) -> np.ndarray:
 
 def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: list | None = None,
                 exec_noise: float = 0.0) -> dict:
-    """exec_noise > 0 (rad, the std of smooth noise on the 7 arm joint targets) is DART: the arm is driven by
+    """exec_noise > 0 (rad, the typical std of smooth noise on the 7 arm joint targets; each episode uses 0.4 to 1.6
+    times it) is DART: the arm is driven by
     target + noise, but the dataset keeps the clean target as the action, so a trained policy sees states that are
     slightly off the plan, each labelled with the move back onto it. The noise is seeded from the task, shrinks
     near gripper commands, and the physics check still has to pass, so a perturbation that spoils a grasp drops
     the episode like any other failure."""
     rng = np.random.default_rng(int(task.get("seed", 0)) + 1) if exec_noise > 0 else None
+    level = exec_noise * rng.uniform(EXEC_NOISE_SPREAD[0], EXEC_NOISE_SPREAD[1]) if rng is not None else 0.0  # per episode
     rho, drift, events = float(np.exp(-1.0 / EXEC_NOISE_TAU)), np.zeros(7), None
     try:
         policy.reset(env, task)
@@ -423,7 +426,7 @@ def run_episode(env: SimEnv, policy, task: dict, max_steps: int = 400, preview: 
                 preview.append(env.render("overview", big=True))
             if rng is not None:
                 near = len(events) > 0 and np.min(np.abs(events - t)) < GRIP_WINDOW
-                drift = rho * drift + np.sqrt(1 - rho * rho) * exec_noise * (EXEC_NOISE_NEAR_GRIP if near else 1.0) * rng.standard_normal(7)
+                drift = rho * drift + np.sqrt(1 - rho * rho) * level * (EXEC_NOISE_NEAR_GRIP if near else 1.0) * rng.standard_normal(7)
                 driven = a.copy()
                 driven[:7] += drift
                 env.step(driven)
