@@ -152,8 +152,12 @@ def run_realism(scan: str | Path, out_dir: str | Path = "out", scans_dir: str | 
     Raises RealismError when no honest measurement can be made. Returns the report dict (with `path`, `png`)."""
     from arrival.eval.realism import evaluate_frames, perturb_pose, render_twin, side_by_side_png
 
-    if max_side < 16 or max_frames < 1:
+    if type(max_side) is not int or max_side < 16 or type(max_frames) is not int or max_frames < 1:
         raise RealismError("--max-side must be at least 16 and --max-frames at least 1")
+    if type(png_frames) is not int or png_frames < 0:
+        raise RealismError("--png-frames must be a nonnegative integer")
+    if type(min_confidence) is not int or min_confidence not in (0, 1, 2):
+        raise RealismError("--min-confidence must be an ARKit confidence level: 0, 1, or 2")
     transform = None
     if camera_transform is not None:
         try:
