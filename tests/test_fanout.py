@@ -109,6 +109,14 @@ def test_invalid_done_marker_cannot_skip_a_shard(tmp_path, marker):
         run_fanout(be, CFG, tmp_path / "out", log=quiet)
     assert be.submissions == []
 
+
+def test_valid_marker_without_shard_dataset_is_not_skipped(tmp_path):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    be.put_object(marker_key(CFG, 0), b'{"shard": 0, "attempts": 1}')
+    with pytest.raises(ShardError, match="missing .*info.json"):
+        run_fanout(be, CFG, tmp_path / "out", log=quiet)
+    assert be.submissions == []
+
 def test_local_backend_refuses_another_shards_output(tmp_path):
     be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
     job = be.submit(CFG, 0)
