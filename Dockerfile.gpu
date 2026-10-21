@@ -1,0 +1,34 @@
+# GPU image for the GR00T N1.7 fine-tune smoke test (docs/08-access.md, Isaac-GR00T README).
+# NOT BUILT OR RUN anywhere: no Docker daemon or GPU was available when this was written.
+# Confirmed from the Isaac-GR00T README: dGPU x86_64 wants CUDA 12.8, Python 3.12, uv, ffmpeg.
+# UNVERIFIED: the exact base image tag below and that it ships what Isaac-GR00T needs (the README
+# points to docker/README.md in that repo, which was not read). Check it before building.
+FROM nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PATH="/root/.local/bin:${PATH}"
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git curl ca-certificates ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv install line is from the Isaac-GR00T README.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# UNVERIFIED: unpinned clone of the default branch; pin a commit once one is known to work.
+RUN git clone https://github.com/NVIDIA/Isaac-GR00T /opt/Isaac-GR00T
+WORKDIR /opt/Isaac-GR00T
+RUN uv sync --python 3.12
+
+# Arrival code and configs. The HF token is never baked in; pass HF_TOKEN at run time.
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY arrival ./arrival
+COPY configs ./configs
+COPY scripts ./scripts
+# UNVERIFIED: installing arrival into Isaac-GR00T's uv environment this way.
+RUN uv pip install --python /opt/Isaac-GR00T/.venv/bin/python -e .
+
+ENV GR00T_DIR=/opt/Isaac-GR00T
+CMD ["bash", "scripts/run_finetune.sh"]

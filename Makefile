@@ -2,7 +2,7 @@
 PY ?= python
 OUT ?= out
 
-.PHONY: install test sim validate demo serve lint docs-check package-smoke clean site check-site
+.PHONY: install test sim validate demo serve lint docs-check package-smoke clean site check-site train eval-policy serve-policy
 
 install:
 	$(PY) -m pip install -e ".[dev,sim]"
@@ -47,3 +47,16 @@ site:
 # Resolves every asset path the site references, against a running `make site` (or by file path with --offline)
 check-site:
 	$(PY) scripts/check_site.py
+
+# GPU targets (G5). Never run on a GPU yet; see docs/BUILD-LOG.md. train needs HF_TOKEN in the environment.
+DATASET ?= $(OUT)/datasets/hero_kitchen_sim
+CKPT ?= $(OUT)/finetune_smoke/checkpoint-100
+train:
+	DATASET_DIR=$(DATASET) OUTPUT_DIR=$(OUT)/finetune_smoke bash scripts/run_finetune.sh
+
+# Needs GR00T_POLICY_URL pointing at a running `make serve-policy`.
+eval-policy:
+	$(PY) -m arrival eval --policy vla --checkpoint-id "$(CKPT)" --out $(OUT)
+
+serve-policy:
+	$(PY) -m arrival.policy_server.gr00t_shim --model-path $(CKPT) --port 8000 --modality-config-path configs/gr00t/arrival_panda_config.py
