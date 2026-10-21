@@ -95,9 +95,9 @@ def test_baseline_and_usage_give_comparison_with_both_sample_sizes(out, tmp_path
     assert c["measured"] and c["generated"]["n_success"] == 7 and c["teleop"]["n_success"] == 10
     assert rep["teleop_baseline"]["seconds_per_success"] == 150.0 and rep["teleop_baseline"]["usd_per_success"] == 5.0
     assert c["generated"]["scope"] == "task" and c["generated"]["seconds_per_success"] is None  # no per-family seconds
-    assert c["generated"]["usd_per_success"] == 0.5 and c["generated"]["usd_measured"] is False
+    assert c["generated"]["usd_per_success"] is None and c["generated"]["usd_measured"] is False
     text = cost.markdown(rep)
-    assert "| generated (task) | 7 |" in text and "| teleop | 10 | 150.0 | 5.0 |" in text and "(estimate)" in text
+    assert "| generated (task) | 7 |" in text and "| teleop | 10 | 150.0 | 5.0 |" in text
     assert cost.main(["--out", str(out), "--usage", str(usage), "--pricing", str(PRICING), "--baseline", str(base),
                       "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["comparison"]["teleop"]["n_success"] == 10
@@ -109,6 +109,23 @@ def test_room_level_comparison_has_ratio(out, tmp_path):
     assert c["generated"]["scope"] == "room" and c["generated"]["n_success"] == 10
     assert c["generated"]["seconds_per_success"] == 12.0 and c["seconds_ratio_teleop_over_generated"] == 12.5
     assert c["generated"]["usd_per_success"] is None
+
+
+def test_scoped_usage_prices_only_matching_task(out, tmp_path):
+    base = _w(tmp_path / "b.json", BASELINE)
+    usage = _w(tmp_path / "usage.json", {"scope": {"room": "hero_kitchen", "task": "counter_to_sink"},
+                                        "gpu_hour": 2})
+    c = cost.build(out, usage, PRICING, base)["comparison"]
+    assert c["generated"]["n_success"] == 7
+    assert c["generated"]["usd_per_success"] == round(5 / 7, 4)
+    usage = _w(tmp_path / "usage.json", {"scope": {"room": "garage", "task": "counter_to_sink"},
+                                        "gpu_hour": 2})
+    assert cost.build(out, usage, PRICING, base)["comparison"]["generated"]["usd_per_success"] is None
+
+
+def test_usage_scope_requires_room_and_task(tmp_path):
+    with pytest.raises(cost.CostError, match="scope"):
+        cost.load_usage(_w(tmp_path / "usage.json", {"scope": {"room": "hero_kitchen"}, "gpu_hour": 2}))
 
 
 def test_baseline_for_another_room_is_not_measured(out, tmp_path):
