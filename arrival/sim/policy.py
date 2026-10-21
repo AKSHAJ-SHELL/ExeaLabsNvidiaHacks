@@ -582,12 +582,15 @@ class VLAClient(Policy):
       {"video.ego_view": <base64 PNG HxWx3 uint8>, "video.wrist": <base64 PNG>, "state.single_arm": [7],
        "state.gripper": [1], "annotation.human.task_description": "<instruction>"}
     Response: {"action.single_arm": [[7], ...], "action.gripper": [[1], ...]}  (absolute joint targets, chunk)
+    With a mobile base the request also has "state.base" [3] and the response "action.base" [[3], ...] (11 floats a step).
     Matches meta/modality.json of datasets written by `arrival sim`; the wire helpers live in
     arrival.policy_server.protocol, which also checks the response (ProtocolError, a ValueError).
     """
 
-    def __init__(self, url: str | None = None, timeout: float = 10.0):
+    def __init__(self, url: str | None = None, timeout: float = 10.0, schema: str | None = None):
         from arrival import config as settings
+
+        self.schema = schema  # "arm" (8 floats), "mobile" (11, adds the base pose) or None: "mobile" when the env has a mobile base
 
         self.url = url or settings.get("GR00T_POLICY_URL")
         if not self.url:
@@ -598,14 +601,16 @@ class VLAClient(Policy):
     def reset(self, env, task: dict) -> None:
         self.instruction = task["instruction"]
         self.queue = []
+        self.active_schema = self.schema or ("mobile" if getattr(env, "mobile", False) else "arm")
 
     def act(self, obs: dict) -> np.ndarray:
         if not self.queue:
             from arrival.policy_server.protocol import decode_response, encode_request
 
-            body = json.dumps(encode_request(obs, self.instruction)).encode()
+            schema = getattr(self, "active_schema", self.schema or "arm")
+            body = json.dumps(encode_request(obs, self.instruction, schema)).encode()
             req = urllib.request.Request(self.url.rstrip("/") + "/act", data=body, method="POST",
                                          headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                self.queue = list(decode_response(json.load(r)))
+                self.queue = list(decode_response(json.load(r), schema))
         return np.asarray(self.queue.pop(0), dtype=float)

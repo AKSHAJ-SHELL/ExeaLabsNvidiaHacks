@@ -43,15 +43,18 @@ def load_policy(model_path: str, modality_config_path: str, device: str, embodim
 def to_observation(req: dict) -> dict:
     """Decoded request -> Gr00tPolicy observation (batch 1, one time step)."""
     state = req["state"]
-    return {"video": {k: req["video"][k][None, None] for k in VIDEO_KEYS},
-            "state": {"single_arm": state[None, None, :ARM_DOF].astype(np.float32),
-                      "gripper": state[None, None, ARM_DOF:].astype(np.float32)},
+    st = {"single_arm": state[None, None, :ARM_DOF].astype(np.float32),
+          "gripper": state[None, None, ARM_DOF:ARM_DOF + 1].astype(np.float32)}
+    if state.shape[0] > ARM_DOF + 1:  # mobile schema
+        st["base"] = state[None, None, ARM_DOF + 1:].astype(np.float32)
+    return {"video": {k: req["video"][k][None, None] for k in VIDEO_KEYS}, "state": st,
             "language": {TASK_KEY: [[req["instruction"]]]}}
 
 
 def to_chunk(action: dict) -> np.ndarray:
-    """Gr00tPolicy action dict ({key: [1,T,D]}) -> chunk [T,8]."""
-    return np.concatenate([np.asarray(action["single_arm"])[0], np.asarray(action["gripper"])[0]], axis=1)
+    """Gr00tPolicy action dict ({key: [1,T,D]}) -> chunk [T,8], or [T,11] when the action has a base key."""
+    keys = ("single_arm", "gripper") + (("base",) if "base" in action else ())
+    return np.concatenate([np.asarray(action[k])[0] for k in keys], axis=1)
 
 
 def make_handler(policy):
