@@ -79,7 +79,7 @@ def _matrix(value, what: str) -> np.ndarray:
 
 
 def _size(value, what: str) -> tuple[int, int]:
-    if not (isinstance(value, (list, tuple)) and len(value) == 2 and all(isinstance(x, int) and x > 0 for x in value)):
+    if not (isinstance(value, (list, tuple)) and len(value) == 2 and all(type(x) is int and x > 0 for x in value)):
         _fail("bad_size", f"{what} must be [width, height] positive ints")
     return int(value[0]), int(value[1])
 
