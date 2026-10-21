@@ -73,8 +73,10 @@ def validate_manifest(manifest: dict) -> dict:
             if not isinstance(tid, str) or not tid or tid in seen:
                 raise ValueError("evaluation task IDs must be nonempty and unique")
             seen.add(tid)
-            if task["family"] not in families or not isinstance(task["instruction"], str):
+            if task["family"] not in families or not isinstance(task["instruction"], str) or not task["instruction"].strip():
                 raise ValueError(f"invalid evaluation task {tid}")
+            if type(task["seed"]) is not int or type(task["people"]) is not int or type(task["holdout"]) is not bool:
+                raise ValueError(f"invalid evaluation task {tid}: seed, people or holdout type")
             if task["people"] != cfg["people"] or task["holdout"] != cfg["holdout"]:
                 raise ValueError(f"evaluation task {tid} disagrees with the manifest settings")
         omitted = [f for f in families if not any(t["family"] == f for t in tasks)]

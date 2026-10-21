@@ -164,6 +164,17 @@ def test_invalid_manifest_fails_before_rollout(hero_twin, tmp_path, rollouts, ch
     assert not rollouts and not (tmp_path / "eval").exists()
 
 
+@pytest.mark.parametrize("field,value", [("people", True), ("holdout", 0), ("seed", "7"),
+                                         ("instruction", "  ")])
+def test_rehashed_manifest_still_rejects_invalid_trial_types(hero_twin, tmp_path, rollouts, field, value):
+    frozen = make_manifest(hero_twin, ["open_drawer"], 1, people=1, log=lambda *_: None)
+    frozen["tasks"][0][field] = value
+    frozen["manifest_id"] = digest({k: v for k, v in frozen.items() if k != "manifest_id"})
+    with pytest.raises(ValueError, match="invalid evaluation task"):
+        harness.evaluate(manifest=frozen, out_dir=tmp_path)
+    assert not rollouts and not (tmp_path / "eval").exists()
+
+
 def test_vla_requires_checkpoint_label_before_running(hero_twin, tmp_path, rollouts):
     with pytest.raises(ValueError, match="checkpoint-id"):
         harness.evaluate(hero_twin, ["open_drawer"], 1, policy_name="vla", out_dir=tmp_path)
