@@ -210,19 +210,31 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
     room, fps = info0["arrival_room_id"], info0["fps"]
     cams = [k.removeprefix("observation.images.") for k, v in info0["features"].items() if v.get("dtype") == "video"]
     res = info0["features"][f"observation.images.{cams[0]}"]["shape"][0]
+
+    def episode_files(s: dict, row: dict) -> tuple[Path, dict[str, Path]]:
+        index = row["episode_index"]
+        size = s["info"].get("chunks_size", 1000)
+        data = s["root"] / s["info"]["data_path"].format(episode_chunk=chunk_of(index, size), episode_index=index)
+        videos = {cam: s["root"] / s["info"]["video_path"].format(
+            episode_chunk=chunk_of(index, size), episode_index=index, video_key=f"observation.images.{cam}")
+            for cam in cams}
+        return data, videos
+
     root = Path(out_dir) / "datasets" / f"{room}_sim"
     for s in shards:
         if root.resolve() in (s["root"].resolve(), *s["root"].resolve().parents):
             raise ShardError(f"the output {root} would overwrite shard {s['root']}; pick another --out")
+        for row in s["episodes"]:
+            data, videos = episode_files(s, row)
+            for source in (data, *videos.values()):
+                if not source.is_file():
+                    raise ShardError(f"missing source file {source}; merge did not touch {root}")
     w = SimDatasetWriter(root, room, fps, res, tuple(cams), base="mobile" if first["embodiment"].get("base_actuated") else "fixed",
                         arm=first["embodiment"].get("arm", "procedural"))
     for s in shards:
-        size = s["info"].get("chunks_size", 1000)
         for row in s["episodes"]:
-            j = row["episode_index"]
-            t = pq.read_table(s["root"] / s["info"]["data_path"].format(episode_chunk=chunk_of(j, size), episode_index=j))
-            videos = {c: s["root"] / s["info"]["video_path"].format(episode_chunk=chunk_of(j, size), episode_index=j,
-                                                                    video_key=f"observation.images.{c}") for c in cams}
+            data, videos = episode_files(s, row)
+            t = pq.read_table(data)
             w.add_copied(np.array(t.column("observation.state").to_pylist(), dtype=np.float32),
                          np.array(t.column("action").to_pylist(), dtype=np.float32), row, videos)
 

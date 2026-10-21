@@ -182,6 +182,19 @@ def test_merge_refuses_episode_owned_by_another_shard(tmp_path):
     assert not out.exists()
 
 
+def test_missing_shard_video_does_not_erase_existing_merge(tmp_path):
+    src = _fake_run(tmp_path / "src")
+    video = src / "shards" / "0of3" / "datasets" / "room_sim" / "videos" / "chunk-000" / "observation.images.ego_view" / "episode_000000.mp4"
+    video.unlink()
+    out = tmp_path / "merged"
+    old = out / "datasets" / "room_sim" / "keep.txt"
+    old.parent.mkdir(parents=True)
+    old.write_text("previous result")
+    with pytest.raises(ShardError, match="missing source file"):
+        merge_shards([src / "shards"], out)
+    assert old.read_text() == "previous result"
+
+
 def test_merge_shards_cli_exit_codes(tmp_path, capsys):
     src = _fake_run(tmp_path / "src")
     assert cli.main(["merge-shards", str(src), "--out", str(tmp_path / "o")]) == cli.EXIT_OK  # `src` holds shards/
