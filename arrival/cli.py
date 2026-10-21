@@ -258,6 +258,7 @@ def cmd_fanout(a) -> int:
     `--backend nebius`, as Nebius Serverless AI Jobs with an Object Storage bucket, and merge them."""
     from arrival.export.validate import validate
     from arrival.jobs.fanout import FanoutConfig, LocalBackend, run_fanout
+    from arrival.jobs.fanout_status import StatusRecorder
     from arrival.jobs.shards import ShardError
 
     cfg = FanoutConfig(a.run_id, a.shards, a.room, a.families, a.episodes, a.people, a.res, a.seed, a.scans)
@@ -271,14 +272,15 @@ def cmd_fanout(a) -> int:
             return EXIT_USAGE
     else:
         be = LocalBackend(Path(a.out) / "fanout_store", Path(a.out) / "fanout_scratch")
+    rec = StatusRecorder(be)
     try:
-        res = run_fanout(be, cfg, a.out)
+        res = run_fanout(rec, cfg, a.out)
     except ShardError as e:
         print(f"fanout: {e}", file=sys.stderr)
         return EXIT_USAGE
     finally:
         if a.backend == "nebius":  # remote jobs outlive this process unless cancelled
-            left = be.cancel_open()
+            left = rec.cancel_open()
             if left:
                 print(f"fanout: could not cancel Nebius jobs {left}; cancel them by hand", file=sys.stderr)
     problems = validate(res["dataset"])

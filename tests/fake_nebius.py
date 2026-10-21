@@ -179,12 +179,14 @@ class _JobsHandler(_Handler):
 
 class FakeJobs(_Server):
     """`fail_first`: shards whose first job ends FAILED without running. `hold`: shards whose jobs stay RUNNING and
-    run nothing until cancelled. `states`: shard -> a state to report once the job is past provisioning."""
+    run nothing until cancelled. `states`: shard -> a state to report once the job is past provisioning. `silent`:
+    shards whose jobs run nothing and answer GET with no state at all until cancelled."""
 
     def __init__(self, token: str, project: str, secrets: dict, workdir, logdir, fail_first=(), hold=(),
-                 states=None):
+                 states=None, silent=()):
         self.token, self.project, self.secrets, self.workdir, self.logdir = token, project, secrets, workdir, logdir
         self.fail_first, self.hold, self.states = set(fail_first), set(hold), dict(states or {})
+        self.silent = set(silent)
         self.requests: list[tuple[str, str, bytes]] = []
         self.created: list[tuple[int, str]] = []  # (shard, job id) in order
         self.cancelled: list[str] = []
@@ -235,7 +237,7 @@ class FakeJobs(_Server):
             self.jobs[job_id] = job
         if shard in self.fail_first and first:
             job["final"] = ("FAILED", {"code": "ExitCode", "message": "container exited with code 3"})
-        elif shard not in self.hold:
+        elif shard not in self.hold | self.silent:
             cmd = sys.executable if spec.get("containerCommand") == "python" else spec.get("containerCommand")
             log = open(os.path.join(self.logdir, f"{job_id}.log"), "wb")
             # the container sees only the spec's NEBIUS_* variables, never the test process's own
@@ -246,9 +248,11 @@ class FakeJobs(_Server):
         job["shard"] = shard
         return {"id": f"aiop-{job_id}", "resourceId": job_id, "description": "create job"}
 
-    def _state(self, job) -> tuple[str, dict | None]:
+    def _state(self, job) -> tuple[str | None, dict | None]:
         if job["final"]:
             return job["final"]
+        if job["shard"] in self.silent:
+            return None, None
         job["gets"] += 1
         if job["gets"] == 1:
             return "PROVISIONING", None
@@ -267,7 +271,7 @@ class FakeJobs(_Server):
     def get(self, job_id: str) -> dict:
         job = self.jobs[job_id]
         state, details = self._state(job)
-        status = {"state": state, **({"stateDetails": details} if details else {})}
+        status = {"state": state, **({"stateDetails": details} if details else {})} if state else {}
         return {"metadata": job["metadata"], "spec": job["spec"], "status": status}
 
     def cancel(self, req) -> dict:

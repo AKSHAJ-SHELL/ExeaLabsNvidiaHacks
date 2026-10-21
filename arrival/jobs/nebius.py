@@ -20,10 +20,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -61,6 +63,17 @@ def require(*names: str) -> dict[str, str]:
         raise NebiusNotConfigured(f"set {', '.join(missing)} for the Nebius backend (see .env.example and "
                                   f"docs/REFERENCE.md); nothing was submitted")
     return values
+
+
+def _seconds(name: str) -> float:
+    raw = settings.get(name)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        value = math.nan
+    if not math.isfinite(value) or value <= 0:
+        raise NebiusNotConfigured(f"{name} must be a number of seconds above 0, not {raw!r}")
+    return value
 
 
 def _http(method: str, url: str, body: bytes | None = None, headers: dict | None = None,
@@ -179,9 +192,13 @@ class ObjectStore:
 
 class NebiusBackend:
     """`Backend` for run_fanout: shards as Serverless AI Jobs, storage in one Object Storage bucket. Settings come
-    from arrival.config (see .env.example); a missing one raises NebiusNotConfigured naming it, before any request."""
+    from arrival.config (see .env.example); a missing one raises NebiusNotConfigured naming it, before any request.
 
-    def __init__(self, store: ObjectStore | None = None, *, timeout: str = "3600s"):
+    `poll` cancels a job and reports it failed (so run_fanout retries it up to max_attempts) when it has not finished
+    NEBIUS_MAX_JOB_SECONDS after it was created, or has reported no state for NEBIUS_MAX_NO_STATE_SECONDS in a row.
+    `clock` is the monotonic clock those limits read (a test hook)."""
+
+    def __init__(self, store: ObjectStore | None = None, *, timeout: str = "3600s", clock=None):
         v = require(*JOB_SETTINGS, *(() if store else STORE_SETTINGS))
         self.store = store or ObjectStore.from_settings()
         self.api = settings.get("NEBIUS_API_URL").rstrip("/")
@@ -191,8 +208,14 @@ class NebiusBackend:
         self.platform, self.preset = settings.get("NEBIUS_JOB_PLATFORM"), settings.get("NEBIUS_JOB_PRESET")
         self.subnet = settings.get("NEBIUS_JOB_SUBNET_ID")
         self.timeout = timeout  # the API allows 1 h to 168 h
+        self.max_job_seconds = _seconds("NEBIUS_MAX_JOB_SECONDS")
+        self.max_no_state_seconds = _seconds("NEBIUS_MAX_NO_STATE_SECONDS")
+        if self.max_job_seconds <= float(timeout.rstrip("s")):
+            raise NebiusNotConfigured(f"NEBIUS_MAX_JOB_SECONDS ({self.max_job_seconds:g}) must be longer than the job "
+                                      f"timeout ({timeout}), or it would cut off a shard the service still allows")
+        self.clock = clock or time.monotonic
         self.submissions: list[tuple[int, int]] = []  # (shard, attempt number) in order
-        self.jobs: dict[str, dict] = {}  # job id -> shard, shards, name, staging prefix, last state and details
+        self.jobs: dict[str, dict] = {}  # job id -> shard, name, staging prefix, last state, clock readings, reason
 
     def _api(self, method: str, path: str, payload: dict | None = None) -> dict:
         body = json.dumps(payload).encode() if payload is not None else None
@@ -232,8 +255,9 @@ class NebiusBackend:
         job_id = op.get("resourceId")
         if not job_id:
             raise ShardError(f"Nebius create for job {name} returned no resourceId")
+        now = self.clock()
         self.jobs[job_id] = {"shard": i, "shards": cfg.shards, "name": name, "staging": staging, "state": None,
-                             "details": None}
+                             "details": None, "submitted": now, "seen": now, "reason": None}
         return job_id
 
     def poll(self, job_id: str) -> str:
@@ -241,9 +265,37 @@ class NebiusBackend:
         state = status.get("state") or "STATE_UNSPECIFIED"
         if state not in JOB_STATES:
             raise ShardError(f"Nebius job {job_id} is in state {state!r}, which this client does not know")
-        if job_id in self.jobs:
-            self.jobs[job_id].update(state=state, details=status.get("stateDetails"))
-        return JOB_STATES[state]
+        rec = self.jobs.get(job_id)
+        if rec is None:
+            return JOB_STATES[state]
+        now = self.clock()
+        if state != "STATE_UNSPECIFIED":
+            rec["seen"] = now
+        rec.update(state=state, details=status.get("stateDetails"))
+        if JOB_STATES[state] != RUNNING:
+            return JOB_STATES[state]
+        if now - rec["submitted"] > self.max_job_seconds:
+            limit = f"not finished {self.max_job_seconds:g} s after it was created"
+        elif now - rec["seen"] > self.max_no_state_seconds:
+            limit = f"reported no state for {self.max_no_state_seconds:g} s"
+        else:
+            return RUNNING
+        try:
+            self.cancel(job_id)
+            rec["reason"] = f"{limit}; cancelled"
+        except ShardError as e:  # cancel_open tries again when the command ends
+            rec["reason"] = f"{limit}; cancel failed: {e}"
+        return FAILED
+
+    def describe(self, job_id: str) -> dict:
+        """What the status record keeps for a job: its last Nebius state, why it failed, and the resources asked for."""
+        rec = self.jobs[job_id]
+        reason = rec["reason"]
+        if reason is None and rec["state"] and JOB_STATES[rec["state"]] == FAILED:
+            reason = rec["state"] + (f": {rec['details'].get('message')}" if rec["details"] else "")
+        return {"state": rec["state"], "reason": reason,
+                "resources": {"platform": self.platform, "preset": self.preset, "disk_bytes": int(DISK_BYTES),
+                              "timeout": self.timeout}}
 
     def cancel(self, job_id: str) -> None:
         self._api("POST", "/ai/v1/jobs/cancel", {"id": job_id})

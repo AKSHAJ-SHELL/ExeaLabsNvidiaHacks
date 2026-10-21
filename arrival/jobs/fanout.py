@@ -133,6 +133,14 @@ class LocalBackend:
         return sorted(p.relative_to(self.store).as_posix() for p in base.rglob("*")
                       if p.is_file() and not p.name.endswith(".part"))
 
+    def describe(self, job_id: str) -> dict:
+        """What the status record keeps for a job. A local subprocess has no resource preset."""
+        proc, _, out, _ = self._jobs[job_id]
+        code = proc.poll()
+        log = out / f"attempt{job_id.rsplit('-', 1)[-1]}.log"
+        return {"state": "running" if code is None else f"exited {code}",
+                "reason": f"exit code {code}, log {log}" if code else None, "resources": None}
+
 
 class NebiusBackendStub:
     """UNTESTED interface stub for Nebius Serverless Jobs plus Nebius Object Storage. Not implemented, never run

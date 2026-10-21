@@ -1,13 +1,17 @@
 """C1: NebiusBackend against in-process fakes of the Serverless AI Jobs REST API and of S3 (tests/fake_nebius.py).
 Nothing here talks to Nebius."""
 
+import dataclasses
 import importlib.util
+import itertools
 import json
+import sys
 
 import pytest
 
 from arrival import config
 from arrival.jobs.fanout import FAILED, FanoutConfig, LocalBackend, run_fanout
+from arrival.jobs.fanout_status import StatusRecorder, status_key
 from arrival.jobs.nebius import NebiusBackend, NebiusNotConfigured, ObjectStore, sigv4
 from arrival.jobs.shards import ShardError
 from conftest import REPO, SCANS
@@ -15,6 +19,7 @@ from fake_nebius import FakeJobs, FakeS3
 
 needs_sim = pytest.mark.skipif(importlib.util.find_spec("mujoco") is None, reason="needs mujoco")
 CFG = FanoutConfig("r1", 2, "hero_kitchen", "counter_to_sink,open_drawer", 4, 0, 32, 3, str(SCANS))
+CFG1 = dataclasses.replace(CFG, run_id="r2", shards=1)
 TOKEN, KEY_ID, SECRET = "fake-iam-token-0123456789", "FAKEKEYID0123", "fake/secret+key0123456789"
 quiet = lambda *_: None  # noqa: E731
 
@@ -204,4 +209,172 @@ def test_killed_run_reruns_only_unmarked_shards(nebius, reference, tmp_path):
     res = run_fanout(be2, CFG, tmp_path / "out", log=quiet)
     assert res["skipped"] == [0] and res["ran"] == [1]
     assert [s for s, _ in jobs.created] == [1]  # shard 0 was not run again
+    _same_episodes(res, reference)
+
+
+def _ticks(step=1000.0):
+    """A monotonic clock that moves `step` seconds every time the backend reads it."""
+    return itertools.count(0.0, step).__next__
+
+
+def _status(s3, cfg, i):
+    return json.loads(s3.objects[status_key(cfg, i)])
+
+
+def test_staging_prefix_is_new_for_every_attempt_and_every_process(nebius):
+    jobs = nebius["make"](hold={0})
+    be = NebiusBackend()
+    be.submit(CFG, 0), be.submit(CFG, 0)
+    NebiusBackend().submit(CFG, 0)  # a rerun after a kill counts its attempts from 1 again
+    dests = [json.loads(body)["spec"]["args"].split()[4] for method, path, body in jobs.requests
+             if (method, path) == ("POST", "/ai/v1/jobs")]
+    assert len(dests) == len(set(dests)) == 3
+    assert all(d.startswith("r1/attempts/0of2/") for d in dests)
+
+
+@pytest.mark.parametrize("fake, states, reason", [
+    ({"hold": {0}}, ["PROVISIONING", "IMAGE_PULLING", "RUNNING", "CANCELLING"],
+     "not finished 7200 s after it was created"),
+    ({"silent": {0}}, ["STATE_UNSPECIFIED", "CANCELLING"], "reported no state for 1800 s"),
+])
+def test_stuck_or_stateless_job_is_cancelled_and_retried_up_to_max_attempts(nebius, tmp_path, fake, states, reason):
+    jobs = nebius["make"](**fake)
+    be = NebiusBackend(clock=_ticks())
+    with pytest.raises(ShardError, match="failed 2 times"):
+        run_fanout(StatusRecorder(be), CFG1, tmp_path / "out", max_attempts=2, poll_seconds=0, log=quiet)
+    created = [j for _, j in jobs.created]
+    assert len(created) == 2 and jobs.cancelled == created
+    # each job was cancelled before the next attempt was created
+    assert [p for m, p, _ in jobs.requests if m == "POST"] == ["/ai/v1/jobs", "/ai/v1/jobs/cancel"] * 2
+    assert be.cancel_open() == [] and jobs.cancelled == created
+    attempts = _status(nebius["s3"], CFG1, 0)["attempts"]
+    assert [(a["job_id"], a["outcome"], a["failed_stage"], a["reason"]) for a in attempts] == [
+        (j, "failed", "run", f"{reason}; cancelled") for j in created]
+    assert all([s["state"] for s in a["states"]] == states for a in attempts)
+
+
+def test_limits_leave_a_job_alone_until_they_are_passed(nebius):
+    nebius["make"](hold={0})
+    be = NebiusBackend(clock=_ticks(600.0))
+    job = be.submit(CFG, 0)
+    assert {be.poll(job) for _ in range(12)} == {"running"}  # 600 s to 7200 s after creation
+    assert be.poll(job) == FAILED and be.jobs[job]["state"] == "CANCELLING"  # 7800 s
+
+
+def test_limit_settings_are_checked_against_the_job_timeout(nebius, monkeypatch):
+    for value, match in [("3600", "longer than the job timeout"), ("abc", "NEBIUS_MAX_JOB_SECONDS must be"),
+                         ("0", "NEBIUS_MAX_JOB_SECONDS must be")]:
+        monkeypatch.setenv("NEBIUS_MAX_JOB_SECONDS", value)
+        with pytest.raises(NebiusNotConfigured, match=match):
+            NebiusBackend()
+    monkeypatch.setenv("NEBIUS_MAX_JOB_SECONDS", "7200")
+    monkeypatch.setenv("NEBIUS_MAX_NO_STATE_SECONDS", "-1")
+    with pytest.raises(NebiusNotConfigured, match="NEBIUS_MAX_NO_STATE_SECONDS"):
+        NebiusBackend()
+
+
+def test_status_record_names_the_failure_stage(nebius, monkeypatch, tmp_path):
+    s3 = nebius["s3"]
+    nebius["make"](hold={0}, states={0: "ERROR"})
+    with pytest.raises(ShardError, match="failed 1 times"):
+        run_fanout(StatusRecorder(NebiusBackend()), CFG1, tmp_path / "a", max_attempts=1, poll_seconds=0, log=quiet)
+    [run] = _status(s3, CFG1, 0)["attempts"]
+    assert (run["outcome"], run["failed_stage"], run["reason"]) == ("failed", "run", "ERROR")
+    assert [s["state"] for s in run["states"]] == ["PROVISIONING", "IMAGE_PULLING", "ERROR"]
+    assert run["resources"] == {"platform": "cpu-d3", "preset": "4vcpu-16gb", "disk_bytes": 64 * 1024**3,
+                                "timeout": "3600s"}
+    assert run["job_id"] and run["wall_seconds"] >= 0 and run["finished_at"] >= run["submitted_at"]
+
+    nebius["make"](hold={0}, states={0: "COMPLETED"})
+    cfg = dataclasses.replace(CFG1, run_id="r3")
+    with pytest.raises(ShardError, match="uploaded nothing"):
+        run_fanout(StatusRecorder(NebiusBackend()), cfg, tmp_path / "b", poll_seconds=0, log=quiet)
+    [fetch] = _status(s3, cfg, 0)["attempts"]
+    assert (fetch["outcome"], fetch["failed_stage"]) == ("failed", "fetch") and "uploaded nothing" in fetch["reason"]
+    assert fetch["states"][-1]["state"] == "COMPLETED"
+
+    monkeypatch.setenv("NEBIUS_IAM_TOKEN", "wrong-token-abcdefgh")
+    cfg = dataclasses.replace(CFG1, run_id="r4")
+    with pytest.raises(ShardError, match="HTTP 401"):
+        run_fanout(StatusRecorder(NebiusBackend()), cfg, tmp_path / "c", poll_seconds=0, log=quiet)
+    [submit] = _status(s3, cfg, 0)["attempts"]
+    assert (submit["job_id"], submit["outcome"], submit["failed_stage"]) == (None, "failed", "submit")
+    assert "HTTP 401" in submit["reason"] and b"wrong-token" not in s3.objects[status_key(cfg, 0)]
+
+
+def test_local_backend_records_attempts_and_a_failed_marker(tmp_path, monkeypatch):
+    def command(cfg, i, out):
+        return [sys.executable, "-c", f"import pathlib; p = pathlib.Path(r'{out}') / 'shards' / '{i}of{cfg.shards}'; "
+                                      "p.mkdir(parents=True, exist_ok=True); (p / 'x.txt').write_text('x')"]
+
+    def kill(i):
+        raise KeyboardInterrupt  # stop before the merge, which these stand-in shards cannot pass
+
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", fail_first={0}, command=command)
+    with pytest.raises(KeyboardInterrupt):
+        run_fanout(StatusRecorder(be), CFG1, tmp_path / "out", poll_seconds=0, on_shard_done=kill, log=quiet)
+    rec = json.loads(be.get_object(status_key(CFG1, 0)))
+    first, second = rec["attempts"]
+    assert (first["job_id"], first["outcome"], first["failed_stage"]) == ("r2-0-1", "failed", "run")
+    assert first["reason"].startswith("exit code 3, log ") and first["states"][-1]["state"] == "exited 3"
+    assert (second["job_id"], second["outcome"], second["failed_stage"], second["reason"]) == (
+        "r2-0-2", "succeeded", None, None)
+    assert second["states"][-1]["state"] == "exited 0" and second["resources"] is None and second["wall_seconds"] > 0
+
+    class MarkerFails(LocalBackend):
+        def put_object(self, key, data):
+            if "/done/" in key:
+                raise OSError("disk full, key do-not-store-me-123")
+            super().put_object(key, data)
+
+    monkeypatch.setenv("NEBIUS_SECRET_ACCESS_KEY", "do-not-store-me-123")
+    be = MarkerFails(tmp_path / "store", tmp_path / "scratch", command=command)
+    cfg = dataclasses.replace(CFG1, run_id="r5")
+    with pytest.raises(OSError, match="disk full"):
+        run_fanout(StatusRecorder(be), cfg, tmp_path / "out", poll_seconds=0, log=quiet)
+    [marker] = json.loads(be.get_object(status_key(cfg, 0)))["attempts"]
+    assert (marker["outcome"], marker["failed_stage"], marker["reason"]) == (
+        "failed", "marker", "disk full, key [redacted]")
+
+
+def test_stopping_after_a_job_succeeded_is_not_recorded_as_a_cancel(nebius, tmp_path):
+    class StopsInFetch(NebiusBackend):
+        def fetch_result(self, job_id, prefix):
+            raise KeyboardInterrupt
+
+    nebius["make"](hold={0}, states={0: "COMPLETED"})
+    rec = StatusRecorder(StopsInFetch())
+    with pytest.raises(KeyboardInterrupt):
+        run_fanout(rec, CFG1, tmp_path / "out", poll_seconds=0, log=quiet)
+    assert rec.cancel_open() == [] and nebius["jobs"].cancelled == []
+    [a] = _status(nebius["s3"], CFG1, 0)["attempts"]
+    assert (a["outcome"], a["failed_stage"]) == ("failed", "fetch") and a["states"][-1]["state"] == "COMPLETED"
+
+
+@needs_sim
+def test_status_record_survives_a_kill_and_rerun(nebius, reference, tmp_path):
+    s3 = nebius["s3"]
+    jobs = nebius["make"](hold={1})
+
+    def kill(i):
+        raise KeyboardInterrupt  # the orchestrator dies here, so nothing cancels shard 1's job
+
+    with pytest.raises(KeyboardInterrupt):
+        run_fanout(StatusRecorder(NebiusBackend()), CFG, tmp_path / "out", on_shard_done=kill, log=quiet)
+    first = dict(jobs.created)
+    done, left = _status(s3, CFG, 0), _status(s3, CFG, 1)
+    [a] = done["attempts"]
+    assert (a["job_id"], a["outcome"], a["failed_stage"]) == (first[0], "succeeded", None)
+    states = [s["state"] for s in a["states"]]
+    assert states[:2] == ["PROVISIONING", "IMAGE_PULLING"] and states[-1] == "COMPLETED"
+    assert a["resources"]["preset"] == "4vcpu-16gb" and a["wall_seconds"] > 0
+    assert [(b["job_id"], b["outcome"]) for b in left["attempts"]] == [(first[1], "running")]
+
+    jobs = nebius["make"]()  # a new orchestrating process; the bucket is the same
+    res = run_fanout(StatusRecorder(NebiusBackend()), CFG, tmp_path / "out", log=quiet)
+    assert res["skipped"] == [0] and res["ran"] == [1]
+    assert _status(s3, CFG, 0) == done
+    after = _status(s3, CFG, 1)["attempts"]
+    assert [(b["attempt"], b["job_id"], b["outcome"]) for b in after] == [
+        (1, first[1], "abandoned"), (2, dict(jobs.created)[1], "succeeded")]
     _same_episodes(res, reference)

@@ -44,6 +44,8 @@ SETTINGS: dict[str, Setting] = {
     "NEBIUS_JOB_PLATFORM": Setting("arrival.jobs.nebius", default="cpu-d3"),
     "NEBIUS_JOB_PRESET": Setting("arrival.jobs.nebius", default="4vcpu-16gb"),
     "NEBIUS_JOB_SUBNET_ID": Setting("arrival.jobs.nebius"),
+    "NEBIUS_MAX_JOB_SECONDS": Setting("arrival.jobs.nebius", default="7200"),
+    "NEBIUS_MAX_NO_STATE_SECONDS": Setting("arrival.jobs.nebius", default="1800"),
     "NEBIUS_JOB_S3_SECRET_ID": Setting("arrival.jobs.nebius"),
     "NEBIUS_REGION": Setting("arrival.jobs.nebius", default="eu-north1"),
     "NEBIUS_S3_ENDPOINT": Setting("arrival.jobs.nebius"),
