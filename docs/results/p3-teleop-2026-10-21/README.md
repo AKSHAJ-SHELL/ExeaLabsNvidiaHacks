@@ -23,7 +23,7 @@ Capture revision: [db26a01ce16dd848a900aa5cf145296ee03e4a3e](https://github.com/
 
 [session.json](session.json) records the revision and capture arguments. [teleop_baseline.json](teleop_baseline.json) is accepted by `arrival.eval.cost.load_baseline`. [The attempt log](reports/hero_kitchen_teleop_attempts.jsonl) is an unchanged copy of the recorded JSONL. The portable copies replace only the machine-specific output path in the session and the attempt-log path in the baseline. The latter is relative to the baseline's directory. The original local recording is unchanged.
 
-The recorded dataset is distributed separately as `p3-teleop-2026-10-21.zip` (5,083,316 bytes). **Publication pending:** the archive is prepared locally; a download URL must be added when it is uploaded. No dataset files or videos are added to Git.
+The recorded dataset is available as [p3-teleop-2026-10-21.zip](https://github.com/Aadi-Tiwari/ExeaLabsNvidiaHacks/releases/download/p3-teleop-2026-10-21/p3-teleop-2026-10-21.zip) (5,083,316 bytes), hosted on the contributor fork. No dataset files or videos are added to Git.
 
 The ZIP contains a `p3-teleop-2026-10-21/` directory with the baseline, session, attempt log, `datasets/hero_kitchen_teleop/`, and [SHA256SUMS](SHA256SUMS). Its SHA-256 is in [archive.sha256](archive.sha256). All 70 listed files matched their checksums after extraction, and the extracted dataset passed validation. The manifest paths are relative to the extracted directory.
 
