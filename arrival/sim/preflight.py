@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from arrival.sim.scene import DRAWER_W, drawer_x, front_stand
+from arrival.sim.scene import DRAWER_W, door_w, drawer_x, front_stand
 from arrival.twin.compile import is_counter_host, to_local, to_world
 
 BASE_CLEAR = 0.15  # the base column is 0.12 m in radius
@@ -42,6 +42,14 @@ FLAP_DOOR_BELOW = {"open_oven": 0.24, "open_dishwasher": 0.18}  # fixture height
 PICK_PLACE = ("counter_to_sink", "counter_to_counter")
 MOBILE_STEP = 0.3  # a mobile base parks this far along the source run toward the target, as counter_to_sink parks
 # between the object and the sink; it then drives to `drive_spot` once the object is held
+CLOSE_DOOR_WALL_ALONG = 0.06  # close_door: the base stands this much nearer the hinge when the run ends flush against a
+# wall (hinge within CLOSE_DOOR_FLUSH of it) and the open door's handle starts within CLOSE_DOOR_ROOM of that wall. The
+# side push then starts with the hand squeezed between the panel and the wall, and from the usual spot link6 grazes it
+# (hero counter_b, hinge 0.01 m inside the wall face, handle 0.117 m from it: 27 steps, 2.0 mm). With counter_b slid
+# along the wall the usual spot grazes with the hinge at 0 and neither spot does at 0.01 m. Off the wall (0.16 m doors
+# hinged 0.11 m from it) or with the handle further out (0.86 m doors flush with it) the nearer spot can miss the bar
+# where the usual one closes the door
+CLOSE_DOOR_FLUSH, CLOSE_DOOR_ROOM = 0.005, 0.13
 
 
 def front(f: dict) -> np.ndarray:
@@ -193,7 +201,13 @@ def _stand_rule(twin: dict, task: dict, obj_xy, mobile: bool, arm: str) -> tuple
         yaw_off = -m * FRIDGE_BASE_YAW
     else:
         src = fx[task["fixture"]]
-        base = park(src, *front_stand(src, fam, fixtures))
+        along, out = front_stand(src, fam, fixtures)
+        base = park(src, along, out)
+        hinge_gap, handle_gap = _close_door_gaps(twin, src) if fam == "close_door" else (math.inf, math.inf)
+        if hinge_gap < CLOSE_DOOR_FLUSH and handle_gap < CLOSE_DOOR_ROOM:
+            nearer = park(src, along + CLOSE_DOOR_WALL_ALONG, out)
+            if _stand_problem(twin, np.array(nearer[:2]), src, task=task) is None:
+                base = nearer
     n = front(src)
     return base, float(np.degrees(np.arctan2(-n[1], -n[0])) + yaw_off), src
 
@@ -210,6 +224,27 @@ def _wall_gap(twin: dict, xy) -> float:
     walls = twin.get("walls") or []
     return min((_segment_distance(xy, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
                default=math.inf)
+
+def _close_door_gaps(twin: dict, c: dict) -> tuple[float, float]:
+    """Distances from a cabinet door's hinge edge and from its handle, at the angle close_door starts from, to the
+    nearest wall face square to the run (within 5 deg; a skewed wall leaves a different gap). The offsets are
+    counter_xml's: the hinge 2 cm in from the run's +x end and 1 cm behind the top's edge, the handle 6 cm in from the
+    free edge and 5 cm out from the panel, the door turning clockwise from above."""
+    from arrival.sim.collect import DOOR_OPEN
+
+    r, a = door_w(c, twin["fixtures"]) - 0.06, DOOR_OPEN
+    hx = c["size"][0] / 2 - 0.02 - r * math.cos(a) + 0.05 * math.sin(a)
+    hy = c["size"][1] / 2 - 0.01 + r * math.sin(a) + 0.05 * math.cos(a)
+    n = front(c)
+
+    def square(w):
+        dx, dy = w["end"][0] - w["start"][0], w["end"][1] - w["start"][1]
+        return abs(dx * n[1] - dy * n[0]) < math.sin(math.radians(5)) * math.hypot(dx, dy)
+
+    walls = [w for w in twin.get("walls") or [] if square(w)]
+    return tuple(min((_segment_distance(p, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
+                     default=math.inf)
+                 for p in (to_world((c["size"][0] / 2, c["size"][1] / 2), c), to_world((hx, hy), c)))
 
 
 def _footprint_distance(xy, f: dict) -> float:

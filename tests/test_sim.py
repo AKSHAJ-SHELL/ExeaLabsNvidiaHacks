@@ -290,6 +290,64 @@ def test_arm_stays_out_of_drawn_fronts(twin, family, fixture):
     assert deepest[0] > -0.01, f"{deepest[1]} penetrates {-deepest[0] * 100:.1f} cm"  # contact depth, not a pass-through
 
 
+def test_close_door_keeps_the_wrist_off_the_wall_beside_the_hinge(twin):
+    """counter_b is hinged at the east wall, and close_door's side push starts with the hand between the open panel
+    and that wall, the handle 0.117 m from it. From the usual door spot link6 grazed the wall for 27 steps (2.0 mm);
+    close_door now stands CLOSE_DOOR_WALL_ALONG nearer the hinge there. counter_a keeps the usual spot."""
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.preflight import CLOSE_DOOR_WALL_ALONG, base_pose, park
+    from arrival.sim.scene import front_stand
+
+    for fixture, shift in (("counter_a", 0.0), ("counter_b", CLOSE_DOOR_WALL_ALONG)):
+        src = next(f for f in twin["fixtures"] if f["id"] == fixture)
+        rule = park(src, *front_stand(src, "close_door", twin["fixtures"]))
+        base, _, _ = base_pose(twin, {"family": "close_door", "fixture": fixture})
+        assert np.allclose(np.subtract(base[:2], rule[:2]), (shift, 0.0))  # both runs face +y with the hinge at +x
+
+    task = {"family": "close_door", "fixture": "counter_b", "joint": "counter_b_door", "lighting": "neutral",
+            "people": 0, "seed": 0}
+    env = SimEnv(twin, task, res=32)
+    m, d = env.model, env.data
+    links = {g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith("link")}
+    walls = {g for g in range(m.ngeom) if m.geom(g).name.startswith("wall_")}
+    hits = []
+    step = env.step
+
+    def checked_step(a):
+        step(a)
+        hits.extend(k for k in range(d.ncon) if {d.contact[k].geom1, d.contact[k].geom2} & links
+                    and {d.contact[k].geom1, d.contact[k].geom2} & walls)
+
+    env.step = checked_step
+    ep = run_episode(env, ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+    assert not hits
+
+
+def test_close_door_keeps_its_spot_when_the_handle_has_room(twin):
+    """counter_b cut to 1.0 m (a 0.46 m door) with its hinge end 0.10 m from the east wall: the run is not flush with
+    the wall, so close_door keeps the usual spot and shuts the door. From the nearer spot the door stays at 0.09 rad,
+    and a rule on the hinge's distance alone (within 0.15 m) moved it there."""
+    import copy
+
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.preflight import CLOSE_DOOR_FLUSH, _close_door_gaps, base_pose, park
+    from arrival.sim.scene import door_w, front_stand
+
+    tw = copy.deepcopy(twin)
+    b = next(f for f in tw["fixtures"] if f["id"] == "counter_b")
+    b["size"][0], b["position"][0] = 1.0, 4.0 - 0.10 - 0.5  # wall_east stands on x = 4.0
+    assert door_w(b, tw["fixtures"]) == pytest.approx(0.46) and _close_door_gaps(tw, b)[0] > CLOSE_DOOR_FLUSH
+    base, _, _ = base_pose(tw, {"family": "close_door", "fixture": "counter_b"})
+    assert np.allclose(base[:2], park(b, *front_stand(b, "close_door", tw["fixtures"]))[:2])
+    task = {"family": "close_door", "fixture": "counter_b", "joint": "counter_b_door", "lighting": "neutral",
+            "people": 0, "seed": 0}
+    ep = run_episode(SimEnv(tw, task, res=32), ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+
+
 def test_vla_requires_server(monkeypatch):
     monkeypatch.delenv("GR00T_POLICY_URL", raising=False)
     with pytest.raises(VLANotConfigured):
