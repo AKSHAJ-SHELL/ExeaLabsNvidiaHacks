@@ -56,9 +56,12 @@ Video policy:
 - `--videos sparse` (required for the 1,000 run): an mp4 when `episode_index % 125 == 0`, so episodes 0, 125, …, 875 (8 files).
 - `--videos none`: no mp4. Validator then requires `info.json` field `arrival_video_policy = "none"`. The done command does not use this.
 
-## Composite renderer (specified, not run)
+## Composite renderer (depth rule implemented, full pipeline not run)
 
-This is the spec's step 5. Implement it later behind `arrival.render.splat`. Do not fake it tonight.
+`arrival.render.splat.render` implements the depth selection rule below for
+aligned static and dynamic RGB-D layers. A trained Gaussian splat, camera-pose
+rendering, and a dynamic-only simulator pass still need to supply those layers
+before an episode can use the composite. No dataset is labelled as splat output.
 
 For each robot camera pose at each frame:
 
