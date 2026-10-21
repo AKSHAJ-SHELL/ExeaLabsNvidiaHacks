@@ -74,6 +74,10 @@ def check_frame(orig: np.ndarray, var: np.ndarray, mask: np.ndarray | None = Non
     if var.shape != orig.shape:
         return {"ok": False, "reason": f"shape {list(var.shape)} != {list(orig.shape)}",
                 "edge_corr": None, "mask_change": None}
+    if mask is not None and (not isinstance(mask, np.ndarray) or mask.dtype != np.bool_
+                             or mask.shape != orig.shape[:2]):
+        return {"ok": False, "reason": "mask must be a boolean array matching frame height and width",
+                "edge_corr": None, "mask_change": None}
     corr = edge_correlation(orig, var)
     mc = masked_change(orig, var, mask)
     reason = None
