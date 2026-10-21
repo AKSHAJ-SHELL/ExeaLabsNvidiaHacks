@@ -254,18 +254,35 @@ def cmd_sim(a) -> int:
 
 
 def cmd_fanout(a) -> int:
-    """Run the sim shards on the local fake backend (a directory as object storage), resumably, and merge them."""
+    """Run the sim shards resumably on the local fake backend (a directory as object storage) or, with
+    `--backend nebius`, as Nebius Serverless AI Jobs with an Object Storage bucket, and merge them."""
     from arrival.export.validate import validate
     from arrival.jobs.fanout import FanoutConfig, LocalBackend, run_fanout
+    from arrival.jobs.fanout_status import StatusRecorder
     from arrival.jobs.shards import ShardError
 
     cfg = FanoutConfig(a.run_id, a.shards, a.room, a.families, a.episodes, a.people, a.res, a.seed, a.scans)
-    be = LocalBackend(Path(a.out) / "fanout_store", Path(a.out) / "fanout_scratch")
+    if a.backend == "nebius":
+        from arrival.jobs.nebius import NebiusBackend, NebiusNotConfigured
+
+        try:
+            be = NebiusBackend()
+        except NebiusNotConfigured as e:
+            print(f"fanout: {e}", file=sys.stderr)
+            return EXIT_USAGE
+    else:
+        be = LocalBackend(Path(a.out) / "fanout_store", Path(a.out) / "fanout_scratch")
+    rec = StatusRecorder(be)
     try:
-        res = run_fanout(be, cfg, a.out)
+        res = run_fanout(rec, cfg, a.out)
     except ShardError as e:
         print(f"fanout: {e}", file=sys.stderr)
         return EXIT_USAGE
+    finally:
+        if a.backend == "nebius":  # remote jobs outlive this process unless cancelled
+            left = rec.cancel_open()
+            if left:
+                print(f"fanout: could not cancel Nebius jobs {left}; cancel them by hand", file=sys.stderr)
     problems = validate(res["dataset"])
     print(f"dataset: {res['dataset']} (ran shards {res['ran']}, skipped {res['skipped']})")
     return EXIT_OK if not problems else EXIT_USAGE
@@ -564,7 +581,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="continue a killed run from its progress journal instead of starting over (same settings)")
     m.add_argument("--tavily", action="store_true", help="Enrich digital twin and VLM planning with Tavily appliance research")
     m.set_defaults(fn=cmd_sim)
-    f = sub.add_parser("fanout", help="run sim shards on the LOCAL fake job backend, resumable, then merge (no Nebius)")
+    f = sub.add_parser("fanout", help="run sim shards on a job backend, resumable, then merge (local by default)")
+    f.add_argument("--backend", choices=["local", "nebius"], default="local",
+                   help="local subprocesses and a directory, or Nebius Serverless AI Jobs and Object Storage "
+                        "(NEBIUS_* settings; tested against fakes only)")
     f.add_argument("--run-id", default="run")
     f.add_argument("--shards", type=int, default=2)
     f.add_argument("--room", default="hero_kitchen")

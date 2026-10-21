@@ -712,7 +712,7 @@
      "size": "L",
      "priority": "must",
      "issue": 66,
-     "note": "Fan-out client with a local backend, done-markers, retry and resume is built and tested. No Nebius client exists."
+     "note": "Fan-out with done-markers, retry and resume is built. arrival fanout --backend nebius runs shards as Serverless AI Jobs with an Object Storage bucket, tested only against in-process fakes of both APIs. It has never run against Nebius; the one small real run needs an account."
     },
     {
      "id": "C2",

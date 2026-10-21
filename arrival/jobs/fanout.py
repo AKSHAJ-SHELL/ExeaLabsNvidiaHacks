@@ -5,8 +5,9 @@ no done-marker to a `Backend`, polls, retries a failed shard, copies a finished 
 storage and writes that shard's done-marker LAST, so a marker means the shard's files are all there. A rerun after a
 kill skips every shard with a marker. When all markers exist the shards are downloaded and joined with `merge_shards`.
 
-Only `LocalBackend` exists and is tested: shards are local subprocesses and a directory stands in for object storage.
-`NebiusBackendStub` is an UNTESTED interface stub. No Nebius account was used; nothing here has run against Nebius."""
+`LocalBackend` runs shards as local subprocesses, with a directory standing in for object storage. `NebiusBackend`
+(arrival/jobs/nebius.py) runs them as Nebius Serverless AI Jobs with an Object Storage bucket; it is tested only
+against fakes and has never run against Nebius. `NebiusBackendStub` below is the earlier stub, which still raises."""
 
 from __future__ import annotations
 
@@ -140,6 +141,14 @@ class LocalBackend:
         base = self._path(prefix)
         return sorted(p.relative_to(self.store).as_posix() for p in base.rglob("*")
                       if p.is_file() and not p.name.endswith(".part"))
+
+    def describe(self, job_id: str) -> dict:
+        """What the status record keeps for a job. A local subprocess has no resource preset."""
+        proc, _, out, _ = self._jobs[job_id]
+        code = proc.poll()
+        log = out / f"attempt{job_id.rsplit('-', 1)[-1]}.log"
+        return {"state": "running" if code is None else f"exited {code}",
+                "reason": f"exit code {code}, log {log}" if code else None, "resources": None}
 
 
 class NebiusBackendStub:

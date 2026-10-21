@@ -37,6 +37,21 @@ SETTINGS: dict[str, Setting] = {
     "TAVILY_BASE_URL": Setting("arrival.models.tavily", default="https://api.tavily.com/search"),
     "GR00T_POLICY_URL": Setting("arrival.sim.policy.VLAClient (--policy vla)"),
     "COSMOS_URL": Setting("arrival.render.variation.CosmosClient (--backend cosmos)"),
+    "NEBIUS_IAM_TOKEN": Setting("arrival.jobs.nebius (fanout --backend nebius)", secret=True),
+    "NEBIUS_API_URL": Setting("arrival.jobs.nebius", default="https://api.nebius.cloud"),
+    "NEBIUS_PROJECT_ID": Setting("arrival.jobs.nebius"),
+    "NEBIUS_JOB_IMAGE": Setting("arrival.jobs.nebius"),
+    "NEBIUS_JOB_PLATFORM": Setting("arrival.jobs.nebius", default="cpu-d3"),
+    "NEBIUS_JOB_PRESET": Setting("arrival.jobs.nebius", default="4vcpu-16gb"),
+    "NEBIUS_JOB_SUBNET_ID": Setting("arrival.jobs.nebius"),
+    "NEBIUS_MAX_JOB_SECONDS": Setting("arrival.jobs.nebius", default="7200"),
+    "NEBIUS_MAX_NO_STATE_SECONDS": Setting("arrival.jobs.nebius", default="1800"),
+    "NEBIUS_JOB_S3_SECRET_ID": Setting("arrival.jobs.nebius"),
+    "NEBIUS_REGION": Setting("arrival.jobs.nebius", default="eu-north1"),
+    "NEBIUS_S3_ENDPOINT": Setting("arrival.jobs.nebius"),
+    "NEBIUS_BUCKET": Setting("arrival.jobs.nebius"),
+    "NEBIUS_ACCESS_KEY_ID": Setting("arrival.jobs.nebius", secret=True),
+    "NEBIUS_SECRET_ACCESS_KEY": Setting("arrival.jobs.nebius", secret=True),
 }
 
 # token shapes worth scrubbing even when the value is not one of ours (a key pasted into an error message)
