@@ -35,6 +35,10 @@ def _u64(*parts) -> int:
 
 def select_frames(episode_index: int, n_frames: int, seed: int, fraction: float = FRACTION) -> list[int]:
     """The round(fraction * n) frames with the smallest hash of (episode_index, frame_index, seed), sorted."""
+    if type(n_frames) is not int or n_frames < 0:
+        raise ValueError("n_frames must be a non-negative integer")
+    if type(fraction) not in (int, float) or not math.isfinite(fraction) or not 0 <= fraction <= 1:
+        raise ValueError("fraction must be finite and between 0 and 1")
     k = min(n_frames, int(round(fraction * n_frames)))
     ranked = sorted(range(n_frames), key=lambda i: (_u64(episode_index, i, seed), i))
     return sorted(ranked[:k])
@@ -178,6 +182,7 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     src, dst = Path(src), Path(dst)
     if backend not in ("cosmos", "local_stub"):
         raise ValueError(f"unknown backend {backend!r}")
+    select_frames(0, 0, seed, fraction)  # reject invalid fractions before copying the dataset
     if dst.exists():
         raise FileExistsError(f"{dst} exists; the copy directory must be new")
     shutil.copytree(src, dst)
