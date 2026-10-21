@@ -152,7 +152,9 @@ def validate(root: Path) -> dict:
             raise FramesError("bad_image", f"{what} {path.name} is not a readable image: {type(e).__name__}") from None
 
     for f in m.frames:
-        open_image(f.rgb, rgb_wh, "rgb")
+        rgb_mode = open_image(f.rgb, rgb_wh, "rgb")
+        if rgb_mode not in ("RGB", "RGBA"):
+            raise FramesError("bad_image", f"rgb {f.rgb.name} must contain RGB channels, got mode {rgb_mode}")
         if f.confidence is not None:
             open_image(f.confidence, None, "confidence")
         if m.depth_unit == "m":
