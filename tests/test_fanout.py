@@ -71,3 +71,14 @@ def test_gives_up_after_max_attempts_and_refuses_other_settings(tmp_path):
 def test_nebius_stub_is_not_a_backend():
     with pytest.raises(NotImplementedError):
         NebiusBackendStub().submit(CFG, 0)
+
+
+def test_local_backend_refuses_another_shards_output(tmp_path):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    job = be.submit(CFG, 0)
+    wrong = tmp_path / "scratch" / CFG.run_id / "0of2" / "shards" / "1of2"
+    wrong.mkdir(parents=True)
+    (wrong / "result.txt").write_text("wrong shard")
+    with pytest.raises(ShardError, match="expected shard folder"):
+        be.fetch_result(job, f"{CFG.run_id}/shards/0of2")
+    assert be.list_objects(f"{CFG.run_id}/shards/0of2") == []
