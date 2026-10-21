@@ -309,8 +309,9 @@ def check_loader(root: str | Path) -> dict:
             f.err("stats_missing", f"stats.json has no entry for {c}")
             continue
         if not {"q01", "q99"} <= set(got):
-            f.warn("stats_no_quantiles", f"stats.json {c} has no q01/q99; the recomputed values are in the --json "
-                   f"report (the writer only stores min/max/mean/std)")
+            f.warn("stats_no_quantiles", f"stats.json {c} has no q01/q99 (written before the writers stored them); "
+                   f"GR00T normalises with them, so regenerate with gr00t/data/stats.py or re-run the sim; the "
+                   f"recomputed values are in the --json report")
         for k in (*STAT_KEYS, "q01", "q99"):
             if k not in got:
                 if k not in ("q01", "q99"):

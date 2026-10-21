@@ -58,6 +58,23 @@ def test_fresh_sim_dataset_passes(sim_ds):
     assert "PASS" in format_report(sim_ds, res)
 
 
+def test_stats_json_has_the_quantiles_gr00t_normalises_with(sim_ds):
+    # GR00T's state/action processor reads q01/q99 from meta/stats.json for percentile normalisation
+    stats = json.loads((sim_ds / "meta" / "stats.json").read_text())
+    for col, st in stats.items():
+        assert {"mean", "std", "min", "max", "q01", "q99"} <= set(st), col
+        assert len(st["q01"]) == len(st["q99"]) == len(st["mean"]), col
+        assert np.all(np.asarray(st["min"]) <= st["q01"]) and np.all(np.asarray(st["q99"]) <= st["max"]), col
+    res = check_loader(sim_ds)
+    assert "stats_no_quantiles" not in {w["code"] for w in res["warnings"]}
+    assert np.allclose(stats["action"]["q99"], res["stats"]["action"]["q99"])
+
+
+def test_wrong_quantile_is_a_mismatch(copy):
+    edit_json(copy / "meta" / "stats.json", lambda d: d["action"].update(q01=[v - 1.0 for v in d["action"]["q01"]]))
+    assert "stats_mismatch" in codes(check_loader(copy))
+
+
 def test_placeholder_demo_is_refused(tmp_path):
     out = tmp_path / "out"
     ds = run_demo("hero_kitchen", 2, "all", out_dir=out, scans_dir=SCANS, log=lambda *a: None)["dataset"]

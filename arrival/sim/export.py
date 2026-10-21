@@ -10,7 +10,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from arrival.export.lerobot import (CHUNKS_SIZE, MODALITY, SCHEMA, _merge_stats, _stats, check_video_size, chunk_of,
+from arrival.export.lerobot import (CHUNKS_SIZE, MODALITY, SCHEMA, _stats, check_video_size, chunk_of, dataset_stats,
                                     video_info, write_video)
 from arrival.sim import menagerie, robot
 
@@ -128,8 +128,7 @@ class SimDatasetWriter:
                 for r in rows:
                     f.write(json.dumps(r) + "\n")
         if self.stats:
-            (meta / "stats.json").write_text(json.dumps(
-                {k: _merge_stats([r["stats"][k] for r in self.stats]) for k in self.stats[0]["stats"]}, indent=2))
+            (meta / "stats.json").write_text(json.dumps(dataset_stats(self.root, self.stats), indent=2))
         modality = json.loads(json.dumps(MODALITY))
         modality["state"]["base"] = dict(BASE_SLICE)
         modality["action"]["base"] = {**BASE_SLICE, "absolute": True}

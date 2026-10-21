@@ -166,6 +166,10 @@ def test_drop_writes_a_valid_reindexed_dataset(ds, tmp_path):
     assert len(list((out / "videos").rglob("*.mp4"))) == 12
     stats = json.loads((out / "meta" / "stats.json").read_text())
     assert stats["observation.state"]["count"] == [info["total_frames"]]
+    rows = np.concatenate([np.asarray(pq.read_table(f).column("observation.state").to_pylist())
+                           for f in sorted((out / "data").rglob("*.parquet"))])
+    assert np.allclose(stats["observation.state"]["q01"], np.quantile(rows, 0.01, axis=0))
+    assert np.allclose(stats["observation.state"]["q99"], np.quantile(rows, 0.99, axis=0))
 
 
 def test_drop_in_the_middle_reindexes_and_keeps_validity(tmp_path):
