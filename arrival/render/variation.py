@@ -155,7 +155,12 @@ class CosmosClient:
                     body = r.read()
                     self.model = r.headers.get("X-Cosmos-Model", self.model)
                     self.version = r.headers.get("X-Cosmos-Version", self.version)
-                img = np.asarray(imageio.imread(io.BytesIO(body), format="PNG"))[..., :3].astype(np.uint8)
+                img = np.asarray(imageio.imread(io.BytesIO(body), format="PNG"))
+                if (img.dtype != np.uint8 or img.ndim != 3 or img.shape[2] not in (3, 4)
+                        or img.shape[:2] != frame.shape[:2]):
+                    raise ValueError(f"expected uint8 RGB or RGBA PNG at {frame.shape[:2]}, got "
+                                     f"{img.dtype} {img.shape}")
+                img = img[..., :3]
                 return img, {"prompt": self.prompt, "attempts": attempt + 1}
             except (urllib.error.URLError, OSError, ValueError) as e:
                 last = e

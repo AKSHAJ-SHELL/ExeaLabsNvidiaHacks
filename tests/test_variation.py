@@ -112,6 +112,17 @@ def test_cosmos_mock_server_pairs_ids_and_label(dataset, tmp_path):
                for r in rs)
 
 
+def test_cosmos_client_rejects_grayscale_response():
+    srv = serve(lambda img: img[..., 0])
+    try:
+        client = variation.CosmosClient(f"http://127.0.0.1:{srv.server_port}/", timeout=5, retries=0)
+        with pytest.raises(RuntimeError, match="expected uint8 RGB or RGBA PNG"):
+            client(np.zeros((8, 8, 3), np.uint8), 0, 0)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_server_down_falls_back_cleanly(dataset, tmp_path):
     srv = serve(lambda img: img)
     port = srv.server_port
