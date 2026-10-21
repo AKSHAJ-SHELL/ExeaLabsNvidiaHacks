@@ -174,8 +174,11 @@ def _stand_rule(twin: dict, task: dict, obj_xy, mobile: bool, arm: str) -> tuple
         # beside the door's free edge and out of its swing (the hinge is on the fixture's left edge), facing the
         # front like the cabinet door tasks
         src = fx[task["fixture"]]
-        base = park(src, src["size"][0] / 2 + FRIDGE_BASE_ALONG, FRIDGE_BASE_OUT)
-        yaw_off = -FRIDGE_BASE_YAW
+        from arrival.sim.scene import fridge_mirror
+
+        m = fridge_mirror(src)  # a right-hinged door's free edge is the fixture's left one
+        base = park(src, m * (src["size"][0] / 2 + FRIDGE_BASE_ALONG), FRIDGE_BASE_OUT)
+        yaw_off = -m * FRIDGE_BASE_YAW
     else:
         src = fx[task["fixture"]]
         base = park(src, *front_stand(src, fam, fixtures))

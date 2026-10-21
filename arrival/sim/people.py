@@ -267,8 +267,9 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
     yaw, L, front = fr.get("yaw", 0.0), g["length"], g["front"]
     centre = np.array(fr["position"][:2], dtype=float)
     hinge = centre + _rot(yaw, g["hinge"])
-    s1 = centre + _rot(yaw, (L / 2 + r, front + r + 0.20))  # 0.2 out: the shoulder stays on the bar's side longer
-    s2 = centre + _rot(yaw, (L / 2 - 0.15, front + r + 0.05))
+    m = g["mirror"]  # +1 left-hinged; -1 right-hinged: every x across the fixture is mirrored
+    s1 = centre + _rot(yaw, (m * (L / 2 + r), front + r + 0.20))  # 0.2 out: the shoulder stays on the bar's side longer
+    s2 = centre + _rot(yaw, (m * (L / 2 - 0.15), front + r + 0.05))
     toe = _rot(yaw, (0.0, -toe_reach(spec, 0.0)))  # the standing toe tip, facing the fridge
     stride = toe_reach(spec, SLOW)
     x0, _, x1, y1 = floor  # the stand points are in the work strip in front of the floor rectangle, like the counter stop
@@ -284,7 +285,7 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
             return None
 
     def panel_dist(p, q):  # distance from a stand point to the door panel at angle q
-        return _seg_dist(hinge, hinge + L * _rot(yaw + q, (1.0, 0.0)), p)
+        return _seg_dist(hinge, hinge + L * _rot(yaw + m * q, (float(m), 0.0)), p)
 
     swing = np.linspace(0.0, OPEN_ANGLE[1], 40)
     if (min(panel_dist(s1, q) for q in swing) < r + 0.02
@@ -302,7 +303,7 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
     sector = {"position": [*(centre + _rot(yaw, (0.0, front + L / 2))), 0.0], "size": [L + 0.7, L + 0.7, 0.0],
               "yaw": yaw}  # the quarter disc the door sweeps, grown for toes: the other walkers route round it
     return {"fixture": fr["id"], "hinge": hinge, "yaw": yaw, "length": L, "handle": g["handle"], "centre": centre,
-            "face": yaw - math.pi / 2, "s1": s1, "s2": s2, "q_open": q_open, "look": float(rng.uniform(*LOOK_T)),
+            "face": yaw - math.pi / 2, "mirror": m, "s1": s1, "s2": s2, "q_open": q_open, "look": float(rng.uniform(*LOOK_T)),
             "sector": sector}
 
 
@@ -463,7 +464,7 @@ class Walkers:
         """A point of the door at angle q, from its frame: x along the panel from the hinge, y out of the front face
         (negative is the inner face), at the handle's height."""
         v = self.visit
-        xy = v["hinge"] + _rot(v["yaw"] + q, (lx, ly))
+        xy = v["hinge"] + _rot(v["yaw"] + v["mirror"] * q, (lx, ly))
         return np.array([xy[0], xy[1], v["handle"][2]])
 
     def _visit_step(self, i: int, tag: str) -> None:
@@ -482,7 +483,7 @@ class Walkers:
             target = self.door_point(q, hx, hy + off)
         else:
             hold = _smooth((q - CATCH) / 0.2)
-            target = self.door_point(q, v["length"] - 0.05, -off - 0.065)  # 0.065 keeps the forearm capsule above the panel's top edge
+            target = self.door_point(q, v["mirror"] * (v["length"] - 0.05), -off - 0.065)  # 0.065 keeps the forearm capsule above the panel's top edge
         w = min(_smooth(t / REACH_T), _smooth((self.total[i] - t) / REACH_T)) * hold
         self.reach[i] = (w, target) if w > 0.0 else None
 

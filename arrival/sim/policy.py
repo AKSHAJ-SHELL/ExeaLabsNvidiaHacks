@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from arrival.sim import ik
+from arrival.sim.scene import fridge_mirror
 from arrival.sim.robot import BASE_SPEED, BASE_TURN, FINGER_OPEN, HAND, HOME
 
 MINJERK_PEAK = 1.875  # peak over mean speed of a min-jerk move: sizes a base drive so it never exceeds BASE_SPEED
@@ -226,13 +227,15 @@ class ScriptedExpert(Policy):
             hinge, h, _ = env.door_geometry(task)
             r = np.linalg.norm((h - hinge)[:2])
             a0 = np.arctan2(*(h - hinge)[[1, 0]])
+            m = fridge_mirror(env.fx[task["fixture"]])  # -1: right-hinged, the whole plan is the mirror image
+            qa = lambda q: (np.pi if m < 0 else 0.0) + m * q  # heading of the panel at door angle q
             s, up = self.seg_steps, np.array([0, 0, 1.0])
 
-            def along(a):  # from the hinge toward the free edge at door angle a
+            def along(a):  # from the hinge toward the free edge, panel heading a
                 return np.array([np.cos(a), np.sin(a), 0.0])
 
-            def nrm(a):  # outward normal of the panel (the door swings counter-clockwise from above)
-                return np.array([-np.sin(a), np.cos(a), 0.0])
+            def nrm(a):  # outward normal of the panel (left: swings counter-clockwise from above; right: clockwise)
+                return m * np.array([-np.sin(a), np.cos(a), 0.0])
 
             def pt(a):
                 return hinge + (r + FRIDGE_HOOK_ALONG) * along(a) + FRIDGE_HOOK_OUT * nrm(a) + (h[2] - hinge[2]) * up
@@ -241,27 +244,27 @@ class ScriptedExpert(Policy):
                 return ik.facing(-along(a0 + FRIDGE_TURN * (a - a0))[:2]) @ FRIDGE_FLIP
 
             def push(q):  # eef with the closed fingertips on the inside face at door angle q
-                return hinge + FRIDGE_PUSH_AT * along(q) - FRIDGE_PUSH_GAP * nrm(q) + (h[2] - hinge[2]) * up
+                return hinge + FRIDGE_PUSH_AT * along(qa(q)) - FRIDGE_PUSH_GAP * nrm(qa(q)) + (h[2] - hinge[2]) * up
 
             def pori(q):
-                return ik.facing(nrm(q)[:2]) @ FRIDGE_PUSH_ROLL
+                return ik.facing(nrm(qa(q))[:2]) @ FRIDGE_PUSH_ROLL
 
             d0, g = along(a0), pt(a0)
             out = [(g + 0.25 * d0 + 0.15 * up, ori(a0), o, s), (g + 0.25 * d0, ori(a0), o, s),
                    (g + 0.08 * d0, ori(a0), o, s, True), (g, ori(a0), o, s), (g, ori(a0), c, self.hold_steps)]
             for k in range(1, 5):
-                a = a0 + FRIDGE_HOOK * k / 4
+                a = a0 + m * FRIDGE_HOOK * k / 4
                 out.append((pt(a), ori(a), c, FRIDGE_PULL_STEPS, k < 4))
-            a, q1 = a0 + FRIDGE_HOOK, FRIDGE_HOOK
-            far = hinge + FRIDGE_FAR * along(q1) + (h[2] - hinge[2]) * up  # clear of the free edge
+            a, q1 = a0 + m * FRIDGE_HOOK, FRIDGE_HOOK
+            far = hinge + FRIDGE_FAR * along(qa(q1)) + (h[2] - hinge[2]) * up  # clear of the free edge
             out += [(pt(a) + FRIDGE_CLEAR * along(a), ori(a), c, s, True),
-                    (far - FRIDGE_BACK * nrm(q1), pori(q1), c, s, True),
-                    (push(q1) - FRIDGE_BACK * nrm(q1), pori(q1), c, s)]
+                    (far - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s, True),
+                    (push(q1) - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s)]
             for k in range(7):
                 q = q1 - np.radians(3) + (FRIDGE_PUSH_END - q1 + np.radians(3)) * k / 6
                 out.append((push(q), pori(q), c, FRIDGE_PULL_STEPS, k < 6))
             q = FRIDGE_PUSH_END
-            out += [(push(q) - 0.12 * nrm(q), pori(q), c, s), (push(q) - 0.12 * nrm(q) + 0.1 * up, pori(q), c, s)]
+            out += [(push(q) - 0.12 * nrm(qa(q)), pori(q), c, s), (push(q) - 0.12 * nrm(qa(q)) + 0.1 * up, pori(q), c, s)]
             return out
         if fam in ("open_oven", "open_dishwasher"):
             # The bar sits on the outside of a bottom-hinged door, so a top-down grasp would put the hand body in
