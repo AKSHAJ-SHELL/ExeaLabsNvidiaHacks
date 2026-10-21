@@ -77,3 +77,15 @@ def test_nebius_stub_is_not_a_backend():
 def test_run_id_cannot_escape_scratch_or_storage(run_id):
     with pytest.raises(ShardError, match="run_id"):
         FanoutConfig(run_id, 2)
+
+@pytest.mark.parametrize("controls", [
+    {"parallel": 0}, {"parallel": -1}, {"parallel": True},
+    {"max_attempts": 0}, {"max_attempts": -1},
+    {"poll_seconds": -0.1}, {"poll_seconds": float("nan")}, {"poll_seconds": float("inf")},
+])
+def test_bad_fanout_controls_fail_before_submitting(controls, tmp_path):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch")
+    with pytest.raises(ShardError):
+        run_fanout(be, CFG, tmp_path / "out", **controls, log=quiet)
+    assert be.submissions == []
+    assert not be.exists("r1/run.json")
