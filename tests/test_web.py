@@ -710,6 +710,14 @@ def _corrupt_rgb(m, root):
     (root / m["frames"][0]["rgb"]).write_bytes(b"not a png at all")
 
 
+def _grayscale_rgb(m, root):
+    from PIL import Image
+
+    path = root / m["frames"][0]["rgb"]
+    with Image.open(path) as im:
+        im.convert("L").save(path)
+
+
 def _wrong_depth_shape(m, root):
     np.save(root / m["frames"][0]["depth"], np.zeros((3, 3), np.float32))
 
@@ -739,6 +747,9 @@ def _bad_axes(m, root):
     (_wrong_confidence_size, "bad_size"), (_pickled_depth, "bad_depth"),
 
     (_wrong_depth_dtype, "depth_shape"), (_pickled_depth, "bad_depth"),
+
+    (_corrupt_rgb, "bad_image"), (_grayscale_rgb, "bad_image"),
+    (_wrong_depth_shape, "depth_shape"), (_pickled_depth, "bad_depth"),
     (_bad_axes, "axis_convention"),
 ])
 def test_bad_frames_bundle_is_rejected_and_nothing_is_queued(make, tmp_path, mutate, code):
