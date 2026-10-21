@@ -117,6 +117,13 @@ def test_baseline_for_another_room_is_not_measured(out, tmp_path):
     assert c["measured"] is False and "garage" in c["reason"]
 
 
+def test_baseline_for_unreported_task_does_not_use_room_totals(out, tmp_path):
+    base = _w(tmp_path / "b.json", {**BASELINE, "task": "pick_and_place"})
+    c = cost.build(out, baseline_path=base)["comparison"]
+    assert c["measured"] is False
+    assert "pick_and_place" in c["reason"]
+
+
 @pytest.mark.parametrize("patch,msg", [
     ({"n_success": 0}, "n_success"), ({"n_success": 2.5}, "n_success"), ({"operator_seconds_total": -1}, "operator_seconds_total"),
     ({"cost_basis_usd": "50"}, "cost_basis_usd"), ({"setup_assumptions": []}, "setup_assumptions"), ({"room": ""}, "room"),
