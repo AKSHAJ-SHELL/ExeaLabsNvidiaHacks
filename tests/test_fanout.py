@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("mujoco")
 
 from arrival.export.validate import validate  # noqa: E402
-from arrival.jobs.fanout import FanoutConfig, LocalBackend, NebiusBackendStub, run_fanout  # noqa: E402
+from arrival.jobs.fanout import FanoutConfig, LocalBackend, NebiusBackendStub, marker_key, run_fanout  # noqa: E402
 from arrival.jobs.shards import ShardError  # noqa: E402
 from conftest import SCANS  # noqa: E402
 
@@ -99,3 +99,12 @@ def test_unknown_backend_state_does_not_count_as_a_failed_attempt(tmp_path):
     with pytest.raises(ShardError, match="unknown state 'queued'"):
         run_fanout(be, CFG, tmp_path / "out", poll_seconds=0, log=quiet)
     assert be.submissions == [(0, 1), (1, 1)]
+
+@pytest.mark.parametrize("marker", [b"{broken", b'{"shard": 1, "attempts": 1}',
+                                    b'{"shard": 0, "attempts": 0}'])
+def test_invalid_done_marker_cannot_skip_a_shard(tmp_path, marker):
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    be.put_object(marker_key(CFG, 0), marker)
+    with pytest.raises(ShardError, match="invalid done marker"):
+        run_fanout(be, CFG, tmp_path / "out", log=quiet)
+    assert be.submissions == []

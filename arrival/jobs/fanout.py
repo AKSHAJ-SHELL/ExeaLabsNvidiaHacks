@@ -180,7 +180,19 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
             raise ShardError(f"run {cfg.run_id!r} in storage was started with different settings; use a new run id")
     else:
         backend.put_object(mkey, json.dumps(manifest, sort_keys=True).encode())
-    todo = [i for i in range(cfg.shards) if not backend.exists(marker_key(cfg, i))]
+    todo = []
+    for i in range(cfg.shards):
+        key = marker_key(cfg, i)
+        if not backend.exists(key):
+            todo.append(i)
+            continue
+        try:
+            marker = json.loads(backend.get_object(key))
+        except (ValueError, UnicodeDecodeError) as e:
+            raise ShardError(f"invalid done marker {key}: {e}") from e
+        if (not isinstance(marker, dict) or type(marker.get("shard")) is not int or marker["shard"] != i or
+                type(marker.get("attempts")) is not int or marker["attempts"] < 1):
+            raise ShardError(f"invalid done marker {key}: shard or attempts do not match")
     skipped = [i for i in range(cfg.shards) if i not in todo]
     if skipped:
         log(f"fanout: shards {skipped} already done, skipping")
