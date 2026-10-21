@@ -133,6 +133,7 @@ def validate_scan_dir(path: str | Path) -> list[str]:
     if not d.is_dir():
         return [f"{d} is not a directory"]
     problems = []
+    fields = {}
     notes = d / "notes.md"
     if not notes.is_file():
         problems.append("notes.md is missing")
@@ -145,6 +146,21 @@ def validate_scan_dir(path: str | Path) -> list[str]:
             elif key.endswith("_m") and _number(value) is None:
                 problems.append(f"notes.md: '{label}' must be a number of metres above 0 and at most "
                                 f"{MAX_MEASURE_M:g}, got {value!r}")
+    measurements = d / "measurements.json"
+    if not measurements.is_file():
+        problems.append("measurements.json is missing; three tape measurements are required")
+    else:
+        from arrival.twin.accuracy import MeasurementError, load_measurements
+
+        try:
+            measured = load_measurements(measurements)
+        except (MeasurementError, ValueError, OSError) as e:
+            problems.append(f"measurements.json is invalid: {e}")
+        else:
+            for key in MEASURES:
+                note = _number(fields.get(f"{key}_m", ""))
+                if note is not None and not math.isclose(note, measured[f"{key}_m"], abs_tol=1e-9):
+                    problems.append(f"notes.md {key} does not match measurements.json")
     photos = sorted(p for p in d.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
     if len(photos) < MIN_PHOTOS:
         problems.append(f"{len(photos)} photos; at least {MIN_PHOTOS} are required")
@@ -250,7 +266,7 @@ def intake(room_id: str, roomplan_path: str | Path, photos: list | None = None, 
         (tmp / "notes.md").write_text(NOTES_TEMPLATE.format(room_id=room_id, **values), encoding="utf-8")
         if tape:
             (tmp / "measurements.json").write_text(json.dumps(
-                {"units": "meters", "source": "tape_measure", **{k: tape.get(k) for k in MEASURES}}, indent=2) + "\n")
+                {f"{k}_m": tape[k] for k in MEASURES if k in tape}, indent=2) + "\n")
         tmp.rename(dest)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
