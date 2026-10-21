@@ -111,3 +111,16 @@ def test_mobile_config_adds_the_base_key_at_8_to_11(monkeypatch, mobile_dataset)
     assert modality["action"]["base"]["absolute"] is True
     emb = json.loads((mobile_dataset / "meta" / "embodiment.json").read_text())
     assert emb["base_actuated"] is True and emb["dof_base"] == 3
+
+
+def test_multiview_config_matches_paired_dataset(monkeypatch, tmp_path):
+    twin = compile_twin(load_room("hero_kitchen", "scans"))
+    result = collect(twin, ["open_drawer"], 1, tmp_path, people=0, res=32,
+                     exocentric=True, log=lambda *_: None)
+    cfg = _load_config(monkeypatch, CONFIGS / "arrival_panda_multiview_config.py")
+    modality = _modality(result["dataset"])
+    assert cfg["video"].modality_keys == list(modality["video"]) == ["ego_view", "wrist", "overview"]
+    assert cfg["video"].delta_indices == [0]
+    assert cfg["state"].modality_keys == ["single_arm", "gripper"]
+    assert cfg["action"].modality_keys == ["single_arm", "gripper"]
+    assert [c.rep for c in cfg["action"].action_configs] == ["rel", "abs"]

@@ -25,7 +25,7 @@ from arrival.export.lerobot import chunk_of
 SHARD_RE = re.compile(r"^(\d+)/(\d+)$")
 SHARD_DIR_RE = re.compile(r"^\d+of\d+$")
 FINGERPRINT_KEYS = ("room", "families", "episodes", "seed", "people", "policy", "planner", "split", "instructions",
-                    "base", "arm", "res", "shard", "exec_noise")
+                    "base", "arm", "res", "shard", "exec_noise", "cameras")
 SKIP_REASONS_KEPT = 50
 # the shard fields that must agree across shards (index and task_range differ by design)
 SHARED_SHARD_KEYS = ("count", "total_tasks", "episodes", "seed", "families", "people", "policy", "planner", "split",
@@ -72,6 +72,7 @@ class Journal:
         ShardError when the journal belongs to a run with other settings."""
         fp = {k: fingerprint.get(k) for k in FINGERPRINT_KEYS}
         fp["exec_noise"] = fp["exec_noise"] or 0.0
+        fp["cameras"] = fingerprint.get("cameras", ["ego_view", "wrist"])
         if resume and self.path.is_file():
             body = self.path.read_text()
             lines = body.splitlines()
@@ -87,8 +88,10 @@ class Journal:
                 if not isinstance(rows[0], dict):
                     raise ShardError(f"{self.path}: invalid fingerprint record")
                 saved = rows[0].get("fingerprint")
-                if saved is not None:
+                if isinstance(saved, dict):
                     saved = {**saved, "exec_noise": saved.get("exec_noise") or 0.0}  # journals from before DART have none
+                if isinstance(saved, dict):
+                    saved = {"cameras": ["ego_view", "wrist"], **saved}
                 if saved != fp:
                     diff = sorted(k for k in set(fp) | set(saved or {}) if (saved or {}).get(k) != fp.get(k))
                     raise ShardError(f"--resume: the saved progress in {self.path} is for a run with different "

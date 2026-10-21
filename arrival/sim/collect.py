@@ -468,7 +468,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             planner_name: str = "rule", cache_path: str | Path | None = None,
             split: str = "train", use_generated_instructions: bool = False, base: str = "fixed",
             shard: tuple[int, int] | None = None, resume: bool = False, arm: str = "procedural",
-            exec_noise: float = 0.0, log=print) -> dict:
+            exec_noise: float = 0.0, exocentric: bool = False, log=print) -> dict:
     """Collect `episodes` attempts; failed attempts are dropped and counted. A task whose stand spot or reach the
     pre-flight rejects never runs (`skipped_unreachable`, counted per rejected variation), and one whose env build
     or rollout raises is logged with its reason, counted as `skipped_error` and never written, so a bad geometry
@@ -477,6 +477,8 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     (`python scripts/fetch_menagerie.py`); the dataset and report say which arm made them.
     shard=(i, n) runs only block i of n of the `episodes` tasks (arrival/jobs/shards.py) and writes under
     <out_dir>/shards/<i>of<n>/, so n processes cover the run with no overlap; `arrival merge-shards` joins them.
+    exocentric=True adds the existing fixed overview camera to the exported observation at every control tick.
+    With save_preview=True it also writes a labeled ego/exo pair from those same dataset frames.
     Every run journals each finished task; resume=True continues from that journal (a different run's journal is
     refused with a ShardError) and the result is the dataset an uninterrupted run would have written."""
     from arrival.jobs.shards import Journal, shard_dir, shard_range
@@ -484,6 +486,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
     from arrival.sim.policy import ScriptedExpert, VLAClient, VLANotConfigured, VLMPlanner
     from arrival.sim.tasks import finish_task, make_tasks
 
+    cameras = ("ego_view", "wrist", "overview") if exocentric else ("ego_view", "wrist")
     out_dir = Path(out_dir)
     room = twin["room_id"]
     pre: dict = {}
@@ -503,14 +506,14 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
 
     prov = run_record(twin, seed=seed, generator="mujoco_scripted_ik", policy=policy_name, planner=planner_name,
                       episodes=episodes, families=list(families), people=people, res=res, split=split,
-                      exec_noise=exec_noise)
+                      exec_noise=exec_noise, cameras=list(cameras))
     fingerprint = {"room": room, "families": list(families), "episodes": episodes, "seed": seed, "people": people,
                    "policy": policy_name, "planner": planner_name, "split": split,
                    "instructions": use_generated_instructions, "base": base, "arm": arm, "res": res,
-                   "shard": list(shard) if shard else None, "exec_noise": exec_noise}
+                   "shard": list(shard) if shard else None, "exec_noise": exec_noise, "cameras": list(cameras)}
     journal = Journal(out_dir / "progress" / f"{room}_sim.jsonl")
     done = journal.start(fingerprint, resume, tasks[lo:hi])
-    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, ("ego_view", "wrist"), provenance=prov,
+    writer = SimDatasetWriter(out_dir / "datasets" / f"{room}_sim", room, FPS, res, cameras, provenance=prov,
                               base=base, resume=bool(done), arm=arm)
     per: dict = {}
     prior_seconds = 0.0
@@ -563,7 +566,7 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
             log(f"[sim] task {task['task_id']}: planned by {planner.source} -> {plan}")
         stage = "build"
         try:
-            env = SimEnv(twin, task, res=res, overview=save_preview and i == 0, base=base, arm=arm)
+            env = SimEnv(twin, task, res=res, cameras=cameras, overview=save_preview and i == 0, base=base, arm=arm)
             stage = "rollout"
             try:
                 if env.people_note:
@@ -626,7 +629,8 @@ def collect(twin: dict, families: list[str], episodes: int, out_dir: str | Path 
               "door_contacts": sum(f["door_contacts"] for f in per.values()),
               "families": {k: {**v, "success_rate": round(v["successes"] / v["attempts"], 3)} for k, v in per.items()},
               "people": people, "resolution": res, "physics_checked_success": True, "grasp": "friction",
-              "base": base, "arm": arm, **({"shard": shard_info} if shard else {}), **({"resumed_tasks": len(done)} if done else {})}
+              "base": base, "arm": arm, "cameras": list(cameras), **({"shard": shard_info} if shard else {}),
+              **({"resumed_tasks": len(done)} if done else {})}
     rp = out_dir / "reports" / f"{room}_sim.json"
     rp.parent.mkdir(parents=True, exist_ok=True)
     rp.write_text(json.dumps(report, indent=2))
@@ -655,3 +659,7 @@ def _write_preview(d: Path, room: str, frames: list, ep: dict) -> None:
     sheet = np.concatenate([np.concatenate(picks[:3], 1), np.concatenate(picks[3:], 1),
                             np.concatenate(egos[:3], 1), np.concatenate(egos[3:], 1)], 0)
     Image.fromarray(sheet).save(d / f"{room}_sim_contact.png")
+    if "overview" in ep["videos"]:
+        from arrival.render.multiview import write_paired_preview
+
+        write_paired_preview(d / f"{room}_sim_ego_exo", ep["videos"]["ego_view"], ep["videos"]["overview"], FPS)
