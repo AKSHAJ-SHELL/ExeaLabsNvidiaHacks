@@ -1,17 +1,17 @@
 {
- "as_of": "2026-10-20",
+ "as_of": "2026-10-21",
  "repo": "AvnehSBhatia/ExeaLabsNvidiaHacks",
- "source": "README to-do, gh pr list and gh issue list on 2026-10-20, with PRs #96 to #100, #102 to #110 merged into feat/demo-site",
+ "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site",
  "counts": {
   "done": 22,
-  "review": 26,
-  "todo": 4,
+  "review": 28,
+  "todo": 2,
   "blocked": 18,
   "total": 70
  },
  "prs": {
   "merged": 44,
-  "open": 23,
+  "open": 28,
   "closed_unmerged": 4
  },
  "groups": [
@@ -444,6 +444,17 @@
      "issue": 65
     },
     {
+     "id": "L17",
+     "title": "Reachability planner: IK solve of the expert's waypoints, fallback base grid",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "L",
+     "priority": "should",
+     "pr": [
+      116
+     ]
+    },
+    {
      "id": "L18",
      "title": "Retention and deletion",
      "status": "review",
@@ -469,13 +480,14 @@
     },
     {
      "id": "L20",
-     "title": "Usage metering for the cost report",
+     "title": "Usage metering for the cost report; timed keyboard teleop baseline",
      "status": "review",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "should",
      "pr": [
-      96
+      96,
+      113
      ],
      "issue": 67
     },
@@ -492,13 +504,14 @@
     },
     {
      "id": "L22",
-     "title": "Secrets handling: arrival doctor (partly)",
+     "title": "Secrets handling: single config loader, .env.example, redaction, arrival doctor",
      "status": "review",
      "owner_kind": "laptop",
      "size": "S",
      "priority": "should",
      "pr": [
-      97
+      97,
+      114
      ]
     },
     {
@@ -540,6 +553,18 @@
      "note": "Replaces #25. The 34 MB meshes are fetched by script and stay out of git."
     },
     {
+     "id": "L26",
+     "title": "Thin-object (spatula) pinch grasp, in counter_to_sink and wipe, both arms",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "nice",
+     "issue": 32,
+     "pr": [
+      117
+     ]
+    },
+    {
      "id": "L28",
      "title": "Multi-room summary command (real rooms wait on P2)",
      "status": "review",
@@ -571,27 +596,6 @@
    "blurb": "Can be done on a laptop with no extra access.",
    "items": [
     {
-     "id": "L17",
-     "title": "Reachability planner (only the pre-flight is in review)",
-     "status": "todo",
-     "owner_kind": "laptop",
-     "size": "L",
-     "priority": "should",
-     "pr": [
-      99
-     ],
-     "note": "Only the pre-flight reach check exists, in L2."
-    },
-    {
-     "id": "L26",
-     "title": "Thin-object (spatula) pinch grasp",
-     "status": "todo",
-     "owner_kind": "laptop",
-     "size": "M",
-     "priority": "nice",
-     "issue": 32
-    },
-    {
      "id": "L27",
      "title": "People pass: yield and stop behaviour, mirrored fridge plan",
      "status": "todo",
@@ -602,14 +606,14 @@
     },
     {
      "id": "L30",
-     "title": "Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress, teleop timer",
+     "title": "Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress",
      "status": "todo",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "should",
      "issue": 68,
      "pr": [],
-     "note": "Left out of L3, L18, L19 and L20 and listed in the build log as not done."
+     "note": "Left out of L3, L18 and L19 and listed in the build log as not done."
     }
    ]
   },
@@ -712,7 +716,11 @@
      "owner_kind": "cloud",
      "size": "M",
      "priority": "must",
-     "issue": 68
+     "issue": 68,
+     "pr": [
+      115
+     ],
+     "note": "The smoke test for a running server is in review (#115). The deployment itself is still blocked."
     },
     {
      "id": "C3",
@@ -773,7 +781,8 @@
      "owner_kind": "people",
      "size": "S",
      "priority": "should",
-     "issue": 67
+     "issue": 67,
+     "note": "The timer tool is in review as part of L20 (#113); the demos need a person."
     },
     {
      "id": "P4",
