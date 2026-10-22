@@ -47,6 +47,10 @@ class Limits:
 
     def check_request(self, episodes: int, people: int) -> None:
         """Raise ``LimitError`` if one job's sim options exceed the ceilings."""
+        if type(episodes) is not int or episodes < 1:
+            raise LimitError("episodes must be a positive whole number")
+        if type(people) is not int or people < 0:
+            raise LimitError("people must be a nonnegative whole number")
         if self.max_episodes and episodes > self.max_episodes:
             raise LimitError(f"episodes {episodes} exceeds the limit of {self.max_episodes}")
         if self.max_people and people > self.max_people:
