@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import shutil
 from pathlib import Path
 
@@ -79,6 +80,11 @@ SCALAR_FEATURES = {
 
 def video_key(name: str) -> str:
     return name if name.startswith("observation.images.") else f"observation.images.{name}"
+
+
+def _check_camera_name(name: str) -> None:
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
+        raise ValueError(f"camera name {name!r} must be a single safe path component")
 
 
 def chunk_of(episode_index: int, chunks_size: int = CHUNKS_SIZE) -> int:
@@ -156,13 +162,20 @@ class LeRobotWriter:
                  robot_type: str = "robocasa_panda", chunks_size: int = CHUNKS_SIZE):
         if video_policy not in ("all", "sparse", "none"):
             raise ValueError(f"unknown video policy {video_policy!r}")
+        if video_keys is not None and not isinstance(video_keys, (list, tuple)):
+            raise ValueError("video_keys must be a list of camera names")
+        names = list(video_keys if video_keys is not None else ["ego_view"])
+        for name in names:
+            _check_camera_name(name)
+        if len(names) != len(set(names)) or (video_policy == "all" and not names):
+            raise ValueError("video_keys must contain distinct camera names (at least one for 'all')")
         self.root = Path(root)
         self.room_id = room_id
         self.video_policy = video_policy
         self.fps = fps
         self.room_center_x = room_center_x
         self.state_dim, self.action_dim = state_dim, action_dim
-        self.video_keys = list(video_keys if video_keys is not None else ["ego_view"])
+        self.video_keys = names
         base = modality if modality is not None else MODALITY
         self.modality = {k: v for k, v in base.items() if k != "video"}
         self.embodiment = dict(embodiment if embodiment is not None else SCRIPTED_EMBODIMENT)
@@ -217,6 +230,7 @@ class LeRobotWriter:
                 raise ValueError(f"episode {ep}: video policy 'all' needs frames for {missing}")
         clips = {}
         for name, frames in (videos or {}).items():
+            _check_camera_name(name)
             frames = np.asarray(frames, dtype=np.uint8)
             if frames.ndim != 4 or frames.shape[0] != n or frames.shape[3] != 3:
                 raise ValueError(f"episode {ep}: video {name} shape {frames.shape} != ({n},H,W,3)")
