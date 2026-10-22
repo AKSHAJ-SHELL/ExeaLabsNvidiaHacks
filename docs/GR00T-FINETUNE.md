@@ -30,3 +30,11 @@ run results separate.
 The configs' keys follow the dataset's `meta/modality.json`; their
 `annotation.human.task_description` language key follows the
 [GR00T data preparation guide](https://github.com/NVIDIA/Isaac-GR00T/blob/main/getting_started/data_preparation.md).
+
+## Published checkpoint (run 4)
+
+The best fine-tune, 39 of 48 in the sim against 26 of 48 for the clean-data model (paired sign test p = 0.007), is on Hugging Face: <https://huggingface.co/Ish1105/arrival-gr00t-n17-run4>. It is not stored in this repo (about 12 GB of F32 weights).
+
+- Data: 480 clean plus 544 DART episodes, with 102 marginal drawer pulls removed. Clean plus unfiltered DART scored 22 of 48, so the filtering is what matters.
+- Licence: the weights are under the NVIDIA Open Model License, not this repo's Apache 2.0.
+- Limits: simulation only, one room, two tasks, one seed, one run per model. Not for controlling a real robot.

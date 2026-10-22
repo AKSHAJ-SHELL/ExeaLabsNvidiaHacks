@@ -37,7 +37,7 @@ General robot policies like NVIDIA GR00T are trained on generic kitchens. When a
 2. **Twin.** We compile the scan into a digital twin: a RoboCasa-style layout and a MuJoCo scene with working drawers and doors.
 3. **Simulate.** A 7-joint Panda-style arm does tasks in the twin while people walk around. Grasps use friction physics, and success is checked by the simulator.
 4. **Capture.** Every successful episode is written as a [GR00T](https://github.com/NVIDIA/Isaac-GR00T)-compatible LeRobot v2 dataset: joint states, actions, ego and wrist camera video, and language instructions.
-5. **Fine-tune.** GR00T N1.7 has been trained on that room's data (39 of 48 against 26 of 48; small samples, and the base-GR00T and generic-RoboCasa cells are not run).
+5. **Fine-tune.** GR00T N1.7 ([weights](https://huggingface.co/Ish1105/arrival-gr00t-n17-run4), NVIDIA Open Model License) has been trained on that room's data (39 of 48 against 26 of 48; small samples, and the base-GR00T and generic-RoboCasa cells are not run).
 
 Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want to help? Jump to [Join in](#join-in-team-plan-for-30-people).** The product spec is [plan.pdf](plan.pdf).
 
@@ -177,7 +177,7 @@ A GPU host with 40 GB or more, or a Linux box.
 
 | id | what | size | priority | status | PRs or issue | who |
 |---|---|---|---|---|---|---|
-| G1 | Real GR00T loader check and fine-tune on hero_kitchen_sim GR00T N1.7-3B fine-tuned on one 96 GB GPU and scored in the sim on identical trials. Best 39 of 48 (81%) against 26 of 48 for the clean-data baseline (paired sign test p = 0.007): clean data plus DART demos with the marginal drawer pulls removed. Self-reported in #165 and #63; small samples, and the base-GR00T and generic-RoboCasa cells (G3, G4) are not run, so `usefulness` stays null. | M | must | Shipped | #165 | @IshaanM05 |
+| G1 | Real GR00T loader check and fine-tune on hero_kitchen_sim GR00T N1.7-3B fine-tuned on one 96 GB GPU and scored in the sim on identical trials. Best 39 of 48 (81%) against 26 of 48 for the clean-data baseline (paired sign test p = 0.007): clean data plus DART demos with the marginal drawer pulls removed. Self-reported in #165 and #63; small samples, and the base-GR00T and generic-RoboCasa cells (G3, G4) are not run, so `usefulness` stays null. Weights: https://huggingface.co/Ish1105/arrival-gr00t-n17-run4 (NVIDIA Open Model License, not the repo's Apache 2.0). The same card reports clean plus unfiltered DART at 22 of 48. | M | must | Shipped | #165 | @IshaanM05 |
 | G2 | Real GR00T policy server: chunking, both camera keys, golden-file test Wire-format golden test and the 8-float and 11-float schemas are done. The shim has not run against a real GR00T server. | M | must | Blocked | none | @AvnehSBhatia, Claude Code |
 | G3 | Three-cell held-out eval, 50 episodes per cell, Wilson intervals | L | must | Blocked | issue #64 | unassigned |
 | G4 | Generic-RoboCasa baseline dataset and fine-tune | M | must | Blocked | issue #64 | unassigned |
