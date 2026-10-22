@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from arrival.sim.scene import DRAWER_W, drawer_x, front_stand
+from arrival.sim.scene import DRAWER_W, door_w, drawer_x, front_stand
 from arrival.twin.compile import is_counter_host, to_local, to_world
 
 BASE_CLEAR = 0.15  # the base column is 0.12 m in radius
@@ -22,6 +22,12 @@ PART_CLEAR = 0.13  # base centre to an open door or drawer: the column's radius 
 DRAWER_TRAVEL = {"put_in_drawer": 0.14, "open_drawer": 0.325, "close_drawer": 0.30}  # how far each has it pulled
 DRAWER_HANDLE = 0.062  # the bar's outer face past the closed carcass front (front 2 cm in, 7 cm standoff, 12 mm bar)
 WALL_CLEAR = 0.15  # base centre to the wall's face
+OPEN_DOOR_WALL_OUT = 0.12  # open_door: the base stands this much further out when the run's hinge end is drawn at least
+# OPEN_DOOR_INSIDE into a wall and the bar ends the pull within OPEN_DOOR_ROOM of that wall. The pull ends with the outer
+# face turned to the wall and the hand between them, and from the usual spot link7 grazes it (hero counter_b, 0.01 m
+# in: 22 steps, 0.9 mm; 15 steps at 0.06 out). In fuzzed rooms no door that opened from a run flush with a wall
+# grazed it, and there the further spot cost one door its last few degrees (1.067 to 1.024 rad)
+OPEN_DOOR_INSIDE, OPEN_DOOR_ROOM = 0.005, 0.06
 DRAWER_OPEN_PUT = 0.14  # start state for put_in_drawer: wide enough for a mug on the exposed tray, and the base
 # can then park straight in front without the pulled-out front reaching its column
 FRIDGE_BASE_ALONG = 0.1  # base centre past the door's free edge, along the front
@@ -113,6 +119,13 @@ def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: st
     `base_shift` (metres along the anchor fixture's local x, and out from the face of it the base stands at; set by
     the reach planner when the rule's spot cannot reach) stands that far from the rule's spot."""
     base, yaw, src = _stand_rule(twin, task, obj_xy, mobile, arm)
+    if task["family"] == "open_door":
+        hinge_gap, handle_gap = _door_wall_gaps(twin, src, math.radians(80))  # where the expert's pull ends
+        if hinge_gap < -OPEN_DOOR_INSIDE and handle_gap < OPEN_DOOR_ROOM:
+            n = front(src)
+            out = (base[0] + n[0] * OPEN_DOOR_WALL_OUT, base[1] + n[1] * OPEN_DOOR_WALL_OUT, base[2])
+            if _stand_problem(twin, np.array(out[:2]), src, task=task) is None:
+                base = out
     if task.get("base_shift"):
         along, out = task["base_shift"]
         a = src.get("yaw", 0.0)
@@ -196,6 +209,26 @@ def _segment_distance(p, a, b) -> float:
 def _footprint_distance(xy, f: dict) -> float:
     lx, ly = to_local(xy, f)
     return math.hypot(max(abs(lx) - f["size"][0] / 2, 0.0), max(abs(ly) - f["size"][1] / 2, 0.0))
+
+
+def _door_wall_gaps(twin: dict, c: dict, a: float) -> tuple[float, float]:
+    """Distances from a cabinet run's hinge end and from its door handle with the door at angle `a`, to the nearest
+    wall face square to the run (within 5 deg; a skewed wall leaves a different gap). The offsets are counter_xml's:
+    the hinge 2 cm in from the run's +x end and 1 cm behind the top's edge, the handle 6 cm in from the free edge and
+    5 cm out from the panel, the door turning clockwise from above."""
+    r = door_w(c, twin["fixtures"]) - 0.06
+    hx = c["size"][0] / 2 - 0.02 - r * math.cos(a) + 0.05 * math.sin(a)
+    hy = c["size"][1] / 2 - 0.01 + r * math.sin(a) + 0.05 * math.cos(a)
+    n = front(c)
+
+    def square(w):
+        dx, dy = w["end"][0] - w["start"][0], w["end"][1] - w["start"][1]
+        return abs(dx * n[1] - dy * n[0]) < math.sin(math.radians(5)) * math.hypot(dx, dy)
+
+    walls = [w for w in twin.get("walls") or [] if square(w)]
+    return tuple(min((_segment_distance(p, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
+                     default=math.inf)
+                 for p in (to_world((c["size"][0] / 2, c["size"][1] / 2), c), to_world((hx, hy), c)))
 
 
 def open_parts(twin: dict, task: dict) -> list[tuple[str, dict, tuple[float, float, float, float]]]:

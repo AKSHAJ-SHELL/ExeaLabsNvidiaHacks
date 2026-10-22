@@ -219,7 +219,7 @@ Status as of Oct 17 (scripted expert, friction grasps, physics-checked; 16/16 ov
 |---|---|---|
 | `counter_to_sink` | 100% | mug, cup, apple and bottle by the body; bowl and plate by the rim; pan by its handle; spatula pinched across its width with the pad tips 3 mm over the counter (L26) |
 | `open_drawer` | 100% | both counters |
-| `open_door` | 100% | both cabinet doors, 8/8 over two seeds; the door ends at about 70° (threshold 60°) |
+| `open_door` | 100% | both cabinet doors, 8/8 over two seeds; the door ends at about 70° (threshold 60°). A run whose hinge end is drawn at least 5 mm into a wall, with the bar ending the pull within 0.06 m of it (the hero kitchen's `counter_b`), is pulled from 0.12 m further out, which keeps the wrist off that wall |
 | `counter_to_counter` | 100% with `--base mobile`, skipped on the fixed base | pick point and target about 2 m apart: the base parks a step toward the target, grasps, tucks the object in front of itself above the counter top, drives along the counter front and places; 6/6 with two people (seed 1, 0 contacts, closest 0.11 m); also runs on the u_kitchen_42 run that faces -y |
 | `close_drawer` | 100% | starts open 0.30 m, pushed shut on the handle bar; success is the slide joint under 0.03 m |
 | `close_door` | 100% | starts open 70°; the closed fingers push the handle bar along its arc from the side to 40°, then the hand goes back to its start pose and pushes the door shut from in front; success is the hinge under 5° |

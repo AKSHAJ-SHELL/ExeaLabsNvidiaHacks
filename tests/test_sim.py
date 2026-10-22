@@ -103,6 +103,63 @@ def test_door_pull_keeps_joint7_off_its_stop(twin, fixture):
     assert np.abs(ep["states"][:, 6]).max() < robot.RANGES[6][1] - 0.3
 
 
+def _open_door_wall_steps(twin, fixture):
+    from arrival.sim.collect import run_episode
+    from arrival.sim.policy import ScriptedExpert
+
+    task = {"family": "open_door", "fixture": fixture, "joint": f"{fixture}_door", "lighting": "neutral", "people": 0,
+            "seed": 0}
+    env = SimEnv(twin, task, res=32)
+    m, d = env.model, env.data
+    links = {g for g in range(m.ngeom) if m.body(m.geom_bodyid[g]).name.startswith("link")}
+    walls = {g for g in range(m.ngeom) if m.geom(g).name.startswith("wall_")}
+    hits = [0]
+    step = env.step
+
+    def checked_step(a):
+        step(a)
+        hits[0] += any({c.geom1, c.geom2} & links and {c.geom1, c.geom2} & walls for c in d.contact[:d.ncon])
+
+    env.step = checked_step
+    return run_episode(env, ScriptedExpert(), task), hits[0]
+
+
+def test_door_pull_keeps_the_wrist_off_the_wall_beside_the_hinge(twin):
+    """counter_b's hinge end is drawn 1 cm into the east wall, and the pull ends with the bar 4 cm from it. From the
+    usual door spot link7 grazed the wall for 22 steps (0.9 mm); open_door stands OPEN_DOOR_WALL_OUT further out there.
+    counter_a keeps the usual spot."""
+    from arrival.sim.preflight import OPEN_DOOR_WALL_OUT, base_pose, park
+    from arrival.sim.scene import front_stand
+
+    for fixture, out in (("counter_a", 0.0), ("counter_b", OPEN_DOOR_WALL_OUT)):
+        src = next(f for f in twin["fixtures"] if f["id"] == fixture)
+        rule = park(src, *front_stand(src, "open_door", twin["fixtures"]))
+        base, _, _ = base_pose(twin, {"family": "open_door", "fixture": fixture})
+        assert np.allclose(np.subtract(base[:2], rule[:2]), (0.0, out))  # both runs face +y
+    ep, hits = _open_door_wall_steps(twin, "counter_b")
+    assert ep["success"], ep["detail"]
+    assert hits == 0
+
+
+def test_door_pull_keeps_its_spot_when_the_run_stops_at_the_wall(twin):
+    """counter_b slid 1 cm off the east wall, its end flush with the wall face: the usual spot opens the door. In
+    fuzzed rooms no door that opened from a flush run grazed the wall, and there the further spot left one door short
+    of 60 deg."""
+    import copy
+
+    from arrival.sim.preflight import OPEN_DOOR_INSIDE, _door_wall_gaps, base_pose, park
+    from arrival.sim.scene import front_stand
+
+    tw = copy.deepcopy(twin)
+    b = next(f for f in tw["fixtures"] if f["id"] == "counter_b")
+    b["position"][0] -= 0.01
+    assert abs(_door_wall_gaps(tw, b, np.radians(80))[0]) < OPEN_DOOR_INSIDE
+    base, _, _ = base_pose(tw, {"family": "open_door", "fixture": "counter_b"})
+    assert np.allclose(base[:2], park(b, *front_stand(b, "open_door", tw["fixtures"]))[:2])
+    ep, _ = _open_door_wall_steps(tw, "counter_b")
+    assert ep["success"], ep["detail"]
+
+
 @pytest.mark.parametrize("family,fixture", [("close_door", "counter_a"), ("close_door", "counter_b"),
                                             ("open_oven", "stove_1")])
 def test_door_episodes_keep_every_joint_off_its_stops(twin, family, fixture):
