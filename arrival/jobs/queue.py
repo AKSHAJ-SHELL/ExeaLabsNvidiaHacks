@@ -71,6 +71,9 @@ def create_job(jobs_root: Path, filename: str, data: bytes | None = None,
                     break
                 out.write(chunk)
                 left -= len(chunk)
+        if left:
+            shutil.rmtree(job_dir)
+            raise EOFError(f"upload ended {left} bytes before its declared length")
     for name, folder in (adopt or {}).items():
         shutil.move(str(folder), str(job_dir / name))
     status = {
