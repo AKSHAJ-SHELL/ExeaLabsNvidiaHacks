@@ -195,6 +195,7 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
                  edge_min: float = EDGE_CORR_MIN, mask_max: float = MASK_CHANGE_MAX) -> dict:
     """Copy src to dst, restyle the selected frames of every video, write the sidecar, summary and variant mp4s."""
     from arrival.export.lerobot import write_video
+    from arrival.export.validate import validate
 
     src, dst = Path(src), Path(dst)
     if backend not in ("cosmos", "local_stub"):
@@ -215,6 +216,9 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     fps = info.get("fps", 20) if fps is None else fps
     if type(fps) is not int or fps < 1:
         raise ValueError("fps must be a positive integer")
+    source_errors = validate(src)
+    if source_errors:
+        raise ValueError(f"source dataset does not validate: {source_errors[0]}")
 
     stage_start = time.perf_counter()
     shutil.copytree(src, dst)
