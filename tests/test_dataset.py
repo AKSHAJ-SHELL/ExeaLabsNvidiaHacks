@@ -262,6 +262,13 @@ def _writer(tmp_path, **kw):
     return LeRobotWriter(tmp_path / "ds", "room", kw.pop("policy", "none"), state_dim=2, action_dim=2, **kw)
 
 
+@pytest.mark.parametrize("chunks_size", [0, -1, True, 2.5, "1000"])
+def test_writer_rejects_invalid_chunk_size_before_creating_dataset(tmp_path, chunks_size):
+    with pytest.raises(ValueError, match="chunks_size"):
+        _writer(tmp_path, chunks_size=chunks_size)
+    assert not (tmp_path / "ds").exists()
+
+
 def test_writer_rejects_nan_and_leaves_no_orphan(tmp_path):
     import numpy as np
 
