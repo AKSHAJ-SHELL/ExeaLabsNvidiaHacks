@@ -69,7 +69,8 @@ nodes {dynamic:[name...], static:{name:[x,y,z,qw,qx,qy,qz]}}
 frames[t]            numbers: for each name in nodes.dynamic, in order, [x,y,z,qw,qx,qy,qz]  (length 7 * len(dynamic))
                      poses are world poses of body frames (limb nodes and cameras: of the geom / camera frame)
                      positions rounded to 1 mm, quaternions to 4 decimals, hemisphere-continuous (safe to nlerp)
-joint_states[t]      [joint1..joint7 (rad), gripper_opening_m (mean finger slide, 0..0.05)]  == the LeRobot observation.state
+joint_states[t]      [joint1..joint7 (rad), gripper_opening_m (mean finger slide, 0..0.05)]  == the first 8 values of the LeRobot
+                     observation.state (the dataset's last 3, the parked base pose, are left out)
 joint_names, people_xy[t][person] = [x,y] floor position, task_joint_q[t] (the drawer/door joint the task moves, or null)
 task {fixture, object_id, source, target, start, joint, handle}  (only the keys the family has)
 lights[]             {name, directional, pos, dir, diffuse, cutoff, castshadow} as built by the sim (key spot, fill, window)
