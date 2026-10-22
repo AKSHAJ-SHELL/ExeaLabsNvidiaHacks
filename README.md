@@ -195,10 +195,10 @@ Physical rooms, a LiDAR iPhone, or a human.
 
 | id | what | size | priority | status | PRs or issue | who |
 |---|---|---|---|---|---|---|
-| P1 | Field-test the iOS app on a LiDAR iPhone; RGB-D recorder in Swift | L | must | Blocked | issue #58 | unassigned |
-| P2 | Three consented real kitchen scans with tape measurements; licence check of the two public scans | L | must | Blocked | issue #59 | unassigned |
+| P1 | Field-test the iOS app on a LiDAR iPhone; RGB-D recorder in Swift Field test of the capture app on an iPhone 13 Pro Max, done with the P2 scans. | L | must | Blocked | #156 | @AKSHAJ-SHELL |
+| P2 | Three consented real kitchen scans with tape measurements; licence check of the two public scans Licence check done: neither public scan's source repo has a licence. Scans next. | L | must | Blocked | #156 | @AKSHAJ-SHELL |
 | P3 | Twenty timed teleoperated counter_to_sink demos 20 successes in 26 attempts; 1230.359 operator seconds including failures. Basic validation passes; one long episode is retained. Evidence: docs/results/p3-teleop-2026-10-21/. C3 still needs the cloud comparison. | S | should | Shipped | #127 | @Aadi-Tiwari |
-| P4 | Refresh the pitch video with real footage; check the demo page in a browser | S | should | Blocked | none | unassigned |
+| P4 | Refresh the pitch video with real footage; check the demo page in a browser Browser check done (#195: three click and layout fixes). Real footage follows the P2 scans. | S | should | Blocked | #156, #195 | @AKSHAJ-SHELL |
 | OWN | Close or update stale issues #18, #22, #24, #26, #28, #30, #32, #34 Repo owner only | S |  | Blocked | none | unassigned |
 
 ### Pull requests not merged as they are
