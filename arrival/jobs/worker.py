@@ -47,6 +47,8 @@ CANCEL = "cancel.requested"  # marker written by cancel_job for a running job
 REAP_LOCK = "reap.lock"  # arbiter so two workers never requeue the same job
 MAX_REQUEUES = 2  # a job whose worker died this many times fails instead of looping forever
 USAGE_LEDGER = ("usage", "jobs.jsonl")  # under out/: one JSON line per finished job, survives gc
+MEM_TICK = 0.5  # seconds between resident-memory checks of a job's child process tree (limits.max_job_bytes)
+MB = 1024 * 1024
 
 
 SIM_TASK_RE = re.compile(r"^\[sim\] \S+: (?:OK|MISS|DROP|SKIP)\b")  # the line collect logs when one task finishes
@@ -574,9 +576,46 @@ def process(job_dir: Path, status: dict, out_dir: Path, episodes: int = 8, famil
     return status
 
 
+def tree_rss(pid: int) -> int | None:
+    """Resident bytes of process ``pid`` and every process under it (the video encoder it starts, for one): from /proc on
+    Linux, from ``ps`` elsewhere. None when the process table cannot be read or ``pid`` is gone."""
+    rows: dict[int, tuple[int, int]] = {}  # pid -> (parent pid, resident bytes)
+    try:
+        if sys.platform == "linux":
+            page = os.sysconf("SC_PAGE_SIZE")
+            for d in os.listdir("/proc"):
+                if not d.isdigit():
+                    continue
+                try:
+                    raw = Path("/proc", d, "stat").read_text()
+                except OSError:
+                    continue  # exited between the listing and the read
+                f = raw[raw.rindex(")") + 2:].split()  # fields after "pid (comm) ": state, ppid, ... rss is the 22nd
+                rows[int(d)] = (int(f[1]), int(f[21]) * page)
+        else:
+            ps = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,rss="], capture_output=True, text=True, timeout=5)
+            for line in ps.stdout.splitlines():
+                p, pp, kb = line.split()
+                rows[int(p)] = (int(pp), int(kb) * 1024)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if pid not in rows:
+        return None
+    kids: dict[int, list[int]] = {}
+    for p, (pp, _) in rows.items():
+        kids.setdefault(pp, []).append(p)
+    total, todo = 0, [pid]
+    while todo:
+        p = todo.pop()
+        total += rows[p][1]
+        todo += kids.get(p, [])
+    return total
+
+
 def run_isolated(job_dir: Path, status: dict, out_dir: Path, limits: Limits, log=print, child_cmd=None,
                  tick: float = 0.1, **kw) -> dict:
-    """Run ``process`` in a child process and enforce ``limits.max_job_seconds`` by killing it. The child writes its
+    """Run ``process`` in a child process and enforce ``limits.max_job_seconds`` and ``limits.max_job_bytes`` (resident
+    memory of the child and everything it starts, read every MEM_TICK s) by killing it. The child writes its
     own status, retry included; this function only steps in when the child timed out, was cancelled, or died without
     finishing (killed by the OS, segfault), and then records the failure with the stage it reached. A child that died
     is retried like any other failure that may pass; a timeout is not, since the limit is what one job may cost."""
@@ -588,13 +627,18 @@ def run_isolated(job_dir: Path, status: dict, out_dir: Path, limits: Limits, log
     t0 = time.monotonic()
     deadline = t0 + limits.max_job_seconds if limits.max_job_seconds else None
     proc = subprocess.Popen(cmd)
-    why = None
+    why, next_mem, rss = None, t0, 0
     try:
         while proc.poll() is None:
             if deadline is not None and time.monotonic() > deadline:
                 why = "timeout"
             elif (job_dir / CANCEL).exists():
                 why = "cancel"
+            elif limits.max_job_bytes and time.monotonic() >= next_mem:
+                next_mem = time.monotonic() + MEM_TICK
+                rss = tree_rss(proc.pid) or 0
+                if rss > limits.max_job_bytes:
+                    why = "memory"
             if why:
                 proc.terminate()
                 try:
@@ -616,6 +660,10 @@ def run_isolated(job_dir: Path, status: dict, out_dir: Path, limits: Limits, log
     if why == "timeout":
         final.update({"status": "failed", "error": f"TimeoutError: job exceeded the {limits.max_job_seconds:g} s "
                                                     f"wall-clock limit during stage {stage!r}"})
+    elif why == "memory":  # like a timeout, not retried: the limit is what one job may use
+        final.update({"status": "failed", "error": f"MemoryLimitError: the job used {rss / MB:.1f} MB resident, over "
+                                                    f"the {limits.max_job_bytes / MB:g} MB limit (ARRIVAL_MAX_JOB_MB), "
+                                                    f"during stage {stage!r}"})
     elif why == "cancel":
         final.update({"status": "cancelled", "error": None})
         _unlink(job_dir / CANCEL)

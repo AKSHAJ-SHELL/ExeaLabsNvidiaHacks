@@ -152,7 +152,7 @@ Pull requests against main. All are merged into feat/demo-site and none is on ma
 | L27 | People pass: yield and stop from the safety distance, counter-use pause, 3D head and arm clearance check On feat/demo-site with no pull request yet. Walkers also keep out of the door hinge disc (open_door 8 of 8 on seeds 0 to 3, was 7 of 8 on one), and fridges can be right-hinged with hinge: "right". Yield ignores the arm links. The hero fridge with a right hinge is rejected by the pre-flight because its free edge is in the corner. | M | nice | Shipped | issue #24 | @AvnehSBhatia, Claude Code |
 | L28 | Multi-room summary command (real rooms wait on P2) | S | nice | Shipped | #102 | @AvnehSBhatia |
 | L29 | Frozen evaluation trials: replay the same trials for any policy and keep every run | M | should | Shipped | #109 | @Aadi-Tiwari |
-| L30 | Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The cap was measured on Linux in Docker (docs/ref/MEMCAP.md, #192): it limits address space, which follows the core count, and past it the native libraries crash instead of raising MemoryError, so leave it off or set it at least 1.5 times the measured peak. | M | should | Shipped | #192 | @AvnehSBhatia, Claude Code, @AKSHAJ-SHELL |
+| L30 | Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The memory cap counts resident memory: the worker reads the job's process tree every 0.5 s and kills it past ARRIVAL_MAX_JOB_MB with a MemoryLimitError naming the stage (#192). The old RLIMIT_AS cap followed the core count and crashed jobs (docs/ref/MEMCAP.md). | M | should | Shipped | #192 | @AvnehSBhatia, Claude Code, @AKSHAJ-SHELL |
 | L31 | Synchronized ego, wrist and exocentric capture from one simulation state, with a side-by-side preview and an optional three-camera GR00T config From rishith-c/feat/ego-exocentric-capture, merged on feat/more-prs-2 with its commit author kept. Offline key and schema checks only; no three-view GR00T training or inference has been run. | M | nice | In review | none | @rishith-c |
 
 ### Laptop: next (0)
@@ -215,7 +215,7 @@ Physical rooms, a LiDAR iPhone, or a human.
 - A 28-episode run at 64 px after the door joint-limit fix (#152) succeeds 28 of 28 with 0 episodes flagged by the quality check. It was not rerun at 224 px.
 - With a fixed base, drawers and `close_door` on the U-kitchen's corner cabinet and the rotated kitchen's fridge stay unreachable and are skipped. Only the corner cabinet's `open_door` takes a shifted stand spot. The reach planner checks the arm's IK, not collisions.
 - The expert's fridge push heading ignores the fixture's yaw, and walker yield ignores the arm links.
-- The memory cap (`ARRIVAL_MAX_JOB_MB`) limits address space, not resident memory, and past it the native libraries crash rather than raise `MemoryError`; it is off by default (`docs/ref/MEMCAP.md`).
+- The job memory limit (`ARRIVAL_MAX_JOB_MB`) counts resident memory and was measured on Ubuntu 24.04 and macOS, not on Windows (docs/ref/MEMCAP.md).
 - The web page was checked with curl, tests and scripts, not in a browser. Uploads are processed by local workers that share one `out/` folder.
 - No real kitchen has been scanned and run end to end, and nothing has trained on the data.
 
