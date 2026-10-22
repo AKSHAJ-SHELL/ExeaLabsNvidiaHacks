@@ -127,7 +127,7 @@ size = [dimensions[0], dimensions[2], dimensions[1]]
 
 Yaw: the local +X axis (first column) mapped the same way, then `atan2` of its horizontal components. Identity rotation yields yaw `0`.
 
-Walls: treat each wall as a Y-up box whose center converts like an object. Project the box onto the floor and store `start` and `end` as the two endpoints of the long horizontal edge. `height` is `dimensions[1]`. `thickness` is the smaller of `dimensions[0]` and `dimensions[2]`.
+Walls: treat each wall as a Y-up box whose center converts like an object. Project the box onto the floor and store `start` and `end` as the two endpoints of the long horizontal edge. `height` is `dimensions[1]`. `thickness` is the smaller of `dimensions[0]` and `dimensions[2]`. A wall whose `curve` has `startAngle`, `endAngle` and a positive `radius` is replaced by those chords: equal steps of 15° along the arc (at least two segments), in the wall's local XZ plane about `curve.center` when present (else the transform origin).
 
 Doors, windows and openings: each is a Surface with `dimensions [width, height, 0]`, a `transform` like a wall's, and `parentIdentifier` naming the wall it sits in. They convert like objects (center, size, yaw, then the same rotation and translation as the room) into `doors`, `windows` and `openings`. `wall_id` is the parent identifier when it matches a wall in the export, else `null`. A door's category is `{"door": {"isOpen": bool}}`; that becomes `is_open`.
 
