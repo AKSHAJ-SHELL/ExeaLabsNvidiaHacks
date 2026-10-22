@@ -17,10 +17,10 @@ Pull requests opened against this repository, by author (merged, or consolidated
 | who | pull requests | some of what they did |
 |---|---|---|
 | @aarochu | 56 | CAP-4: Add field scanning protocol; DEM-3: Refresh release status and setup guidance; TWN: Avoid duplicate counters over scanned base cabinets |
-| @Aadi-Tiwari | 32 | Open doors: tilted grasp, clearance path, via-point pull; Sample kitchen: fridge, counters and stove tile the wall wit; Scan regression suite and full RoomPlan coverage |
-| @AvnehSBhatia (repo owner, with Claude Code) | 30 | Add tonight's MVP handoff; Integrate 16 open PRs, 40+ bug fixes, new web page, refreshe; Before the deadline: blocked items, laptop sprint, known bug |
-| @JmarbinGG | 8 | iOS RoomPlan capture app: scan, share, upload to /jobs; Timed keyboard teleop baseline for the cost comparison; Single config loader, .env.example and secret redaction |
-| @AKSHAJ-SHELL | 6 | Cabinet fronts collide where they are drawn; arm clipping te; Count arm-fixture contacts in eval; A scanned office becomes a room the arm can work in |
+| @Aadi-Tiwari | 33 | Open doors: tilted grasp, clearance path, via-point pull; Sample kitchen: fridge, counters and stove tile the wall wit; Scan regression suite and full RoomPlan coverage |
+| @AvnehSBhatia (repo owner, with Claude Code) | 31 | Add tonight's MVP handoff; Integrate 16 open PRs, 40+ bug fixes, new web page, refreshe; Before the deadline: blocked items, laptop sprint, known bug |
+| @AKSHAJ-SHELL | 11 | Cabinet fronts collide where they are drawn; arm clipping te; Count arm-fixture contacts in eval; A scanned office becomes a room the arm can work in |
+| @JmarbinGG | 9 | iOS RoomPlan capture app: scan, share, upload to /jobs; Timed keyboard teleop baseline for the cost comparison; Single config loader, .env.example and secret redaction |
 | @IshaanM05 | 6 | DEM-3: pin video writer to the FFMPEG backend; DAT-1: GR00T N1.7 modality config for the sim Panda; POL-3: gr00t_shim run against real GR00T, plus GPU run notes |
 | @Anandb71 | 3 | close_door, open_oven: keep every arm joint off its stops; Draw RoomPlan doors, windows and openings in the sim as visu; Upload worker: retry a failed job a bounded number of times |
 | @amanx98 | 3 | [POL-2] Wire Nemotron VLMPlanner into sim colle…; Implement Tavily AI Research Agent for appliance manuals and; Mobile Manipulator Base & 100% Physics-Checked Counter-to-Co |
@@ -204,10 +204,10 @@ Physical rooms, a LiDAR iPhone, or a human.
 
 | id | what | size | priority | status | PRs or issue | who |
 |---|---|---|---|---|---|---|
-| P1 | Field-test the iOS app on a LiDAR iPhone; RGB-D recorder in Swift | L | must | Blocked | issue #58 | unassigned |
-| P2 | Three consented real kitchen scans with tape measurements; licence check of the two public scans | L | must | Blocked | issue #59 | unassigned |
+| P1 | Field-test the iOS app on a LiDAR iPhone; RGB-D recorder in Swift Field test of the capture app on an iPhone 13 Pro Max, done with the P2 scans. | L | must | Blocked | #156 | @AKSHAJ-SHELL |
+| P2 | Three consented real kitchen scans with tape measurements; licence check of the two public scans Licence check done: neither public scan's source repo has a licence. Scans next. | L | must | Blocked | #156 | @AKSHAJ-SHELL |
 | P3 | Twenty timed teleoperated counter_to_sink demos 20 successes in 26 attempts; 1230.359 operator seconds including failures. Basic validation passes; one long episode is retained. Evidence: docs/results/p3-teleop-2026-10-21/. C3 still needs the cloud comparison. | S | should | Shipped | #127 | @Aadi-Tiwari |
-| P4 | Rendered pitch video, 24 seconds, with the fine-tune result site/motion/pitch.mp4 is the submission video: 24.4 seconds, public-repo file, no studio recording and no copyrighted music. The closing sheet says the fine-tune is 39 of 48 against 26 of 48, small samples, and that real kitchen scans are still not done. Devpost still wants this file on public YouTube (SUB). docs/media/demo.mp4 remains the silent 31-second code render. | S | must | In review | none | @AvnehSBhatia |
+| P4 | Rendered pitch video, 24 seconds, with the fine-tune result site/motion/pitch.mp4 is the submission video: 24.4 seconds, public-repo file, no studio recording and no copyrighted music. The closing sheet says the fine-tune is 39 of 48 against 26 of 48, small samples, and that real kitchen scans are still not done. Devpost still wants this file on public YouTube (SUB). docs/media/demo.mp4 remains the silent 31-second code render. | S | must | In review | #156, #195 | @AvnehSBhatia, @AKSHAJ-SHELL |
 | OWN | Close or update stale issues #18, #22, #24, #26, #28, #30, #32, #34 Repo owner only | S |  | Blocked | none | unassigned |
 
 ### Devpost form (1)

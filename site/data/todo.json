@@ -1028,7 +1028,13 @@
      "size": "L",
      "priority": "must",
      "issue": 58,
-     "authors": []
+     "authors": [
+      "AKSHAJ-SHELL"
+     ],
+     "pr": [
+      156
+     ],
+     "note": "Field test of the capture app on an iPhone 13 Pro Max, done with the P2 scans."
     },
     {
      "id": "P2",
@@ -1038,7 +1044,13 @@
      "size": "L",
      "priority": "must",
      "issue": 59,
-     "authors": []
+     "authors": [
+      "AKSHAJ-SHELL"
+     ],
+     "pr": [
+      156
+     ],
+     "note": "Licence check done: neither public scan's source repo has a licence. Scans next."
     },
     {
      "id": "P3",
@@ -1064,7 +1076,12 @@
      "size": "S",
      "priority": "must",
      "authors": [
-      "AvnehSBhatia"
+      "AvnehSBhatia",
+      "AKSHAJ-SHELL"
+     ],
+     "pr": [
+      156,
+      195
      ],
      "note": "site/motion/pitch.mp4 is the submission video: 24.4 seconds, public-repo file, no studio recording and no copyrighted music. The closing sheet says the fine-tune is 39 of 48 against 26 of 48, small samples, and that real kitchen scans are still not done. Devpost still wants this file on public YouTube (SUB). docs/media/demo.mp4 remains the silent 31-second code render."
     },

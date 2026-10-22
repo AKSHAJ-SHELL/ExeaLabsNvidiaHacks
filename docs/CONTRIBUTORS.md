@@ -7,13 +7,13 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 ## Commits by author
 
 ```
-   227	redmythic1
+   236	redmythic1
     60	aarochu
-    39	Aadi Tiwari
-    13	Jahan Marbin
+    40	Aadi Tiwari
+    14	Jahan Marbin
+    13	Akshaj Shandilya
     12	IshaanM05
-     9	Avneh Singh Bhatia
-     5	Akshaj Shandilya
+    10	Avneh Singh Bhatia
      3	Anand Biju
      2	Amelia Patel
      2	amanx98
@@ -59,33 +59,33 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 - #147 Keep original videos when a variation mask is invalid (merged)
 - #148 Match resumed journal records to task order (merged)
 - #149 Require scoped usage for task cost comparisons (merged)
-- #166 Reject unchanged appearance variation frames (open)
-- #167 Prevent variation output inside its source dataset (open)
-- #168 Match custom variation clients to requested backends (open)
-- #169 Report committed usage ledger corruption (open)
-- #170 Validate worker metering before reporting totals (open)
-- #171 Preserve corrupt committed journal lines for diagnosis (open)
-- #172 Require stored shard artifacts before marking completion (open)
-- #173 Validate fanout simulation settings at construction (open)
-- #174 Reject confidence images with mismatched depth size (open)
-- #175 Validate ARKit confidence image levels on upload (open)
-- #176 Check shard episode files before replacing merge output (open)
-- #177 Report corrupt shard metadata before merge (open)
-- #178 Refuse fanout resume on corrupt run manifests (open)
-- #179 Validate appearance variation geometry thresholds (open)
-- #180 Handle malformed appearance backend responses (open)
-- #181 Validate frame rate before appearance variation copy (open)
-- #182 Validate realism scoring controls before reading scans (open)
-- #183 Require float32 metric depth in uploaded frames (open)
-- #184 Require color channels in uploaded RGB frames (open)
-- #185 Reject boolean dimensions in RGB-D manifests (open)
-- #186 Add GR00T fine-tune preflight for existing configs (open)
-- #187 Reject mismatched mobile policy action chunks (open)
-- #188 Implement depth compositor for static and moving RGB-D layers (open)
-- #189 Fix scan intake handoff to the 5 cm accuracy gate (open)
-- #190 Measure appearance variation stage and backend latency (open)
+- #166 Reject unchanged appearance variation frames (merged)
+- #167 Prevent variation output inside its source dataset (merged)
+- #168 Match custom variation clients to requested backends (merged)
+- #169 Report committed usage ledger corruption (merged)
+- #170 Validate worker metering before reporting totals (merged)
+- #171 Preserve corrupt committed journal lines for diagnosis (merged)
+- #172 Require stored shard artifacts before marking completion (merged)
+- #173 Validate fanout simulation settings at construction (merged)
+- #174 Reject confidence images with mismatched depth size (merged)
+- #175 Validate ARKit confidence image levels on upload (merged)
+- #176 Check shard episode files before replacing merge output (merged)
+- #177 Report corrupt shard metadata before merge (merged)
+- #178 Refuse fanout resume on corrupt run manifests (merged)
+- #179 Validate appearance variation geometry thresholds (merged)
+- #180 Handle malformed appearance backend responses (merged)
+- #181 Validate frame rate before appearance variation copy (merged)
+- #182 Validate realism scoring controls before reading scans (merged)
+- #183 Require float32 metric depth in uploaded frames (merged)
+- #184 Require color channels in uploaded RGB frames (merged)
+- #185 Reject boolean dimensions in RGB-D manifests (merged)
+- #186 Add GR00T fine-tune preflight for existing configs (merged)
+- #187 Reject mismatched mobile policy action chunks (merged)
+- #188 Implement depth compositor for static and moving RGB-D layers (merged)
+- #189 Fix scan intake handoff to the 5 cm accuracy gate (merged)
+- #190 Measure appearance variation stage and backend latency (merged)
 
-### @Aadi-Tiwari (32)
+### @Aadi-Tiwari (33)
 
 - #4 [MAN-2] Open doors: tilted grasp, clearance path, via-point pull (merged)
 - #5 [TWN-6] Sample kitchen: fridge, counters and stove tile the wall without overlap (merged)
@@ -112,15 +112,16 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 - #110 [EVAL-1a] Connect uploaded frames to worker comparison results (open)
 - #116 [L17] Reachability planner: IK pre-flight on the expert's waypoints, fallback base spots when the stand rule's spot cannot reach (open)
 - #117 [L26] The spatula is pinched, picked into the sink and used to wipe the counter (open)
-- #119 [L27] People give way to the arm, work the counter, and open a left-hinged fridge (open)
+- #119 [L27] People give way to the arm, work the counter, and open a left-hinged fridge (closed)
 - #127 [P3] Record twenty timed human teleoperation demos (merged)
-- #157 [C4] Detect small objects from posed RGB-D frames and place them in the twin (offline slice) (open)
-- #158 [L27] A fridge can hang on its right; let go of the bar before sliding off it (open)
-- #159 [G1] Stand open_oven to the side of the bar, open_door further out when hinged by a wall (open)
-- #160 [C1] Nebius backend for the fan-out: Serverless AI Jobs plus Object Storage, tested against fakes (open)
-- #191 [G1] close_door: stand nearer the hinge where the run ends flush against a wall (open)
+- #157 [C4] Detect small objects from posed RGB-D frames and place them in the twin (offline slice) (merged)
+- #158 [L27] A fridge can hang on its right; let go of the bar before sliding off it (closed)
+- #159 [G1] Stand open_oven to the side of the bar, open_door further out when hinged by a wall (merged)
+- #160 [C1] Nebius backend for the fan-out: Serverless AI Jobs plus Object Storage, tested against fakes (merged)
+- #191 [G1] close_door: stand nearer the hinge where the run ends flush against a wall (merged)
+- #193 [G1] open_door: stand further out where the run is drawn into a wall (open)
 
-### @AvnehSBhatia (30)
+### @AvnehSBhatia (31)
 
 - #1 Add tonight's MVP handoff (merged)
 - #80 Integrate 16 open PRs, 40+ bug fixes, new web page, refreshed README (merged)
@@ -152,8 +153,23 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 - #106 [L24] Oven, dishwasher and faucet families (#27) rebased onto the any-wall chain (merged)
 - #107 L25: real Menagerie Franka behind --arm menagerie (rebases #25) (merged)
 - #164 Gap fixes (door joints, fridge hinge, corner door, Menagerie) + teammate PRs #118, #126-#150, #152-#155 (merged)
+- #194 Consolidate teammate PRs #156-#192, ego/exo capture, attribution (merged)
 
-### @JmarbinGG (8)
+### @AKSHAJ-SHELL (11)
+
+- #53 [MAN-2] Cabinet fronts collide where they are drawn; arm clipping test (closed)
+- #55 [POL-4] Count arm-fixture contacts in eval (merged)
+- #57 [SIM-5] A scanned office becomes a room the arm can work in (merged)
+- #156 [P2] Three consented real kitchen scans with tape measurements; licence check of the public scans (open)
+- #163 CI: mark the three tests that render in a child process as render (main's portable jobs are red) (merged)
+- #192 Job memory limit: RLIMIT_AS measured on Linux (crashes jobs, follows core count), replaced by a resident-memory limit in the worker (open)
+- #195 [P4] Demo page: the stage buttons and the scan/twin divider take clicks again; phones keep the disclaimer (open)
+- #197 CI: mark the three test_nebius tests that render in shard subprocesses as render (portable jobs are red on main) (open)
+- #198 CI: split the rendering suite into 3 parallel shards (it outgrew the 75-minute limit) (open)
+- #199 open_fridge: re-plan the push from the door's measured angle (right-hinged fridge stopped at 66.8° instead of 80°) (open)
+- #200 RoomPlan objects face their local +Z: a real kitchen scan had every fixture facing its wall (open)
+
+### @JmarbinGG (9)
 
 - #43 [CAP-1] iOS RoomPlan capture app: scan, share, upload to /jobs (merged)
 - #113 [L20] Timed keyboard teleop baseline for the cost comparison (merged)
@@ -162,31 +178,23 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 - #144 Hand checks: fix browser upload with an empty frames input; delete the sim journal with a job (merged)
 - #146 [G1] Write q01/q99 into stats.json for GR00T percentile normalisation (merged)
 - #150 [CAP-2] Record RGB-D frames in the iOS app during a RoomPlan scan (merged)
-- #151 close_door: push the panel above the bar (G1 joint_at_limit 5 -> 3); re-measure open_door (open)
-
-### @AKSHAJ-SHELL (6)
-
-- #53 [MAN-2] Cabinet fronts collide where they are drawn; arm clipping test (closed)
-- #55 [POL-4] Count arm-fixture contacts in eval (merged)
-- #57 [SIM-5] A scanned office becomes a room the arm can work in (merged)
-- #156 [P2] Three consented real kitchen scans with tape measurements; licence check of the public scans (open)
-- #163 CI: mark the three tests that render in a child process as render (main's portable jobs are red) (open)
-- #192 Job memory cap on Linux: measured (RLIMIT_AS crashes jobs and follows core count); resident-memory limit in the worker (open)
+- #151 close_door: push the panel above the bar (G1 joint_at_limit 5 -> 3); re-measure open_door (closed)
+- #196 Re-export site/data; fix the exporter (11-float state, local paths, deleted todo.json) (open)
 
 ### @IshaanM05 (6)
 
 - #9 DEM-3: pin video writer to the FFMPEG backend (merged)
 - #38 DAT-1: GR00T N1.7 modality config for the sim Panda (merged)
 - #155 POL-3: gr00t_shim run against real GR00T, plus GPU run notes (merged)
-- #161 POL-3: gr00t_shim serialises concurrent requests, plus optional sample averaging (open)
-- #162 SIM: sim --dart, drive the arm off the plan while the dataset keeps the clean targets (open)
-- #165 DAT: record the GR00T fine-tune results and what they showed (G1, DAT-2) (open)
+- #161 POL-3: gr00t_shim serialises concurrent requests, plus optional sample averaging (merged)
+- #162 SIM: sim --dart, drive the arm off the plan while the dataset keeps the clean targets (merged)
+- #165 DAT: record the GR00T fine-tune results and what they showed (G1, DAT-2) (merged)
 
 ### @app/dependabot (6)
 
-- #120 build(deps): bump nvidia/cuda from 12.8.0-cudnn-devel-ubuntu22.04 to 13.4.3-cudnn-devel-ubuntu22.04 (open)
+- #120 build(deps): bump nvidia/cuda from 12.8.0-cudnn-devel-ubuntu22.04 to 13.4.3-cudnn-devel-ubuntu22.04 (closed)
 - #121 build(deps): bump actions/setup-python from 5 to 7 (open)
-- #122 build(deps): bump python from 3.11-slim to 3.13-slim (open)
+- #122 build(deps): bump python from 3.11-slim to 3.13-slim (closed)
 - #123 build(deps): bump actions/checkout from 4 to 7 (open)
 - #124 build(deps): bump actions/upload-artifact from 4 to 7 (open)
 - #125 build(deps-dev): bump ruff from 0.11.13 to 0.17.1 (open)
