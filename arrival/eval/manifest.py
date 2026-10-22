@@ -25,8 +25,15 @@ def make_manifest(twin: dict, families: list[str], episodes: int, seed: int = 0,
                   arm: str = "procedural") -> dict:
     from arrival.sim.tasks import finish_task, make_tasks
 
-    if episodes < 1 or people < 0 or res < 1 or len(set(families)) != len(families):
-        raise ValueError("evaluation needs positive episodes/resolution, nonnegative people and distinct families")
+    if any(type(value) is not int or value < minimum for value, minimum in
+           ((episodes, 1), (people, 0), (res, 1))) or type(seed) is not int or type(holdout) is not bool:
+        raise ValueError("evaluation needs integer episodes/resolution/people/seed and a boolean holdout")
+    if (not isinstance(families, list) or not families or
+            any(not isinstance(family, str) or not family.strip() for family in families) or
+            len(set(families)) != len(families)):
+        raise ValueError("evaluation needs distinct, nonempty family names")
+    if base not in ("fixed", "mobile") or arm not in ("procedural", "menagerie"):
+        raise ValueError("evaluation needs a supported base and arm")
     tasks, omitted = [], []
     for i, family in enumerate(families):
         batch = make_tasks(twin, [family], episodes, seed=seed + EVAL_SEED_BASE + i,

@@ -9,6 +9,18 @@ from arrival.eval import harness
 from arrival.eval.manifest import digest, load_manifest, make_manifest
 
 
+@pytest.mark.parametrize("options", [
+    {"episodes": True}, {"episodes": 0}, {"people": False}, {"res": 1.5},
+    {"seed": "7"}, {"holdout": 1}, {"families": [""]},
+    {"families": ["open_drawer", "open_drawer"]}, {"base": "sideways"}, {"arm": "unknown"},
+])
+def test_manifest_creation_rejects_bad_controls_before_task_generation(options):
+    args = {"twin": {}, "families": ["open_drawer"], "episodes": 1}
+    args.update(options)
+    with pytest.raises(ValueError, match="evaluation needs"):
+        make_manifest(**args)
+
+
 @pytest.fixture
 def rollouts(monkeypatch):
     seen = []
