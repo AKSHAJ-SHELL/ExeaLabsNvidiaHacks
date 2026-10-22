@@ -98,6 +98,8 @@ def parse_measures(spec: str | dict | None) -> dict[str, float]:
         k = str(k).strip()
         if k not in MEASURES:
             raise IntakeError(f"unknown measurement {k!r}; expected {', '.join(MEASURES)}")
+        if k in out:
+            raise IntakeError(f"duplicate measurement {k!r}")
         n = _number(str(v))
         if n is None:
             raise IntakeError(f"measurement {k}={str(v).strip()!r} must be a number of metres, above 0 and at most "
