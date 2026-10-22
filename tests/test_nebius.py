@@ -182,6 +182,7 @@ def test_bad_token_is_an_error_without_the_token(nebius, monkeypatch):
 
 
 @needs_sim
+@pytest.mark.render  # `reference` runs shards as subprocesses, where --no-render's patch does not reach
 def test_failed_shard_resumes_to_the_uninterrupted_episode_set(nebius, reference, tmp_path):
     jobs = nebius["make"](fail_first={1})
     be = NebiusBackend()
@@ -194,6 +195,7 @@ def test_failed_shard_resumes_to_the_uninterrupted_episode_set(nebius, reference
 
 
 @needs_sim
+@pytest.mark.render  # `reference` runs shards as subprocesses, where --no-render's patch does not reach
 def test_killed_run_reruns_only_unmarked_shards(nebius, reference, tmp_path):
     jobs = nebius["make"]()
 
@@ -353,6 +355,7 @@ def test_stopping_after_a_job_succeeded_is_not_recorded_as_a_cancel(nebius, tmp_
 
 
 @needs_sim
+@pytest.mark.render  # `reference` runs shards as subprocesses, where --no-render's patch does not reach
 def test_status_record_survives_a_kill_and_rerun(nebius, reference, tmp_path):
     s3 = nebius["s3"]
     jobs = nebius["make"](hold={1})
