@@ -42,8 +42,8 @@ def test_export_is_self_contained_and_link_checked(out, tmp_path):
     res = export_site(out, REPO / "scans", tmp_path / "site", log=lambda *_: None)
     dest = tmp_path / "site"
     assert res["rooms"] == ["hero_kitchen"] and res["pages"] == 2 and res["previews"] == 2
-    index = (dest / "index.html").read_text()
-    room = (dest / "rooms" / "hero_kitchen" / "index.html").read_text()
+    index = (dest / "index.html").read_text(encoding="utf-8")
+    room = (dest / "rooms" / "hero_kitchen" / "index.html").read_text(encoding="utf-8")
     for page in (index, room):
         assert "<form" not in page and "<script" not in page  # no backend to post to, no page script
         assert "Static snapshot" in page
@@ -59,22 +59,22 @@ def test_export_is_self_contained_and_link_checked(out, tmp_path):
 
 def test_data_json_matches_what_is_on_disk(out, tmp_path):
     export_site(out, REPO / "scans", tmp_path / "site", log=lambda *_: None)
-    data = json.loads((tmp_path / "site" / "data" / "hero_kitchen.json").read_text())
+    data = json.loads((tmp_path / "site" / "data" / "hero_kitchen.json").read_text(encoding="utf-8"))
     assert data["datasets"]["hero_kitchen_sim"]["total_episodes"] == 3
     assert data["datasets"]["hero_kitchen_sim"]["arrival_physically_valid"] is True
     assert data["report"]["successes"] == 3 and data["fixtures"] and data["geometry_source"]
-    idx = json.loads((tmp_path / "site" / "data" / "index.json").read_text())
+    idx = json.loads((tmp_path / "site" / "data" / "index.json").read_text(encoding="utf-8"))
     assert idx["rooms"] == ["hero_kitchen"] and idx["zips_included"] == []
 
 
 def test_zips_are_opt_in(out, tmp_path):
     export_site(out, REPO / "scans", tmp_path / "plain", log=lambda *_: None)
-    plain = (tmp_path / "plain" / "index.html").read_text()
+    plain = (tmp_path / "plain" / "index.html").read_text(encoding="utf-8")
     assert "downloads/" not in plain and "#removed" not in plain and "Sim zip" not in plain
     assert not (tmp_path / "plain" / "downloads").exists()
     export_site(out, REPO / "scans", tmp_path / "withzip", zips=True, log=lambda *_: None)
     z = tmp_path / "withzip" / "downloads" / "hero_kitchen_sim.zip"
-    assert "downloads/hero_kitchen_sim.zip" in hrefs((tmp_path / "withzip" / "index.html").read_text())
+    assert "downloads/hero_kitchen_sim.zip" in hrefs((tmp_path / "withzip" / "index.html").read_text(encoding="utf-8"))
     assert any(n.endswith("meta/info.json") for n in zipfile.ZipFile(z).namelist())
     assert link_check(tmp_path / "withzip") == []
 
@@ -83,7 +83,7 @@ def test_room_without_dataset_still_exports_and_says_so(tmp_path):
     logs = []
     res = export_site(tmp_path / "empty_out", REPO / "scans", tmp_path / "site", log=logs.append)
     assert res["rooms_without_dataset"] == ["hero_kitchen"]
-    assert "not generated" in (tmp_path / "site" / "index.html").read_text()
+    assert "not generated" in (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
     assert logs and "hero_kitchen" in logs[0]
 
 
@@ -92,7 +92,9 @@ def test_link_check_finds_broken_links(tmp_path):
     (tmp_path / "a" / "ok.png").write_bytes(PNG)
     (tmp_path / "a" / "index.html").write_text(
         "<a href='ok.png'>x</a><a href='../missing.html'>y</a><img src='gone.png'>"
-        "<a href='https://example.com/'>ext</a><a href='#top'>t</a><a href='../escape.png'>e</a>")
+        "<a href='https://example.com/'>ext</a><a href='#top'>t</a><a href='../escape.png'>e</a>",
+        encoding="utf-8",
+    )
     (tmp_path / "escape.png").write_bytes(PNG)  # a file outside dest must not count as a hit
     dest = tmp_path / "a"
     broken = link_check(dest)

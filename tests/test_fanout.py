@@ -1,6 +1,7 @@
 """C1 offline: fanout to a fake local backend with resumable storage (arrival/jobs/fanout.py)."""
 
 import json
+import sys
 
 import pytest
 
@@ -13,6 +14,8 @@ from conftest import SCANS  # noqa: E402
 
 CFG = FanoutConfig("r1", 2, "hero_kitchen", "counter_to_sink,open_drawer", 4, 0, 32, 3, str(SCANS))
 quiet = lambda *_: None  # noqa: E731
+CMD_TRUE = [sys.executable, "-c", ""]
+CMD_FALSE = [sys.executable, "-c", "import sys; sys.exit(1)"]
 
 
 def _rows(ds):
@@ -63,7 +66,7 @@ def test_killed_run_resumes_skipping_done_shards(reference, tmp_path):
 
 
 def test_gives_up_after_max_attempts_and_refuses_other_settings(tmp_path):
-    be = LocalBackend(tmp_path / "store", tmp_path / "s", command=lambda c, i, o: ["false"])
+    be = LocalBackend(tmp_path / "store", tmp_path / "s", command=lambda c, i, o: CMD_FALSE)
     with pytest.raises(ShardError, match="failed 2 times"):
         run_fanout(be, CFG, tmp_path / "out", max_attempts=2, log=quiet)
     with pytest.raises(ShardError, match="different settings"):
@@ -118,7 +121,7 @@ def test_unknown_backend_state_does_not_count_as_a_failed_attempt(tmp_path):
         def poll(self, job_id):
             return "queued"
 
-    be = UnknownBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    be = UnknownBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: CMD_TRUE)
     with pytest.raises(ShardError, match="unknown state 'queued'"):
         run_fanout(be, CFG, tmp_path / "out", poll_seconds=0, log=quiet)
     assert be.submissions == [(0, 1), (1, 1)]
@@ -126,7 +129,7 @@ def test_unknown_backend_state_does_not_count_as_a_failed_attempt(tmp_path):
 @pytest.mark.parametrize("marker", [b"{broken", b'{"shard": 1, "attempts": 1}',
                                     b'{"shard": 0, "attempts": 0}'])
 def test_invalid_done_marker_cannot_skip_a_shard(tmp_path, marker):
-    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: CMD_TRUE)
     be.put_object(marker_key(CFG, 0), marker)
     with pytest.raises(ShardError, match="invalid done marker"):
         run_fanout(be, CFG, tmp_path / "out", log=quiet)
@@ -134,14 +137,14 @@ def test_invalid_done_marker_cannot_skip_a_shard(tmp_path, marker):
 
 
 def test_valid_marker_without_shard_dataset_is_not_skipped(tmp_path):
-    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: CMD_TRUE)
     be.put_object(marker_key(CFG, 0), b'{"shard": 0, "attempts": 1}')
     with pytest.raises(ShardError, match="missing .*info.json"):
         run_fanout(be, CFG, tmp_path / "out", log=quiet)
     assert be.submissions == []
 
 def test_local_backend_refuses_another_shards_output(tmp_path):
-    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: ["true"])
+    be = LocalBackend(tmp_path / "store", tmp_path / "scratch", command=lambda c, i, o: CMD_TRUE)
     job = be.submit(CFG, 0)
     wrong = tmp_path / "scratch" / CFG.run_id / "0of2" / "shards" / "1of2"
     wrong.mkdir(parents=True)

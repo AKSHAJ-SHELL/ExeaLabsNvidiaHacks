@@ -1,4 +1,8 @@
 import re
+import shutil
+import sys
+
+import pytest
 import subprocess
 from pathlib import Path
 
@@ -14,10 +18,14 @@ def test_files_and_targets_exist():
 
 
 def test_script_parses():
+    if shutil.which("bash") is None or sys.platform == "win32":
+        pytest.skip("bash not installed or running on Windows")
     subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
 
 
 def test_make_dry_run_parses():
+    if shutil.which("make") is None:
+        pytest.skip("make not installed")
     for t in ("train", "eval-policy", "serve-policy"):
         r = subprocess.run(["make", "-n", t], cwd=ROOT, capture_output=True, text=True)
         assert r.returncode == 0, r.stderr
