@@ -200,9 +200,15 @@ def depth_intrinsics(m: Manifest, frame: Frame) -> np.ndarray:
 def load_depth(m: Manifest, frame: Frame) -> np.ndarray:
     """Depth in metres, float32, shape (h, w); 0 or non-finite marks no reading."""
     if m.depth_unit == "m":
-        d = np.load(frame.depth).astype(np.float32)
+        raw = np.load(frame.depth)
+        if raw.dtype != np.float32:
+            _fail("depth_dtype", f"frame {frame.id} metric depth must be float32, got {raw.dtype}")
+        d = raw
     else:
-        d = np.asarray(Image.open(frame.depth)).astype(np.float32) / 1000.0
+        raw = np.asarray(Image.open(frame.depth))
+        if raw.dtype != np.uint16:
+            _fail("depth_dtype", f"frame {frame.id} millimetre depth must be uint16, got {raw.dtype}")
+        d = raw.astype(np.float32) / 1000.0
     if d.shape != (m.depth_size[1], m.depth_size[0]):
         _fail("depth_shape", f"frame {frame.id} depth is {d.shape[::-1]}, manifest says {m.depth_size}")
     return d
