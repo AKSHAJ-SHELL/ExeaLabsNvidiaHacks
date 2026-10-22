@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
@@ -42,24 +43,35 @@ def load_policy(model_path: str, modality_config_path: str, device: str, embodim
     return Gr00tPolicy(embodiment_tag=EmbodimentTag(embodiment_tag), model_path=model_path, device=device)
 
 
-def to_observation(req: dict) -> dict:
-    """Decoded request -> Gr00tPolicy observation (batch 1, one time step)."""
+def to_observation(req: dict, batch: int = 1) -> dict:
+    """Decoded request -> Gr00tPolicy observation (one time step). `batch` > 1 repeats the same observation so the
+    policy draws that many independent samples (it starts every chunk from fresh random noise)."""
     state = req["state"]
-    st = {"single_arm": state[None, None, :ARM_DOF].astype(np.float32),
-          "gripper": state[None, None, ARM_DOF:ARM_DOF + 1].astype(np.float32)}
+
+    def rep(x: np.ndarray) -> np.ndarray:
+        return np.repeat(x, batch, axis=0) if batch > 1 else x
+
+    st = {"single_arm": rep(state[None, None, :ARM_DOF].astype(np.float32)),
+          "gripper": rep(state[None, None, ARM_DOF:ARM_DOF + 1].astype(np.float32))}
     if state.shape[0] > ARM_DOF + 1:  # mobile schema
-        st["base"] = state[None, None, ARM_DOF + 1:].astype(np.float32)
-    return {"video": {k: req["video"][k][None, None] for k in VIDEO_KEYS}, "state": st,
-            "language": {TASK_KEY: [[req["instruction"]]]}}
+        st["base"] = rep(state[None, None, ARM_DOF + 1:].astype(np.float32))
+    return {"video": {k: rep(req["video"][k][None, None]) for k in VIDEO_KEYS}, "state": st,
+            "language": {TASK_KEY: [[req["instruction"]] for _ in range(batch)]}}
 
 
-def to_chunk(action: dict) -> np.ndarray:
-    """Gr00tPolicy action dict ({key: [1,T,D]}) -> chunk [T,8], or [T,11] when the action has a base key."""
+def to_chunk(action: dict, reduce: str = "mean") -> np.ndarray:
+    """Gr00tPolicy action dict ({key: [B,T,D]}) -> chunk [T,8], or [T,11] when the action has a base key. A batch of
+    B samples is reduced to one chunk by the mean or the median over B (B = 1 is a plain copy)."""
+    if reduce not in ("mean", "median"):
+        raise ValueError(f"unknown reduce {reduce!r}; choose mean or median")
     keys = ("single_arm", "gripper") + (("base",) if "base" in action else ())
-    return np.concatenate([np.asarray(action[k])[0] for k in keys], axis=1)
+    fn = np.median if reduce == "median" else np.mean
+    return np.concatenate([fn(np.asarray(action[k], dtype=np.float64), axis=0) for k in keys], axis=1)
 
 
-def make_handler(policy):
+def make_handler(policy, samples: int = 1, reduce: str = "mean"):
+    lock = threading.Lock()  # the server is threaded; Gr00tPolicy is not safe to call from two requests at once (HTTP 500)
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -86,8 +98,9 @@ def make_handler(policy):
             except (ProtocolError, ValueError) as e:
                 return self._send(400, {"error": str(e)})
             try:
-                action, _info = policy.get_action(to_observation(req))
-                self._send(200, encode_response(to_chunk(action)))
+                with lock:
+                    action, _info = policy.get_action(to_observation(req, samples))
+                self._send(200, encode_response(to_chunk(action, reduce)))
             except Exception as e:  # the client sees a 500 with the reason, the server keeps running
                 self._send(500, {"error": f"{type(e).__name__}: {e}"})
 
@@ -100,11 +113,20 @@ def main(argv=None) -> int:
     p.add_argument("--modality-config-path", default="configs/gr00t/arrival_panda_config.py")
     p.add_argument("--embodiment-tag", default="new_embodiment")
     p.add_argument("--device", default="cuda")
+    p.add_argument("--samples", type=int, default=1,
+                   help="chunks sampled per request and reduced to one (GR00T starts each from fresh noise)")
+    p.add_argument("--reduce", choices=("mean", "median"), default="mean", help="how --samples chunks are combined")
+    p.add_argument("--denoise-steps", type=int, default=None,
+                   help="flow-matching steps per chunk; unset keeps the checkpoint's own value (4 for N1.7)")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8000)
     a = p.parse_args(argv)
+    if a.samples < 1 or (a.denoise_steps is not None and a.denoise_steps < 1):
+        p.error("--samples and --denoise-steps must be at least 1")
     policy = load_policy(a.model_path, a.modality_config_path, a.device, a.embodiment_tag)
-    srv = ThreadingHTTPServer((a.host, a.port), make_handler(policy))
+    if a.denoise_steps is not None:  # the action head reads this attribute on every call (gr00t's open_loop_eval does the same)
+        policy.model.action_head.num_inference_timesteps = a.denoise_steps
+    srv = ThreadingHTTPServer((a.host, a.port), make_handler(policy, a.samples, a.reduce))
     print(f"gr00t shim at http://{a.host}:{srv.server_address[1]}", flush=True)
     try:
         srv.serve_forever()

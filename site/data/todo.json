@@ -3,11 +3,11 @@
  "repo": "AvnehSBhatia/ExeaLabsNvidiaHacks",
  "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site; teammate PRs #118, #126-#150 and #152-#155 merged on feat/gap-fixes",
  "counts": {
-  "done": 53,
-  "review": 0,
+  "done": 54,
+  "review": 1,
   "todo": 0,
-  "blocked": 17,
-  "total": 70
+  "blocked": 16,
+  "total": 71
  },
  "prs": {
   "merged": 44,
@@ -27,6 +27,9 @@
      "owner_kind": "laptop",
      "pr": [
       5
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -36,6 +39,9 @@
      "owner_kind": "laptop",
      "pr": [
       10
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -46,6 +52,10 @@
      "pr": [
       2,
       71
+     ],
+     "authors": [
+      "wwpatel",
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -56,6 +66,10 @@
      "pr": [
       4,
       47
+     ],
+     "authors": [
+      "Aadi-Tiwari",
+      "aarochu"
      ]
     },
     {
@@ -65,6 +79,9 @@
      "owner_kind": "laptop",
      "pr": [
       11
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -74,6 +91,9 @@
      "owner_kind": "laptop",
      "pr": [
       31
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -83,6 +103,9 @@
      "owner_kind": "laptop",
      "pr": [
       78
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -92,6 +115,9 @@
      "owner_kind": "laptop",
      "pr": [
       19
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -101,6 +127,9 @@
      "owner_kind": "laptop",
      "pr": [
       21
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -111,6 +140,9 @@
      "pr": [
       23,
       76
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -120,6 +152,9 @@
      "owner_kind": "laptop",
      "pr": [
       73
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -130,6 +165,10 @@
      "pr": [
       13,
       55
+     ],
+     "authors": [
+      "Aadi-Tiwari",
+      "AKSHAJ-SHELL"
      ]
     },
     {
@@ -140,6 +179,10 @@
      "pr": [
       12,
       51
+     ],
+     "authors": [
+      "Aadi-Tiwari",
+      "aarochu"
      ]
     },
     {
@@ -150,6 +193,10 @@
      "pr": [
       38,
       52
+     ],
+     "authors": [
+      "IshaanM05",
+      "aarochu"
      ]
     },
     {
@@ -160,6 +207,9 @@
      "pr": [
       3,
       35
+     ],
+     "authors": [
+      "amanx98"
      ]
     },
     {
@@ -170,6 +220,10 @@
      "pr": [
       43,
       44
+     ],
+     "authors": [
+      "JmarbinGG",
+      "aarochu"
      ]
     },
     {
@@ -180,6 +234,9 @@
      "pr": [
       82,
       86
+     ],
+     "authors": [
+      "AvnehSBhatia"
      ]
     },
     {
@@ -190,6 +247,9 @@
      "pr": [
       83,
       84
+     ],
+     "authors": [
+      "AvnehSBhatia"
      ]
     },
     {
@@ -202,6 +262,9 @@
       90,
       92,
       88
+     ],
+     "authors": [
+      "AvnehSBhatia"
      ]
     },
     {
@@ -213,6 +276,9 @@
       85,
       89,
       93
+     ],
+     "authors": [
+      "AvnehSBhatia"
      ]
     },
     {
@@ -225,6 +291,12 @@
       29,
       9,
       50
+     ],
+     "authors": [
+      "AvnehSBhatia",
+      "Aadi-Tiwari",
+      "IshaanM05",
+      "aarochu"
      ]
     },
     {
@@ -238,6 +310,9 @@
       1,
       81,
       95
+     ],
+     "authors": [
+      "AvnehSBhatia"
      ]
     }
    ]
@@ -258,7 +333,10 @@
       99
      ],
      "issue": 42,
-     "note": "Replaces #49, #75 and #77. The U-kitchen corner cabinet door now opens from a stand spot 0.25 m along its run. Its drawers, its close_door and the rotated kitchen fridge stay rejected."
+     "note": "Replaces #49, #75 and #77. The U-kitchen corner cabinet door now opens from a stand spot 0.25 m along its run. Its drawers, its close_door and the rotated kitchen fridge stay rejected.",
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L2",
@@ -270,7 +348,10 @@
      "pr": [
       99
      ],
-     "issue": 42
+     "issue": 42,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L3",
@@ -282,7 +363,10 @@
      "pr": [
       96
      ],
-     "issue": 68
+     "issue": 68,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L4",
@@ -294,7 +378,10 @@
      "pr": [
       97
      ],
-     "issue": 68
+     "issue": 68,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L5",
@@ -306,6 +393,9 @@
      "issue": 66,
      "pr": [
       104
+     ],
+     "authors": [
+      "AvnehSBhatia"
      ]
     },
     {
@@ -319,7 +409,11 @@
       98,
       108
      ],
-     "issue": 72
+     "issue": 72,
+     "authors": [
+      "AvnehSBhatia",
+      "Aadi-Tiwari"
+     ]
     },
     {
      "id": "L7",
@@ -332,7 +426,10 @@
       98
      ],
      "issue": 30,
-     "note": "Demo video and gif regenerated and the README status rows checked; the open-door row now states its measured rate."
+     "note": "Demo video and gif regenerated and the README status rows checked; the open-door row now states its measured rate.",
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L8",
@@ -343,6 +440,9 @@
      "priority": "must",
      "pr": [
       98
+     ],
+     "authors": [
+      "AvnehSBhatia"
      ]
     },
     {
@@ -356,7 +456,10 @@
       105
      ],
      "issue": 56,
-     "note": "Replaces #57."
+     "note": "Replaces #57.",
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L10",
@@ -368,7 +471,10 @@
      "pr": [
       100
      ],
-     "issue": 42
+     "issue": 42,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L11",
@@ -380,7 +486,10 @@
      "pr": [
       100
      ],
-     "issue": 42
+     "issue": 42,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L12",
@@ -392,7 +501,10 @@
      "pr": [
       102
      ],
-     "issue": 72
+     "issue": 72,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L13",
@@ -405,7 +517,10 @@
       103
      ],
      "issue": 34,
-     "note": "Replaces #33 and #36. The fixed base stays the default; run the fixed-base GR00T check (G1) before training on the 11-float schema."
+     "note": "Replaces #33 and #36. The fixed base stays the default; run the fixed-base GR00T check (G1) before training on the 11-float schema.",
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L14",
@@ -418,7 +533,11 @@
       97,
       110
      ],
-     "issue": 58
+     "issue": 58,
+     "authors": [
+      "AvnehSBhatia",
+      "Aadi-Tiwari"
+     ]
     },
     {
      "id": "L15",
@@ -430,7 +549,10 @@
      "pr": [
       100
      ],
-     "issue": 60
+     "issue": 60,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L16",
@@ -442,7 +564,10 @@
      "pr": [
       100
      ],
-     "issue": 65
+     "issue": 65,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L17",
@@ -453,6 +578,9 @@
      "priority": "should",
      "pr": [
       116
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -465,7 +593,10 @@
      "pr": [
       96
      ],
-     "issue": 68
+     "issue": 68,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L19",
@@ -477,7 +608,10 @@
      "pr": [
       96
      ],
-     "issue": 66
+     "issue": 66,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L20",
@@ -490,7 +624,11 @@
       96,
       113
      ],
-     "issue": 67
+     "issue": 67,
+     "authors": [
+      "AvnehSBhatia",
+      "JmarbinGG"
+     ]
     },
     {
      "id": "L21",
@@ -501,6 +639,9 @@
      "priority": "should",
      "pr": [
       98
+     ],
+     "authors": [
+      "AvnehSBhatia"
      ]
     },
     {
@@ -513,6 +654,10 @@
      "pr": [
       97,
       114
+     ],
+     "authors": [
+      "AvnehSBhatia",
+      "JmarbinGG"
      ]
     },
     {
@@ -525,7 +670,10 @@
      "pr": [
       102
      ],
-     "issue": 68
+     "issue": 68,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L24",
@@ -538,7 +686,10 @@
       106
      ],
      "issue": 28,
-     "note": "Replaces #27."
+     "note": "Replaces #27.",
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L25",
@@ -551,7 +702,10 @@
       107
      ],
      "issue": 26,
-     "note": "Replaces #25. The 34 MB meshes are fetched by script and stay out of git. The close-door push standoff is retuned for the real hand: 14 of 14 on seed 5 with no people. Not measured over other seeds, rooms or people."
+     "note": "Replaces #25. The 34 MB meshes are fetched by script and stay out of git. The close-door push standoff is retuned for the real hand: 14 of 14 on seed 5 with no people. Not measured over other seeds, rooms or people.",
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L26",
@@ -563,6 +717,9 @@
      "issue": 32,
      "pr": [
       117
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -573,7 +730,11 @@
      "size": "M",
      "priority": "nice",
      "issue": 24,
-     "note": "On feat/demo-site with no pull request yet. Walkers also keep out of the door hinge disc (open_door 8 of 8 on seeds 0 to 3, was 7 of 8 on one), and fridges can be right-hinged with hinge: \"right\". Yield ignores the arm links. The hero fridge with a right hinge is rejected by the pre-flight because its free edge is in the corner."
+     "note": "On feat/demo-site with no pull request yet. Walkers also keep out of the door hinge disc (open_door 8 of 8 on seeds 0 to 3, was 7 of 8 on one), and fridges can be right-hinged with hinge: \"right\". Yield ignores the arm links. The hero fridge with a right hinge is rejected by the pre-flight because its free edge is in the corner.",
+     "authors": [
+      "AvnehSBhatia",
+      "Claude Code"
+     ]
     },
     {
      "id": "L28",
@@ -585,7 +746,10 @@
      "pr": [
       102
      ],
-     "issue": 59
+     "issue": 59,
+     "authors": [
+      "AvnehSBhatia"
+     ]
     },
     {
      "id": "L29",
@@ -597,6 +761,9 @@
      "issue": 64,
      "pr": [
       109
+     ],
+     "authors": [
+      "Aadi-Tiwari"
      ]
     },
     {
@@ -607,7 +774,29 @@
      "size": "M",
      "priority": "should",
      "issue": 68,
-     "pr": []
+     "pr": [
+      192
+     ],
+     "authors": [
+      "AvnehSBhatia",
+      "Claude Code",
+      "AKSHAJ-SHELL"
+     ],
+     "note": "DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The cap was measured on Linux in Docker (docs/ref/MEMCAP.md, #192): it limits address space, which follows the core count, and past it the native libraries crash instead of raising MemoryError, so leave it off or set it at least 1.5 times the measured peak."
+    },
+    {
+     "id": "L31",
+     "title": "Synchronized ego, wrist and exocentric capture from one simulation state, with a side-by-side preview and an optional three-camera GR00T config",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "M",
+     "priority": "nice",
+     "issue": null,
+     "pr": [],
+     "authors": [
+      "rishith-c"
+     ],
+     "note": "From rishith-c/feat/ego-exocentric-capture, merged on feat/more-prs-2 with its commit author kept. Offline key and schema checks only; no three-view GR00T training or inference has been run."
     }
    ]
   },
@@ -624,13 +813,19 @@
    "items": [
     {
      "id": "G1",
-     "title": "Real GR00T loader check and 100-step fine-tune on hero_kitchen_sim",
-     "status": "blocked",
+     "title": "Real GR00T loader check and fine-tune on hero_kitchen_sim",
+     "status": "done",
      "owner_kind": "gpu",
      "size": "M",
      "priority": "must",
      "issue": 63,
-     "note": "Offline slice done: 28 of 28 episodes at 224 px, validator passes, loader check passes with 4 warnings. GR00T itself has not loaded the data."
+     "note": "GR00T N1.7-3B fine-tuned on one 96 GB GPU and scored in the sim on identical trials. Best 39 of 48 (81%) against 26 of 48 for the clean-data baseline (paired sign test p = 0.007): clean data plus DART demos with the marginal drawer pulls removed. Self-reported in #165 and #63; small samples, and the base-GR00T and generic-RoboCasa cells (G3, G4) are not run, so `usefulness` stays null.",
+     "pr": [
+      165
+     ],
+     "authors": [
+      "IshaanM05"
+     ]
     },
     {
      "id": "G2",
@@ -639,7 +834,11 @@
      "owner_kind": "gpu",
      "size": "M",
      "priority": "must",
-     "note": "Wire-format golden test and the 8-float and 11-float schemas are done. The shim has not run against a real GR00T server."
+     "note": "Wire-format golden test and the 8-float and 11-float schemas are done. The shim has not run against a real GR00T server.",
+     "authors": [
+      "AvnehSBhatia",
+      "Claude Code"
+     ]
     },
     {
      "id": "G3",
@@ -648,7 +847,8 @@
      "owner_kind": "gpu",
      "size": "L",
      "priority": "must",
-     "issue": 64
+     "issue": 64,
+     "authors": []
     },
     {
      "id": "G4",
@@ -657,7 +857,8 @@
      "owner_kind": "gpu",
      "size": "M",
      "priority": "must",
-     "issue": 64
+     "issue": 64,
+     "authors": []
     },
     {
      "id": "G5",
@@ -667,7 +868,11 @@
      "size": "L",
      "priority": "must",
      "issue": 63,
-     "note": "Dockerfile.gpu, scripts/run_finetune.sh and the train, eval-policy and serve-policy targets are written and never run on a GPU. Unverified items are listed in the build log."
+     "note": "Dockerfile.gpu, scripts/run_finetune.sh and the train, eval-policy and serve-policy targets are written and never run on a GPU. Unverified items are listed in the build log.",
+     "authors": [
+      "AvnehSBhatia",
+      "Claude Code"
+     ]
     },
     {
      "id": "G6",
@@ -677,7 +882,11 @@
      "size": "M",
      "priority": "must",
      "issue": 69,
-     "note": "Offline checker scripts/check_layout.py compares layout.yaml with the twin. Loading in real RoboCasa is not checked."
+     "note": "Offline checker scripts/check_layout.py compares layout.yaml with the twin. Loading in real RoboCasa is not checked.",
+     "authors": [
+      "AvnehSBhatia",
+      "Claude Code"
+     ]
     },
     {
      "id": "G7",
@@ -686,7 +895,8 @@
      "owner_kind": "gpu",
      "size": "L",
      "priority": "should",
-     "issue": 62
+     "issue": 62,
+     "authors": []
     },
     {
      "id": "G8",
@@ -695,7 +905,8 @@
      "owner_kind": "gpu",
      "size": "L",
      "priority": "should",
-     "issue": 61
+     "issue": 61,
+     "authors": []
     }
    ]
   },
@@ -712,7 +923,11 @@
      "size": "L",
      "priority": "must",
      "issue": 66,
-     "note": "Fan-out client with a local backend, done-markers, retry and resume is built and tested. No Nebius client exists."
+     "note": "Fan-out with done-markers, retry and resume is built. arrival fanout --backend nebius runs shards as Serverless AI Jobs with an Object Storage bucket, tested only against in-process fakes of both APIs. It has never run against Nebius; the one small real run needs an account.",
+     "authors": [
+      "AvnehSBhatia",
+      "Claude Code"
+     ]
     },
     {
      "id": "C2",
@@ -725,7 +940,10 @@
      "pr": [
       115
      ],
-     "note": "Smoke test (#115), /healthz, docker-compose.yml and docs/DEPLOY.md are written and tested on a laptop. TLS, the domain, a real seeded room and a run on a host are still blocked."
+     "note": "Smoke test (#115), /healthz, docker-compose.yml and docs/DEPLOY.md are written and tested on a laptop. TLS, the domain, a real seeded room and a run on a host are still blocked.",
+     "authors": [
+      "JmarbinGG"
+     ]
     },
     {
      "id": "C3",
@@ -734,7 +952,8 @@
      "owner_kind": "cloud",
      "size": "S",
      "priority": "should",
-     "issue": 67
+     "issue": 67,
+     "authors": []
     },
     {
      "id": "C4",
@@ -743,7 +962,9 @@
      "owner_kind": "cloud",
      "size": "M",
      "priority": "should",
-     "issue": 60
+     "issue": 60,
+     "note": "Offline slice built: detection client, back-projection into the room, merge across frames and the worker's labelled fallback, tested on rendered frames with hand-written replies. The real model call is blocked on Token Factory credentials.",
+     "authors": []
     },
     {
      "id": "C5",
@@ -752,7 +973,8 @@
      "owner_kind": "cloud",
      "size": "M",
      "priority": "nice",
-     "issue": 70
+     "issue": 70,
+     "authors": []
     }
    ]
   },
@@ -768,7 +990,8 @@
      "owner_kind": "people",
      "size": "L",
      "priority": "must",
-     "issue": 58
+     "issue": 58,
+     "authors": []
     },
     {
      "id": "P2",
@@ -777,7 +1000,8 @@
      "owner_kind": "people",
      "size": "L",
      "priority": "must",
-     "issue": 59
+     "issue": 59,
+     "authors": []
     },
     {
      "id": "P3",
@@ -787,7 +1011,13 @@
      "size": "S",
      "priority": "should",
      "issue": 67,
-     "note": "20 successes in 26 attempts; 1230.359 operator seconds including failures. Basic validation passes; one long episode is retained. Evidence: docs/results/p3-teleop-2026-10-21/. C3 still needs the cloud comparison."
+     "note": "20 successes in 26 attempts; 1230.359 operator seconds including failures. Basic validation passes; one long episode is retained. Evidence: docs/results/p3-teleop-2026-10-21/. C3 still needs the cloud comparison.",
+     "pr": [
+      127
+     ],
+     "authors": [
+      "Aadi-Tiwari"
+     ]
     },
     {
      "id": "P4",
@@ -795,7 +1025,8 @@
      "status": "blocked",
      "owner_kind": "people",
      "size": "S",
-     "priority": "should"
+     "priority": "should",
+     "authors": []
     },
     {
      "id": "OWN",
@@ -803,7 +1034,8 @@
      "status": "blocked",
      "owner_kind": "people",
      "size": "S",
-     "note": "Repo owner only"
+     "note": "Repo owner only",
+     "authors": []
     }
    ]
   }

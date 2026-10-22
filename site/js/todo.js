@@ -31,12 +31,13 @@ function rowHTML(it) {
   const size = it.size ? `<span class="sched__chip" title="${esc(SIZE[it.size] || it.size)}"><span class="sr-only">Size </span>${esc(it.size)}</span>` : '';
   const prio = it.priority ? `<span class="sched__prio sched__prio--${esc(it.priority)}">${esc(it.priority)}</span>` : '';
   const note = it.note ? `<small class="sched__note">${esc(it.note)}</small>` : '';
+  const who = (it.authors || []).length ? `<span class="sched__chip" title="Worked on by"><span class="sr-only">Worked on by </span>${it.authors.map(esc).join(', ')}</span>` : '';
   const links = prs.map(prLink).join('') + (it.issue && !prs.length ? issueLink(it.issue) : '');
   return `<li class="sched__row" data-status="${esc(it.status)}">
     <span class="sched__st">${mark(it.status)}<span class="sr-only">${STATUS[it.status].word}: </span></span>
     <span class="sched__id mono">${esc(it.id)}</span>
     <span class="sched__title">${esc(it.title)}${note}</span>
-    <span class="sched__meta">${prio}${size}${links}</span>
+    <span class="sched__meta">${prio}${size}${who}${links}</span>
   </li>`;
 }
 

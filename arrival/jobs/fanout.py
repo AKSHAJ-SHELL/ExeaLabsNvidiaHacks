@@ -5,8 +5,9 @@ no done-marker to a `Backend`, polls, retries a failed shard, copies a finished 
 storage and writes that shard's done-marker LAST, so a marker means the shard's files are all there. A rerun after a
 kill skips every shard with a marker. When all markers exist the shards are downloaded and joined with `merge_shards`.
 
-Only `LocalBackend` exists and is tested: shards are local subprocesses and a directory stands in for object storage.
-`NebiusBackendStub` is an UNTESTED interface stub. No Nebius account was used; nothing here has run against Nebius."""
+`LocalBackend` runs shards as local subprocesses, with a directory standing in for object storage. `NebiusBackend`
+(arrival/jobs/nebius.py) runs them as Nebius Serverless AI Jobs with an Object Storage bucket; it is tested only
+against fakes and has never run against Nebius. `NebiusBackendStub` below is the earlier stub, which still raises."""
 
 from __future__ import annotations
 
@@ -44,6 +45,19 @@ class FanoutConfig:
         # The run id becomes both a scratch-directory component and an object-storage prefix.
         if not isinstance(self.run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", self.run_id):
             raise ShardError("run_id must be 1-64 letters, digits, underscores or hyphens, starting with a letter or digit")
+        for name, minimum in (("shards", 1), ("episodes", 1), ("people", 0), ("res", 1)):
+            value = getattr(self, name)
+            if type(value) is not int or value < minimum:
+                raise ShardError(f"{name} must be an integer >= {minimum}")
+        if type(self.seed) is not int:
+            raise ShardError("seed must be an integer")
+        if not isinstance(self.room, str) or not self.room.strip():
+            raise ShardError("room must be a non-empty name")
+        if (not isinstance(self.families, str) or not self.families.strip() or
+                any(not part.strip() for part in self.families.split(","))):
+            raise ShardError("families must be comma-separated non-empty names")
+        if not isinstance(self.scans, str) or not self.scans.strip():
+            raise ShardError("scans must be a non-empty path")
 
     def sim_args(self, i: int) -> list[str]:
         return ["sim", "--room", self.room, "--families", self.families, "--episodes", str(self.episodes),
@@ -141,6 +155,14 @@ class LocalBackend:
         return sorted(p.relative_to(self.store).as_posix() for p in base.rglob("*")
                       if p.is_file() and not p.name.endswith(".part"))
 
+    def describe(self, job_id: str) -> dict:
+        """What the status record keeps for a job. A local subprocess has no resource preset."""
+        proc, _, out, _ = self._jobs[job_id]
+        code = proc.poll()
+        log = out / f"attempt{job_id.rsplit('-', 1)[-1]}.log"
+        return {"state": "running" if code is None else f"exited {code}",
+                "reason": f"exit code {code}, log {log}" if code else None, "resources": None}
+
 
 class NebiusBackendStub:
     """UNTESTED interface stub for Nebius Serverless Jobs plus Nebius Object Storage. Not implemented, never run
@@ -161,6 +183,13 @@ def shard_prefix(cfg: FanoutConfig, i: int) -> str:
     return f"{cfg.run_id}/shards/{i}of{cfg.shards}"
 
 
+def require_shard_artifacts(backend: Backend, cfg: FanoutConfig, i: int) -> None:
+    base = f"{shard_prefix(cfg, i)}/datasets/{cfg.room}_sim/meta"
+    for name in ("info.json", "episodes.jsonl"):
+        if not backend.exists(f"{base}/{name}"):
+            raise ShardError(f"shard {i}/{cfg.shards} is missing {base}/{name}; done marker is not trustworthy")
+
+
 def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, parallel: int = 2, max_attempts: int = 3,
                poll_seconds: float = 0.2, on_shard_done: Callable[[int], None] | None = None, log=print) -> dict:
     """Run every shard without a done-marker, retry failures up to `max_attempts` submissions each, then download and
@@ -177,7 +206,11 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
     manifest = {"config": cfg.__dict__}
     mkey = f"{cfg.run_id}/run.json"
     if backend.exists(mkey):
-        if json.loads(backend.get_object(mkey)) != manifest:
+        try:
+            saved_manifest = json.loads(backend.get_object(mkey))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ShardError(f"invalid run manifest {mkey}: {exc}") from exc
+        if saved_manifest != manifest:
             raise ShardError(f"run {cfg.run_id!r} in storage was started with different settings; use a new run id")
     else:
         backend.put_object(mkey, json.dumps(manifest, sort_keys=True).encode())
@@ -194,6 +227,7 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
         if (not isinstance(marker, dict) or type(marker.get("shard")) is not int or marker["shard"] != i or
                 type(marker.get("attempts")) is not int or marker["attempts"] < 1):
             raise ShardError(f"invalid done marker {key}: shard or attempts do not match")
+        require_shard_artifacts(backend, cfg, i)
     skipped = [i for i in range(cfg.shards) if i not in todo]
     if skipped:
         log(f"fanout: shards {skipped} already done, skipping")
@@ -214,6 +248,7 @@ def run_fanout(backend: Backend, cfg: FanoutConfig, out_dir: str | Path, *, para
             del running[job_id]
             if state == SUCCEEDED:
                 backend.fetch_result(job_id, shard_prefix(cfg, i))
+                require_shard_artifacts(backend, cfg, i)
                 backend.put_object(marker_key(cfg, i), json.dumps({"shard": i, "attempts": attempts[i]}).encode())
                 ran.append(i)
                 log(f"fanout: shard {i}/{cfg.shards} done (attempt {attempts[i]})")

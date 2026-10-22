@@ -25,7 +25,7 @@ from arrival.export.lerobot import chunk_of
 SHARD_RE = re.compile(r"^(\d+)/(\d+)$")
 SHARD_DIR_RE = re.compile(r"^\d+of\d+$")
 FINGERPRINT_KEYS = ("room", "families", "episodes", "seed", "people", "policy", "planner", "split", "instructions",
-                    "base", "arm", "res", "shard")
+                    "base", "arm", "res", "shard", "exec_noise", "cameras")
 SKIP_REASONS_KEPT = 50
 # the shard fields that must agree across shards (index and task_range differ by design)
 SHARED_SHARD_KEYS = ("count", "total_tasks", "episodes", "seed", "families", "people", "policy", "planner", "split",
@@ -71,20 +71,27 @@ class Journal:
         (a torn last line, from a kill mid-write, is cut off), or start fresh when there is no journal. Raises
         ShardError when the journal belongs to a run with other settings."""
         fp = {k: fingerprint.get(k) for k in FINGERPRINT_KEYS}
+        fp["exec_noise"] = fp["exec_noise"] or 0.0
+        fp["cameras"] = fingerprint.get("cameras", ["ego_view", "wrist"])
         if resume and self.path.is_file():
-            lines = self.path.read_text().splitlines()
+            body = self.path.read_text()
+            lines = body.splitlines()
             rows = []
             for k, line in enumerate(lines):
                 try:
                     rows.append(json.loads(line))
                 except json.JSONDecodeError:
-                    if k != len(lines) - 1:
+                    if k != len(lines) - 1 or body.endswith("\n"):
                         raise ShardError(f"{self.path}: line {k + 1} is not JSON; delete the progress file to start over")
                     break  # a kill mid-write: that task counts as not done
             if rows:
                 if not isinstance(rows[0], dict):
                     raise ShardError(f"{self.path}: invalid fingerprint record")
                 saved = rows[0].get("fingerprint")
+                if isinstance(saved, dict):
+                    saved = {**saved, "exec_noise": saved.get("exec_noise") or 0.0}  # journals from before DART have none
+                if isinstance(saved, dict):
+                    saved = {"cameras": ["ego_view", "wrist"], **saved}
                 if saved != fp:
                     diff = sorted(k for k in set(fp) | set(saved or {}) if (saved or {}).get(k) != fp.get(k))
                     raise ShardError(f"--resume: the saved progress in {self.path} is for a run with different "
@@ -113,7 +120,27 @@ class Journal:
 # ---- merge ----
 
 def _jsonl(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows = []
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        if line.strip():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ShardError(f"{path}: line {number} is not JSON: {exc.msg}") from exc
+            if not isinstance(row, dict):
+                raise ShardError(f"{path}: line {number} must be a JSON object")
+            rows.append(row)
+    return rows
+
+
+def _json(path: Path) -> dict:
+    try:
+        value = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ShardError(f"{path}: invalid JSON: {exc.msg}") from exc
+    if not isinstance(value, dict):
+        raise ShardError(f"{path}: expected a JSON object")
+    return value
 
 
 def _find_dataset(path: Path) -> Path:
@@ -141,16 +168,21 @@ def expand_sources(paths: list[str | Path]) -> list[Path]:
 
 def _load(path: Path) -> dict:
     root = _find_dataset(path)
-    info = json.loads((root / "meta" / "info.json").read_text())
+    info = _json(root / "meta" / "info.json")
     shard = info.get("arrival_shard")
     if not isinstance(shard, dict):
         raise ShardError(f"{root} is not a shard dataset (no arrival_shard in info.json); "
                          f"produce it with arrival sim --shard i/n")
     report = root.parent.parent / "reports" / f"{info.get('arrival_room_id')}_sim.json"
     return {"root": root, "info": info, "shard": shard, "episodes": _jsonl(root / "meta" / "episodes.jsonl"),
-            "modality": json.loads((root / "meta" / "modality.json").read_text()),
-            "embodiment": json.loads((root / "meta" / "embodiment.json").read_text()),
-            "report": json.loads(report.read_text()) if report.is_file() else None}
+            "modality": _json(root / "meta" / "modality.json"),
+            "embodiment": _json(root / "meta" / "embodiment.json"),
+            "report": _json(report) if report.is_file() else None}
+
+
+def _exec_noise(info: dict) -> float:
+    """The DART level of a shard: the info key, or (shards written before it existed) the provenance block's."""
+    return float(info.get("arrival_exec_noise_rad") or ((info.get("arrival_provenance") or {}).get("run") or {}).get("exec_noise") or 0.0)
 
 
 def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=print) -> dict:
@@ -178,6 +210,9 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
         for k in ("arrival_room_id", "fps", "features"):
             if s["info"].get(k) != first["info"].get(k):
                 raise ShardError(f"shard {s['shard']['index']} differs from shard 0 in info.{k}")
+        if _exec_noise(s["info"]) != _exec_noise(first["info"]):
+            raise ShardError(f"shard {s['shard']['index']} differs from shard 0 in arrival_exec_noise_rad: "
+                             f"{_exec_noise(s['info'])!r} vs {_exec_noise(first['info'])!r}; they are not from one run")
         if s["modality"] != first["modality"] or s["embodiment"] != first["embodiment"]:
             raise ShardError(f"shard {s['shard']['index']} has a different modality or embodiment than shard 0")
     cursor = 0
@@ -210,19 +245,31 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
     room, fps = info0["arrival_room_id"], info0["fps"]
     cams = [k.removeprefix("observation.images.") for k, v in info0["features"].items() if v.get("dtype") == "video"]
     res = info0["features"][f"observation.images.{cams[0]}"]["shape"][0]
+
+    def episode_files(s: dict, row: dict) -> tuple[Path, dict[str, Path]]:
+        index = row["episode_index"]
+        size = s["info"].get("chunks_size", 1000)
+        data = s["root"] / s["info"]["data_path"].format(episode_chunk=chunk_of(index, size), episode_index=index)
+        videos = {cam: s["root"] / s["info"]["video_path"].format(
+            episode_chunk=chunk_of(index, size), episode_index=index, video_key=f"observation.images.{cam}")
+            for cam in cams}
+        return data, videos
+
     root = Path(out_dir) / "datasets" / f"{room}_sim"
     for s in shards:
         if root.resolve() in (s["root"].resolve(), *s["root"].resolve().parents):
             raise ShardError(f"the output {root} would overwrite shard {s['root']}; pick another --out")
-    w = SimDatasetWriter(root, room, fps, res, tuple(cams), base="mobile" if first["embodiment"].get("base_actuated") else "fixed",
-                        arm=first["embodiment"].get("arm", "procedural"))
-    for s in shards:
-        size = s["info"].get("chunks_size", 1000)
         for row in s["episodes"]:
-            j = row["episode_index"]
-            t = pq.read_table(s["root"] / s["info"]["data_path"].format(episode_chunk=chunk_of(j, size), episode_index=j))
-            videos = {c: s["root"] / s["info"]["video_path"].format(episode_chunk=chunk_of(j, size), episode_index=j,
-                                                                    video_key=f"observation.images.{c}") for c in cams}
+            data, videos = episode_files(s, row)
+            for source in (data, *videos.values()):
+                if not source.is_file():
+                    raise ShardError(f"missing source file {source}; merge did not touch {root}")
+    w = SimDatasetWriter(root, room, fps, res, tuple(cams), base="mobile" if first["embodiment"].get("base_actuated") else "fixed",
+                        arm=first["embodiment"].get("arm", "procedural"), provenance=info0.get("arrival_provenance"))
+    for s in shards:
+        for row in s["episodes"]:
+            data, videos = episode_files(s, row)
+            t = pq.read_table(data)
             w.add_copied(np.array(t.column("observation.state").to_pylist(), dtype=np.float32),
                          np.array(t.column("action").to_pylist(), dtype=np.float32), row, videos)
 
@@ -235,7 +282,10 @@ def merge_shards(sources: list[str | Path], out_dir: str | Path = "out", log=pri
     skipped = {"skipped_unreachable": unreachable, "skipped_error": errored, "skipped": unreachable + errored,
                "skip_reasons": reasons[:SKIP_REASONS_KEPT]}
     attempts = sum(i.get("arrival_attempts", 0) for i in infos)
-    out_info = w.finish(attempts, skipped, {"merged_shards": n, "merged_total_tasks": first["shard"]["total_tasks"]})
+    merged = {"merged_shards": n, "merged_total_tasks": first["shard"]["total_tasks"]}
+    if _exec_noise(info0):  # DART shards (they agree, checked above): the merged set is just as perturbed
+        merged["exec_noise_rad"] = _exec_noise(info0)
+    out_info = w.finish(attempts, skipped, merged)
     log(f"[merge] {n} shards -> {root}: {out_info['total_episodes']} episodes, {out_info['total_frames']} frames")
     rp = _merged_report(shards, out_info, skipped, Path(out_dir) / "reports" / f"{room}_sim.json", n)
     return {"dataset": root, "report": rp, "info": out_info}

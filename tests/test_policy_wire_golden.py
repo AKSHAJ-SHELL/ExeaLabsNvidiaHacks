@@ -72,6 +72,10 @@ def test_wrong_widths_refused_clearly():
         decode_response(GOLDEN["arm"]["response"], "mobile")
     with pytest.raises(ProtocolError, match="expects 8 floats.*returned 11"):
         decode_response(GOLDEN["mobile"]["response"], "arm")
+    bad_mobile = dict(GOLDEN["mobile"]["response"])
+    bad_mobile["action.base"] = [[0.0] * 3]
+    with pytest.raises(ProtocolError, match="chunk lengths differ.*action.base=1"):
+        decode_response(bad_mobile, "mobile")
     body = dict(GOLDEN["arm"]["request"])
     body["state.single_arm"] = [0.0] * 10
     with pytest.raises(ProtocolError, match="7 finite floats, got shape \\[10\\]"):

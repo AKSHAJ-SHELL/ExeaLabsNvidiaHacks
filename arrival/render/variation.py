@@ -85,6 +85,9 @@ def check_frame(orig: np.ndarray, var: np.ndarray, mask: np.ndarray | None = Non
                              or mask.shape != orig.shape[:2]):
         return {"ok": False, "reason": "mask must be a boolean array matching frame height and width",
                 "edge_corr": None, "mask_change": None}
+    if np.array_equal(orig, var):
+        return {"ok": False, "reason": "backend returned the original frame unchanged",
+                "edge_corr": 1.0, "mask_change": 0.0 if mask is not None and mask.any() else None}
     corr = edge_correlation(orig, var)
     mc = masked_change(orig, var, mask)
     reason = None
@@ -196,12 +199,25 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     src, dst = Path(src), Path(dst)
     if backend not in ("cosmos", "local_stub"):
         raise ValueError(f"unknown backend {backend!r}")
+    if client is not None and getattr(client, "name", None) != backend:
+        raise ValueError(f"client backend {getattr(client, 'name', None)!r} does not match requested {backend!r}")
     select_frames(0, 0, seed, fraction)  # reject invalid fractions before copying the dataset
+    if dst.resolve().is_relative_to(src.resolve()):
+        raise ValueError("destination must be outside the source dataset")
+
+    if type(edge_min) not in (int, float) or not math.isfinite(edge_min) or not -1 <= edge_min <= 1:
+        raise ValueError("edge_min must be a finite correlation threshold between -1 and 1")
+    if type(mask_max) not in (int, float) or not math.isfinite(mask_max) or mask_max < 0:
+        raise ValueError("mask_max must be a finite, nonnegative change threshold")
     if dst.exists():
         raise FileExistsError(f"{dst} exists; the copy directory must be new")
+    info = json.loads((src / "meta" / "info.json").read_text())
+    fps = info.get("fps", 20) if fps is None else fps
+    if type(fps) is not int or fps < 1:
+        raise ValueError("fps must be a positive integer")
+
+    stage_start = time.perf_counter()
     shutil.copytree(src, dst)
-    info = json.loads((dst / "meta" / "info.json").read_text())
-    fps = fps or int(info.get("fps", 20))
     cli = client if client is not None else (CosmosClient() if backend == "cosmos" else LocalStub(seed))
     counts = {"selected": 0, "ok": 0, "rejected": 0, "failed": 0, "skipped": 0}
     consecutive = 0
@@ -229,6 +245,11 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
             t0 = time.perf_counter()
             try:
                 out, params = cli(orig, ep, fi)
+                if not isinstance(out, np.ndarray):
+                    raise ValueError("backend frame must be a numpy array")
+                if not isinstance(params, dict):
+                    raise ValueError("backend parameters must be a JSON object")
+                json.dumps(params)  # sidecar parameters must be serializable
             except Exception as e:  # noqa: BLE001 - any backend error leaves the frame original
                 row.update(latency_ms=round((time.perf_counter() - t0) * 1000, 2), reason=str(e))
                 counts["failed"] += 1
@@ -254,11 +275,14 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
             write_video(dst / VIDEO_DIR / key / vid.name, np.stack(frames), fps)
     label = "cosmos" if cosmos_ok else ("local_stub" if backend == "local_stub" and counts["ok"] else "none")
     (dst / "meta" / SIDECAR).write_text("".join(json.dumps(r) + "\n" for r in rows))
+    backend_latency_s = round(sum(r["latency_ms"] or 0 for r in rows) / 1000, 3)
     summary = {"arrival_appearance_variation": label, "backend_requested": backend, "seed": seed,
                "fraction": fraction, "requests": counts.pop("selected"), **counts,
                "cosmos_model": cli.model if cli.name == "cosmos" and cosmos_ok else None,
-               "added_latency_s": None, "cost_usd": None,
-               "note": "frames not ok stay original; added latency and cost are unmeasured end to end"}
+               "backend_latency_s": backend_latency_s,
+               "added_latency_s": round(time.perf_counter() - stage_start, 3), "cost_usd": None,
+               "note": "frames not ok stay original; added latency includes copy, backend calls and video writes; "
+                       "USD is unknown without endpoint billing data"}
     (dst / "meta" / SUMMARY).write_text(json.dumps(summary, indent=2))
     info["arrival_appearance_variation"] = label
     (dst / "meta" / "info.json").write_text(json.dumps(info, indent=2))

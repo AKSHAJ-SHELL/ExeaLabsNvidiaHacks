@@ -25,6 +25,10 @@ def refs(it: dict) -> str:
     return ", ".join(out) or "none"
 
 
+def who(it: dict) -> str:
+    return ", ".join(f"@{a}" if a != "Claude Code" else a for a in it.get("authors") or []) or "unassigned"
+
+
 def cell(s: str) -> str:
     return s.replace("|", "\\|")
 
@@ -45,14 +49,14 @@ def render(todo: dict) -> str:
     for g in todo["groups"]:
         L += [f"### {g['title']} ({len(g['items'])})", "", g["blurb"], ""]
         if g["id"] == "shipped":
-            L += ["| id | what | PRs |", "|---|---|---|"]
-            L += [f"| {it['id']} | {cell(it['title'])} | {refs(it)} |" for it in g["items"]]
+            L += ["| id | what | PRs | who |", "|---|---|---|---|"]
+            L += [f"| {it['id']} | {cell(it['title'])} | {refs(it)} | {who(it)} |" for it in g["items"]]
         else:
-            L += ["| id | what | size | priority | status | PRs or issue |", "|---|---|---|---|---|---|"]
+            L += ["| id | what | size | priority | status | PRs or issue | who |", "|---|---|---|---|---|---|---|"]
             for it in g["items"]:
                 what = cell(it["title"]) + (f" {cell(it['note'])}" if it.get("note") else "")
                 L.append(f"| {it['id']} | {what} | {it.get('size') or ''} | {it.get('priority') or ''} | "
-                         f"{WORD[it['status']]} | {refs(it)} |")
+                         f"{WORD[it['status']]} | {refs(it)} | {who(it)} |")
         L.append("")
     sup, nm = todo.get("superseded"), todo.get("not_merged")
     if sup or nm:

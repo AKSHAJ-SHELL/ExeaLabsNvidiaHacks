@@ -76,6 +76,7 @@ def test_failure_with_non_ascii_message_is_recorded(tmp_path):
     assert "мм" in (out / "jobs" / job["id"] / "error.txt").read_text(encoding="utf-8")
 
 
+@pytest.mark.render  # the sim renders in a child process, where --no-render's patch does not reach
 def test_scan_json_job_becomes_dataset_zip(tmp_path):
     pytest.importorskip("mujoco")
     from arrival.export.validate import validate

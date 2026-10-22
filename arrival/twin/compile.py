@@ -259,6 +259,20 @@ def place_default_objects(twin: dict, seed: int = 0) -> list[dict]:
     return placed
 
 
+def fill_objects(twin: dict, detection: dict | None = None, seed: int = 0) -> list[dict]:
+    """Objects for a twin whose scan lists none: the ones `arrival.twin.detect.detect_objects` found (labelled
+    `detected`) when there are any, else `place_default_objects` (`default_synthetic`). The detection run, less its
+    object list, is kept in twin["object_detection"] so a fallback says why. Mutates twin."""
+    run = dict(detection or {"state": "not_run", "reason": "no RGB-D frames"})
+    found = run.pop("objects", None) or []
+    twin["object_detection"] = run
+    if not found:
+        return place_default_objects(twin, seed=seed)
+    twin["objects"] += found
+    twin["provenance"].setdefault("generators", {})["objects"] = object_counts(twin)
+    return found
+
+
 def _wall_entry(w: dict) -> dict:
     (x0, y0), (x1, y1) = w["start"], w["end"]
     length, angle = math.hypot(x1 - x0, y1 - y0), math.atan2(y1 - y0, x1 - x0)

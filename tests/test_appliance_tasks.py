@@ -76,6 +76,48 @@ def test_hero_kitchen_oven_and_faucet(hero_twin, family):
     assert float(env.data.joint(task["joint"]).qpos[0]) > (FLAP_OPEN if family == "open_oven" else FAUCET_ON)
 
 
+def test_open_oven_stand_keeps_every_joint_off_its_stop(hero_twin):
+    """Straight in front of the bar, joint 5 sat on its stop for 71 steps and the episode validator flagged both G1
+    open_oven episodes; from OVEN_ALONG to the side of the bar no joint stays in the 3% band for LIMIT_STEPS."""
+    from arrival.export.quality import check_trace
+    from arrival.sim import robot
+    from arrival.sim.preflight import OVEN_ALONG, base_pose
+    from arrival.twin.compile import to_local
+
+    task = _task(hero_twin, "open_oven")
+    (x, y, _), _, src = base_pose(hero_twin, task)
+    assert to_local((x, y), src)[0] == pytest.approx(OVEN_ALONG)
+    ep = run_episode(SimEnv(hero_twin, task, res=32), ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+    assert ep["ik_error"] < 0.005
+    flags = check_trace(ep["states"], ep["actions"], list(robot.RANGES))
+    assert not [f for f in flags if f["check"] == "joint_at_limit"], flags
+
+
+def test_open_oven_stands_on_the_other_side_when_one_side_is_against_a_wall(hero_twin):
+    """The hero layout with stove_1 and counter_b swapped puts the stove's +x end 1 cm from wall_east, where the
+    OVEN_ALONG spot is too close to the wall; the base stands on the -x side instead and the episode still clears."""
+    import copy
+
+    from arrival.export.quality import check_trace
+    from arrival.sim import robot
+    from arrival.sim.preflight import OVEN_ALONG, base_pose, check_task
+    from arrival.twin.compile import to_local
+
+    twin = copy.deepcopy(hero_twin)
+    fx = {f["id"]: f for f in twin["fixtures"]}
+    fx["stove_1"]["position"][0] = 4.0 - 0.01 - 0.01 - 0.35
+    fx["counter_b"]["position"][0] = fx["stove_1"]["position"][0] - 0.35 - 0.55
+    task = _task(twin, "open_oven")
+    assert check_task(twin, task) is None
+    (x, y, _), _, src = base_pose(twin, task)
+    assert to_local((x, y), src)[0] == pytest.approx(-OVEN_ALONG)
+    ep = run_episode(SimEnv(twin, task, res=32), ScriptedExpert(), task)
+    assert ep["success"], ep["detail"]
+    flags = check_trace(ep["states"], ep["actions"], list(robot.RANGES))
+    assert not [f for f in flags if f["check"] == "joint_at_limit"], flags
+
+
 def test_faucet_lever_is_pushed_without_driving_it_through_its_stop(hero_twin):
     task = _task(hero_twin, "turn_on_faucet")
     env = SimEnv(hero_twin, task, res=32)

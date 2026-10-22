@@ -110,6 +110,17 @@ def test_invalid_camera_transform_is_rejected_before_scoring(tmp_path, transform
     assert not (tmp_path / "out").exists()
 
 
+@pytest.mark.parametrize("option,value", [
+    ("max_side", True), ("max_frames", 1.5), ("png_frames", -1),
+    ("png_frames", True), ("min_confidence", -1), ("min_confidence", 3),
+    ("min_confidence", True),
+])
+def test_invalid_realism_controls_rejected_before_loading_scan(tmp_path, option, value):
+    with pytest.raises(realism_cli.RealismError):
+        realism_cli.run_realism(tmp_path / "missing_scan", tmp_path / "out", **{option: value})
+    assert not (tmp_path / "out").exists()
+
+
 def test_masked_depth_is_not_scored(scan_dir, tmp_path):
     """The 5 m error in the confidence-0 columns must not reach the mean; with the mask off it does."""
     _, masked = _run(scan_dir, tmp_path)

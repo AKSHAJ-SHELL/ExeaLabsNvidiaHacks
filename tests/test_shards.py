@@ -68,6 +68,17 @@ def test_journal_resume_rejects_out_of_order_task_records(tmp_path):
     assert j.path.read_bytes() == before
 
 
+def test_journal_does_not_discard_a_corrupt_completed_line(tmp_path):
+    j = Journal(tmp_path / "progress.jsonl")
+    j.start(FP, resume=False)
+    with j.path.open("a") as stream:
+        stream.write("{broken}\n")  # a complete line, not an interrupted append
+    before = j.path.read_bytes()
+    with pytest.raises(ShardError, match="line 2 is not JSON"):
+        j.start(FP, resume=True)
+    assert j.path.read_bytes() == before
+
+
 # ---- merge, on synthetic episodes (no MuJoCo) ----
 
 def _episode(n, seed):
@@ -105,6 +116,19 @@ def _fake_run(tmp_path, count=3, total=6, drop=()):
         lo, hi = shard_range(total, i, count)
         _write_shard(tmp_path, i, count, total, [k for k in range(lo, hi) if k not in drop])
     return tmp_path
+
+
+@pytest.mark.parametrize("name,content,match", [
+    ("episodes.jsonl", '{broken}\n', "episodes.jsonl: line 1 is not JSON"),
+    ("episodes.jsonl", '[]\n', "episodes.jsonl: line 1 must be a JSON object"),
+    ("info.json", '{broken}', "info.json: invalid JSON"),
+])
+def test_merge_reports_corrupt_shard_metadata(tmp_path, name, content, match):
+    src = _fake_run(tmp_path / "source", count=1, total=1)
+    (src / "shards" / "0of1" / "datasets" / "room_sim" / "meta" / name).write_text(content)
+    with pytest.raises(ShardError, match=match):
+        merge_shards([src / "shards"], tmp_path / "merged")
+    assert not (tmp_path / "merged").exists()
 
 
 def test_merge_synthetic_shards_reindexes_everything_and_validates(tmp_path):
@@ -180,6 +204,19 @@ def test_merge_refuses_episode_owned_by_another_shard(tmp_path):
     with pytest.raises(ShardError, match="out-of-range task"):
         merge_shards([src / "shards"], out)
     assert not out.exists()
+
+
+def test_missing_shard_video_does_not_erase_existing_merge(tmp_path):
+    src = _fake_run(tmp_path / "src")
+    video = src / "shards" / "0of3" / "datasets" / "room_sim" / "videos" / "chunk-000" / "observation.images.ego_view" / "episode_000000.mp4"
+    video.unlink()
+    out = tmp_path / "merged"
+    old = out / "datasets" / "room_sim" / "keep.txt"
+    old.parent.mkdir(parents=True)
+    old.write_text("previous result")
+    with pytest.raises(ShardError, match="missing source file"):
+        merge_shards([src / "shards"], out)
+    assert old.read_text() == "previous result"
 
 
 def test_merge_shards_cli_exit_codes(tmp_path, capsys):

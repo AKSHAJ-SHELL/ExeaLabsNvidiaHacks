@@ -710,8 +710,40 @@ def _corrupt_rgb(m, root):
     (root / m["frames"][0]["rgb"]).write_bytes(b"not a png at all")
 
 
+def _grayscale_rgb(m, root):
+    from PIL import Image
+
+    path = root / m["frames"][0]["rgb"]
+    with Image.open(path) as im:
+        im.convert("L").save(path)
+
+
 def _wrong_depth_shape(m, root):
     np.save(root / m["frames"][0]["depth"], np.zeros((3, 3), np.float32))
+
+
+def _wrong_confidence_size(m, root):
+    from PIL import Image
+
+    Image.new("L", (3, 3), 2).save(root / "confidence.png")
+    m["frames"][0]["confidence"] = "confidence.png"
+
+def _wrong_depth_dtype(m, root):
+    path = root / m["frames"][0]["depth"]
+    np.save(path, np.load(path).astype(np.float64))
+
+def _invalid_confidence_level(m, root):
+    from PIL import Image
+
+    Image.new("L", tuple(m["depth_size"]), 255).save(root / "confidence.png")
+    m["frames"][0]["confidence"] = "confidence.png"
+
+
+def _invalid_confidence_mode(m, root):
+    from PIL import Image
+
+    Image.new("RGB", tuple(m["depth_size"]), (2, 2, 2)).save(root / "confidence.png")
+    m["frames"][0]["confidence"] = "confidence.png"
 
 
 def _pickled_depth(m, root):
@@ -724,7 +756,16 @@ def _bad_axes(m, root):
 
 @pytest.mark.parametrize("mutate,code", [
     (_same_times, "non_monotonic_timestamps"), (_drop_file, "missing_file"), (_wrong_rgb_size, "bad_size"),
+    (_corrupt_rgb, "bad_image"), (_wrong_depth_shape, "depth_shape"),
+    (_wrong_confidence_size, "bad_size"), (_pickled_depth, "bad_depth"),
+
+    (_wrong_depth_dtype, "depth_shape"), (_pickled_depth, "bad_depth"),
+
+    (_corrupt_rgb, "bad_image"), (_grayscale_rgb, "bad_image"),
+    (_wrong_depth_shape, "depth_shape"), (_pickled_depth, "bad_depth"),
+
     (_corrupt_rgb, "bad_image"), (_wrong_depth_shape, "depth_shape"), (_pickled_depth, "bad_depth"),
+    (_invalid_confidence_level, "bad_confidence"), (_invalid_confidence_mode, "bad_confidence"),
     (_bad_axes, "axis_convention"),
 ])
 def test_bad_frames_bundle_is_rejected_and_nothing_is_queued(make, tmp_path, mutate, code):

@@ -76,6 +76,24 @@ def test_selection_deterministic_and_ten_percent():
     assert abs(sum(map(len, a)) / (2 * N) - 0.10) <= 0.02
 
 
+def test_destination_inside_source_is_refused_before_copy(tmp_path):
+    src = tmp_path / "source"
+    src.mkdir()
+    (src / "keep").write_text("original")
+    with pytest.raises(ValueError, match="outside the source"):
+        variation.vary_dataset(src, src / "nested")
+    assert (src / "keep").read_text() == "original"
+    assert not (src / "nested").exists()
+
+def test_custom_client_cannot_mislabel_backend(tmp_path):
+    src = tmp_path / "source"
+    src.mkdir()
+    dst = tmp_path / "copy"
+    with pytest.raises(ValueError, match="does not match requested"):
+        variation.vary_dataset(src, dst, backend="cosmos", client=variation.LocalStub())
+    assert not dst.exists()
+
+
 @pytest.mark.parametrize("fraction", [-0.1, 1.1, float("nan"), float("inf")])
 def test_bad_fraction_rejected_before_copy(tmp_path, fraction):
     dst = tmp_path / "copy"
@@ -84,9 +102,28 @@ def test_bad_fraction_rejected_before_copy(tmp_path, fraction):
     assert not dst.exists()
 
 
+@pytest.mark.parametrize("option,value", [
+    ("edge_min", float("nan")), ("edge_min", 1.1), ("edge_min", True),
+    ("mask_max", float("nan")), ("mask_max", -0.1), ("mask_max", float("inf")),
+])
+def test_invalid_geometry_thresholds_rejected_before_copy(tmp_path, option, value):
+    dst = tmp_path / "copy"
+    with pytest.raises(ValueError, match=option):
+        variation.vary_dataset(tmp_path / "missing", dst, **{option: value})
+    assert not dst.exists()
+
+
 def test_bad_frame_count_is_rejected():
     with pytest.raises(ValueError, match="n_frames"):
         variation.select_frames(0, -1, 0)
+
+
+@pytest.mark.parametrize("fps", [0, -1, True, 20.5, "20"])
+def test_bad_fps_rejected_before_copy(dataset, tmp_path, fps):
+    dst = tmp_path / "copy"
+    with pytest.raises(ValueError, match="fps"):
+        variation.vary_dataset(dataset, dst, fps=fps)
+    assert not dst.exists()
 
 
 def test_local_stub_differs_keeps_geometry_and_source_untouched(dataset, tmp_path):
@@ -96,7 +133,7 @@ def test_local_stub_differs_keeps_geometry_and_source_untouched(dataset, tmp_pat
     assert digest(dataset) == before and validate(dataset) == []
     assert validate(dst) == []
     assert s["arrival_appearance_variation"] == "local_stub" and s["ok"] == s["requests"] == 16
-    assert s["added_latency_s"] is None and s["cost_usd"] is None
+    assert s["added_latency_s"] >= s["backend_latency_s"] > 0 and s["cost_usd"] is None
     assert json.loads((dst / "meta" / "info.json").read_text())["arrival_appearance_variation"] == "local_stub"
     rs = rows(dst)
     assert all(r["backend"] == "local_stub" and r["status"] == "ok" and r["edge_corr"] >= 0.6 for r in rs)
@@ -120,9 +157,23 @@ def test_cosmos_mock_server_pairs_ids_and_label(dataset, tmp_path):
         srv.shutdown()
         srv.server_close()
     assert s["arrival_appearance_variation"] == "cosmos" and s["ok"] == 16 and s["failed"] == 0
+    assert s["added_latency_s"] >= s["backend_latency_s"] > 0 and s["cost_usd"] is None
     rs = rows(tmp_path / "c")
     assert all(r["variant_id"] == r["original_id"] + "_v" and r["model"] == "mock-cosmos" and r["latency_ms"] > 0
                for r in rs)
+
+
+def test_unchanged_cosmos_frames_are_not_claimed_as_variation(dataset, tmp_path):
+    srv = serve(lambda img: img)
+    try:
+        client = variation.CosmosClient(f"http://127.0.0.1:{srv.server_port}/", timeout=5, retries=0)
+        summary = variation.vary_dataset(dataset, tmp_path / "copy", "cosmos", client=client)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert summary["arrival_appearance_variation"] == "none"
+    assert summary["rejected"] == summary["requests"] == 16
+    assert all("unchanged" in row["reason"] for row in rows(tmp_path / "copy"))
 
 
 def test_cosmos_client_rejects_grayscale_response():
@@ -201,4 +252,21 @@ def test_dataset_with_bad_mask_keeps_original_videos(dataset, tmp_path):
     summary = variation.vary_dataset(dataset, dst, mask=np.ones((2, 3), bool))
     assert summary["rejected"] == summary["requests"] == 16
     assert summary["ok"] == 0 and not (dst / variation.VIDEO_DIR).exists()
+    assert validate(dst) == []
+
+
+@pytest.mark.parametrize("result", [(None, {}), (np.zeros((2, 2, 3), np.uint8), None),
+                                     (np.zeros((2, 2, 3), np.uint8), {"bad": object()})])
+def test_malformed_backend_result_fails_frames_without_aborting_copy(dataset, tmp_path, result):
+    class Client:
+        name, model, version = "local_stub", "test", "1"
+
+        def __call__(self, frame, episode, index):
+            return result
+
+    dst = tmp_path / "copy"
+    summary = variation.vary_dataset(dataset, dst, client=Client())
+    assert summary["failed"] == summary["requests"] == 16
+    assert summary["ok"] == 0
+    assert all(row["status"] == "failed" and row["reason"] for row in rows(dst))
     assert validate(dst) == []

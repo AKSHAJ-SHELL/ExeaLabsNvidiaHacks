@@ -64,10 +64,15 @@ class SimDatasetWriter:
         return self.root / "videos" / f"chunk-{chunk_of(i):03d}" / f"observation.images.{cam}" / f"episode_{i:06d}.mp4"
 
     def add_episode(self, ep: dict, task: dict) -> int:
+        n = len(ep["states"])
+        for cam in self.cameras:
+            frames = np.asarray(ep["videos"].get(cam))
+            if frames.shape != (n, self.res, self.res, 3) or frames.dtype != np.uint8:
+                raise ValueError(f"camera {cam}: expected synchronized uint8 video ({n}, {self.res}, {self.res}, 3), "
+                                 f"got {frames.shape} {frames.dtype}")
         i = self._write_arrays(ep["states"], ep["actions"], task["instruction"])
         for cam in self.cameras:
             write_video(self._video_path(cam, i), ep["videos"][cam], self.fps)
-        n = len(ep["states"])
         self.episodes.append({"episode_index": i, "tasks": [task["instruction"]], "length": n,
                               "arrival_family": task["family"], "arrival_lighting": task["lighting"],
                               "arrival_people": task.get("people", 0),
@@ -160,6 +165,9 @@ class SimDatasetWriter:
             "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
             "arrival_generator": "mujoco_scripted_ik", "arrival_physically_valid": True, "arrival_grasp": "friction",
             "arrival_success_check": "physics", "arrival_successes": n, "arrival_attempts": attempts,
+            "arrival_camera_capture": {"phase": "pre_action", "timestamp": "frame_index / fps",
+                                       "roles": {c: {"ego_view": "egocentric", "wrist": "wrist",
+                                                     "overview": "exocentric"}.get(c, "unspecified") for c in self.cameras}},
             "arrival_video_policy": "all", "arrival_appearance": "mujoco_raster", "arrival_room_id": self.room_id,
             "arrival_families": sorted({e["arrival_family"] for e in self.episodes}),
             **{f"arrival_{k}": v for k, v in {**(skipped or {}), **(extra or {})}.items()},

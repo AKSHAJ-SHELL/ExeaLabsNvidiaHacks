@@ -50,6 +50,8 @@ def test_synthetic_bundle_points_land_on_floor_plane(tmp_path, unit):
     (lambda m: m.update(splits={"train": ["f000"], "heldout": ["f000", "f001"]}), "frame_in_both_splits"),
     (lambda m: m["axes"].update(camera="opencv"), "axis_convention"),
     (lambda m: m["frames"][0].update(camera_to_room=[float("nan")] * 16), "nonfinite_transform"),
+    (lambda m: m.update(rgb_size=[True, 48]), "bad_size"),
+    (lambda m: m.update(depth_size=[64, True]), "bad_size"),
 ])
 def test_malformed_manifest_rejected_with_distinct_code(tmp_path, mutate, code):
     root = rgbd.write_synthetic_bundle(tmp_path)

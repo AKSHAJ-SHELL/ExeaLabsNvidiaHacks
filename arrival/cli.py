@@ -1,4 +1,4 @@
-"""python -m arrival demo | validate | serve | sim | merge-shards | eval | realism | work | gc | doctor | summary | export-site"""
+"""python -m arrival demo | validate | serve | sim | merge-shards | subset | eval | realism | work | gc | doctor | summary | export-site"""
 
 from __future__ import annotations
 
@@ -221,7 +221,9 @@ def cmd_sim(a) -> int:
                       seed=a.seed, save_preview=a.save_preview,
                       planner_name=a.planner, split=a.split,
                       use_generated_instructions=(a.instructions == "nemotron"), base=getattr(a, "base", "fixed"),
-                      shard=shard, resume=getattr(a, "resume", False), arm=getattr(a, "arm", "procedural"))
+                      shard=shard, resume=getattr(a, "resume", False), arm=getattr(a, "arm", "procedural"),
+                      exec_noise=getattr(a, "dart", 0.0),
+                      exocentric=getattr(a, "exocentric", False))
     except ShardError as e:
         print(e, file=sys.stderr)
         return EXIT_USAGE
@@ -254,21 +256,56 @@ def cmd_sim(a) -> int:
 
 
 def cmd_fanout(a) -> int:
-    """Run the sim shards on the local fake backend (a directory as object storage), resumably, and merge them."""
+    """Run the sim shards resumably on the local fake backend (a directory as object storage) or, with
+    `--backend nebius`, as Nebius Serverless AI Jobs with an Object Storage bucket, and merge them."""
     from arrival.export.validate import validate
     from arrival.jobs.fanout import FanoutConfig, LocalBackend, run_fanout
+    from arrival.jobs.fanout_status import StatusRecorder
     from arrival.jobs.shards import ShardError
 
     cfg = FanoutConfig(a.run_id, a.shards, a.room, a.families, a.episodes, a.people, a.res, a.seed, a.scans)
-    be = LocalBackend(Path(a.out) / "fanout_store", Path(a.out) / "fanout_scratch")
+    if a.backend == "nebius":
+        from arrival.jobs.nebius import NebiusBackend, NebiusNotConfigured
+
+        try:
+            be = NebiusBackend()
+        except NebiusNotConfigured as e:
+            print(f"fanout: {e}", file=sys.stderr)
+            return EXIT_USAGE
+    else:
+        be = LocalBackend(Path(a.out) / "fanout_store", Path(a.out) / "fanout_scratch")
+    rec = StatusRecorder(be)
     try:
-        res = run_fanout(be, cfg, a.out)
+        res = run_fanout(rec, cfg, a.out)
     except ShardError as e:
         print(f"fanout: {e}", file=sys.stderr)
         return EXIT_USAGE
+    finally:
+        if a.backend == "nebius":  # remote jobs outlive this process unless cancelled
+            left = rec.cancel_open()
+            if left:
+                print(f"fanout: could not cancel Nebius jobs {left}; cancel them by hand", file=sys.stderr)
     problems = validate(res["dataset"])
     print(f"dataset: {res['dataset']} (ran shards {res['ran']}, skipped {res['skipped']})")
     return EXIT_OK if not problems else EXIT_USAGE
+
+
+def cmd_subset(a) -> int:
+    """Keep the episodes of a sim dataset that pass a rule (family, drawer opening) as a new validated dataset."""
+    from arrival.export.subset import SubsetError, subset_dataset
+    from arrival.export.validate import validate
+
+    try:
+        res = subset_dataset(a.src, a.out, families=[f for f in a.families.split(",") if f] if a.families else None,
+                             min_drawer_opening=a.min_drawer_opening)
+    except SubsetError as e:
+        print(f"subset: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    errors = validate(res["dataset"])
+    for e in errors:
+        print(f"INVALID: {e}", file=sys.stderr)
+    print(f"dataset: {res['dataset']}")
+    return EXIT_INVALID if errors else EXIT_OK
 
 
 def cmd_merge_shards(a) -> int:
@@ -557,14 +594,23 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--scans", default="scans")
     m.add_argument("--seed", type=int, default=0)
     m.add_argument("--save-preview", action="store_true")
+    m.add_argument("--exocentric", action="store_true",
+                   help="also export the synchronized external overview camera; --save-preview adds a paired ego/exo video")
     m.add_argument("--shard", default=None, metavar="I/N",
                    help="run block I of N of the --episodes tasks (I counts from 0), into <out>/shards/<I>of<N>/; "
                         "join with merge-shards")
     m.add_argument("--resume", action="store_true",
                    help="continue a killed run from its progress journal instead of starting over (same settings)")
+    m.add_argument("--dart", type=float, default=0.0, metavar="RAD",
+                   help="DART: drive the arm with smooth noise, typical std RAD (each episode uses 0.4x to 1.6x), on the joint targets while the dataset "
+                        "keeps the clean targets, so a policy sees off-plan states labelled with the way back; "
+                        "0 (default) is off, 0.02 to 0.05 is a useful range. Recorded in the dataset provenance")
     m.add_argument("--tavily", action="store_true", help="Enrich digital twin and VLM planning with Tavily appliance research")
     m.set_defaults(fn=cmd_sim)
-    f = sub.add_parser("fanout", help="run sim shards on the LOCAL fake job backend, resumable, then merge (no Nebius)")
+    f = sub.add_parser("fanout", help="run sim shards on a job backend, resumable, then merge (local by default)")
+    f.add_argument("--backend", choices=["local", "nebius"], default="local",
+                   help="local subprocesses and a directory, or Nebius Serverless AI Jobs and Object Storage "
+                        "(NEBIUS_* settings; tested against fakes only)")
     f.add_argument("--run-id", default="run")
     f.add_argument("--shards", type=int, default=2)
     f.add_argument("--room", default="hero_kitchen")
@@ -581,6 +627,13 @@ def build_parser() -> argparse.ArgumentParser:
                                              "or the one folder that holds them")
     g.add_argument("--out", default="out", help="the merged dataset goes to <out>/datasets/<room>_sim")
     g.set_defaults(fn=cmd_merge_shards)
+    u = sub.add_parser("subset", help="keep the episodes of a sim dataset that pass a rule (family, drawer opening)")
+    u.add_argument("src", help="a sim dataset folder (or the folder that holds datasets/<room>_sim)")
+    u.add_argument("--out", default="out", help="the subset goes to <out>/datasets/<room>_sim")
+    u.add_argument("--families", default="", help="comma list of families to keep (default: all)")
+    u.add_argument("--min-drawer-opening", type=float, default=None, metavar="M",
+                   help="drop open_drawer episodes whose final drawer opening is under M metres (the clean expert ends at 0.300)")
+    u.set_defaults(fn=cmd_subset)
     r = sub.add_parser("research", help="Tavily AI research on kitchen appliances and safety guidelines")
     r.add_argument("--room", default="hero_kitchen")
     r.add_argument("--query", default=None, help="direct query string to search via Tavily")
