@@ -96,6 +96,10 @@ class Journal:
                     diff = sorted(k for k in set(fp) | set(saved or {}) if (saved or {}).get(k) != fp.get(k))
                     raise ShardError(f"--resume: the saved progress in {self.path} is for a run with different "
                                      f"{', '.join(diff)}; rerun without --resume to start over")
+                for index, record in enumerate(rows[1:], 1):
+                    if (not isinstance(record, dict) or not isinstance(record.get("task_id"), str)
+                            or record.get("outcome") not in ("ok", "miss", "contact", "skip")):
+                        raise ShardError(f"{self.path}: record {index} is not a completed task")
                 if expected_tasks is not None:
                     done = rows[1:]
                     if len(done) > len(expected_tasks):
