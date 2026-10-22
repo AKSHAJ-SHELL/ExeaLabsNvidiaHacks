@@ -44,15 +44,16 @@ def make_manifest(twin: dict, families: list[str], episodes: int, seed: int = 0,
 
 
 def validate_manifest(manifest: dict) -> dict:
-    if not isinstance(manifest, dict) or manifest.get("schema_version") != SCHEMA_VERSION:
+    if (not isinstance(manifest, dict) or type(manifest.get("schema_version")) is not int or
+            manifest["schema_version"] != SCHEMA_VERSION):
         raise ValueError("unsupported evaluation manifest schema")
     payload = {k: v for k, v in manifest.items() if k != "manifest_id"}
     if manifest.get("manifest_id") != digest(payload):
         raise ValueError("evaluation manifest hash does not match its contents")
     try:
         twin, cfg, tasks = manifest["twin"], manifest["settings"], manifest["tasks"]
-        if not isinstance(twin, dict) or not isinstance(twin["room_id"], str):
-            raise ValueError("evaluation manifest needs a twin with a room_id")
+        if not isinstance(twin, dict) or not isinstance(twin["room_id"], str) or not twin["room_id"].strip():
+            raise ValueError("evaluation manifest needs a twin with a nonempty room_id")
         if digest(twin) != manifest["twin_sha256"]:
             raise ValueError("evaluation twin hash does not match")
         if cfg["base"] not in ("fixed", "mobile") or cfg.get("arm", "procedural") not in ("procedural", "menagerie") or cfg["fps"] != FPS or cfg["max_steps"] != MAX_STEPS:

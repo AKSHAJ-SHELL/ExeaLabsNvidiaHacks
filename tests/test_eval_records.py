@@ -164,6 +164,21 @@ def test_invalid_manifest_fails_before_rollout(hero_twin, tmp_path, rollouts, ch
     assert not rollouts and not (tmp_path / "eval").exists()
 
 
+@pytest.mark.parametrize("change", ["boolean_version", "empty_room"])
+def test_manifest_identity_cannot_be_rehashed_to_hide_invalid_values(hero_twin, change):
+    from arrival.eval.manifest import validate_manifest
+
+    frozen = make_manifest(hero_twin, ["open_drawer"], 1, log=lambda *_: None)
+    if change == "boolean_version":
+        frozen["schema_version"] = True
+    else:
+        frozen["twin"]["room_id"] = " "
+        frozen["twin_sha256"] = digest(frozen["twin"])
+    frozen["manifest_id"] = digest({k: v for k, v in frozen.items() if k != "manifest_id"})
+    with pytest.raises(ValueError, match="schema|room_id"):
+        validate_manifest(frozen)
+
+
 @pytest.mark.parametrize("field,value", [("people", True), ("holdout", 0), ("seed", "7"),
                                          ("instruction", "  ")])
 def test_rehashed_manifest_still_rejects_invalid_trial_types(hero_twin, tmp_path, rollouts, field, value):
