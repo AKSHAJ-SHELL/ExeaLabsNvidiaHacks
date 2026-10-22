@@ -278,6 +278,18 @@ def test_writer_rejects_nan_and_leaves_no_orphan(tmp_path):
     json.loads((tmp_path / "ds" / "meta" / "stats.json").read_text(), parse_constant=lambda c: pytest.fail(c))
 
 
+@pytest.mark.parametrize("instruction", [None, "", "  ", 5])
+def test_writer_rejects_missing_task_instruction_before_writing(tmp_path, instruction):
+    import numpy as np
+
+    w = _writer(tmp_path)
+    z = np.zeros((2, 2))
+    with pytest.raises(ValueError, match="instruction must be a nonempty string"):
+        w.add_episode(z, z, [0, .05], instruction, True)
+    assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
+    w.close()
+
+
 def test_writer_checks_videos_before_writing_and_closes_sidecar(tmp_path):
     import numpy as np
 
