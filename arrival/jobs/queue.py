@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import threading
@@ -101,6 +102,8 @@ def write_status(job_dir: Path, status: dict) -> dict:
 
 
 def read_job(jobs_root: Path, job_id: str) -> dict | None:
+    if not isinstance(job_id, str) or re.fullmatch(r"job_[0-9a-f]{32}", job_id) is None:
+        return None
     path = Path(jobs_root) / job_id / "status.json"
     for _ in range(100):
         if not path.is_file():
