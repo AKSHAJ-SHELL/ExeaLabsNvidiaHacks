@@ -61,3 +61,6 @@ def test_refuses_an_empty_result_and_overwriting_the_source(source, tmp_path):
         subset_dataset(source, tmp_path, families=["no_such_family"], log=lambda *_: None)
     with pytest.raises(SubsetError, match="overwrite"):
         subset_dataset(source, source.parent.parent, log=lambda *_: None)
+    with pytest.raises(SubsetError, match="inside the source"):
+        subset_dataset(source, source, log=lambda *_: None)
+    assert not (source / "datasets").exists()
