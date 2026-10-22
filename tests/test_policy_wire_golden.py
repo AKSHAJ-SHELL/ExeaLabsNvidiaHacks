@@ -87,6 +87,13 @@ def test_bad_frame_shape_refused():
         encode_request({"state": STATE11, "ego_view": np.zeros((4, 4), np.uint8)}, "x")
 
 
+@pytest.mark.parametrize("chunk", [np.zeros((0, 8)), np.full((1, 8), np.nan),
+                                   np.full((1, 11), np.inf), [["bad"] * 8]])
+def test_encoder_refuses_chunks_the_decoder_cannot_accept(chunk):
+    with pytest.raises(ProtocolError):
+        encode_response(chunk)
+
+
 def test_shim_maps_base_key():
     req = decode_request(GOLDEN["mobile"]["request"])
     obs = gr00t_shim.to_observation(req)

@@ -111,9 +111,14 @@ def _vec(body: dict, key: str, n: int) -> np.ndarray:
 
 def encode_response(chunk: np.ndarray) -> dict:
     """chunk [T,8] (7 arm targets + gripper) or [T,11] (plus base x, y, yaw) -> response body."""
-    chunk = np.asarray(chunk, dtype=float)
-    if chunk.ndim != 2 or chunk.shape[1] not in SCHEMA_DIM.values():
+    try:
+        chunk = np.asarray(chunk, dtype=float)
+    except (TypeError, ValueError) as e:
+        raise ProtocolError(f"chunk is not numeric: {e}") from e
+    if chunk.ndim != 2 or chunk.shape[1] not in SCHEMA_DIM.values() or chunk.shape[0] < 1:
         raise ProtocolError(f"chunk must be [T,8] (arm schema) or [T,11] (mobile schema), got shape {list(chunk.shape)}")
+    if not np.isfinite(chunk).all():
+        raise ProtocolError("chunk has non-finite values")
     out = {"action.single_arm": chunk[:, :ARM_DOF].tolist(), "action.gripper": chunk[:, ARM_DOF:ARM_DOF + 1].tolist()}
     if chunk.shape[1] == SCHEMA_DIM["mobile"]:
         out["action.base"] = chunk[:, ARM_DOF + 1:].tolist()
