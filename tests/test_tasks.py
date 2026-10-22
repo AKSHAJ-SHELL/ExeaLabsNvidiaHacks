@@ -47,6 +47,8 @@ def test_start_poses(hero_twin):
 def _apple_obj(ident, cat, dims, x, y_up, z, yaw_deg=0.0):
     import math
 
+    if cat != "wall":  # a RoomPlan object's front is its local +Z (measured on a real scan, kitchen_real_01)
+        yaw_deg += 180.0
     c, s = math.cos(math.radians(yaw_deg)), math.sin(math.radians(yaw_deg))
     return {"identifier": ident, "category": {cat: {}}, "confidence": {"high": {}}, "dimensions": dims,
             "transform": [c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, y_up, z, 1]}

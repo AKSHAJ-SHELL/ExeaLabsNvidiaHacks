@@ -36,11 +36,12 @@ def test_roomplan_walls_project_to_floor():
 
 
 def test_yaw_from_rotation():
-    # 90 degrees about ARKit +Y: local +X maps to ARKit -Z, i.e. Z-up +Y -> yaw +pi/2.
+    # 90 degrees about ARKit +Y: local +X maps to ARKit -Z, i.e. Z-up +Y, and local +Z (the object's front, measured on
+    # the real scan kitchen_real_01) maps to Z-up +X; the twin's yaw puts the front on +y at 0, so the yaw is -pi/2.
     m = [0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1]
     rp = {"walls": [], "objects": [{"identifier": "t", "category": "table", "dimensions": [1, 1, 1], "transform": m}]}
     b = roomplan.to_bundle(rp, "r")
-    assert b["fixtures"][0]["yaw"] == pytest.approx(1.5707963, abs=1e-6)
+    assert b["fixtures"][0]["yaw"] == pytest.approx(-1.5707963, abs=1e-6)
 
 
 def test_hero_scan_loads(hero_bundle):
