@@ -100,7 +100,7 @@ export function initScroll({ stage, ui, reduced, coarse, announce, compare, moti
     const H = pin.clientHeight;
     if (reduced) {
       const x = p.id === 'hero' ? smoothstep(0.25, 0.6, t) : 1;
-      stageEl.style.opacity = x; hero.style.opacity = 1 - x; hero.style.pointerEvents = x > 0.5 ? 'none' : '';
+      stageEl.style.opacity = x; hero.style.opacity = 1 - x; hero.inert = x > 0.5;  // inert, not pointer-events: style.css gives .hero > * auto
       stageEl.style.setProperty('--k', 1); stageEl.classList.remove('is-tilted');
     } else {
       const ty = (1 - k) * H * (innerWidth < 720 ? 0.72 : 0.55), rx = (1 - k) * 18, sc = lerp(0.84, 1, k);
@@ -109,7 +109,7 @@ export function initScroll({ stage, ui, reduced, coarse, announce, compare, moti
       stageEl.classList.toggle('is-tilted', k < 0.96);
       hero.style.transform = `translate3d(0,${(-k * 90).toFixed(1)}px,0)`;
       hero.style.opacity = String(1 - smoothstep(0.35, 0.95, k));
-      hero.style.pointerEvents = k > 0.5 ? 'none' : '';
+      hero.inert = k > 0.5;  // the faded headline sat over the stage chips and took their clicks (.hero > * is auto)
     }
     hud.top.classList.toggle('is-on', hTop); hud.layers.classList.toggle('is-on', hLayers);
     hud.side.classList.toggle('is-on', hSide); hud.dock.classList.toggle('is-on', hSide); hud.feeds.classList.toggle('is-on', feeds > 0);
