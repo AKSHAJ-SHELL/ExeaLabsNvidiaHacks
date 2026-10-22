@@ -41,13 +41,14 @@ jobs:
         run: python -m arrival validate out/datasets/hero_kitchen
 
   render:
-    name: rendering (Linux, py${{ matrix.python-version }})
+    name: rendering (Linux, py${{ matrix.python-version }}, shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
+        shard: [1, 2, 3]  # whole test files split by measured time (tests/conftest.py, tests/shard_weights.json)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,10 +76,13 @@ jobs:
               for key in ("MUJOCO_GL", "PYOPENGL_PLATFORM"):
                   if key in os.environ:
                       stream.write(f"{key}={os.environ[key]}\n")
-      - name: Full suite with rendering
-        # split across the runner's CPUs (pytest-xdist): one test at a time, the suite outgrew the 75-minute limit
+      - name: Full suite with rendering, one third of the test files
+        # one job ran past the 75-minute limit even with pytest-xdist; three shards, each split over the CPUs
+        env:
+          ARRIVAL_TEST_SHARD: ${{ matrix.shard }}/3
         run: python -m pytest -q -p no:cacheprovider -n auto
       - name: Offline one-command demo (same as make demo)
+        if: matrix.shard == 1
         run: python scripts/demo_all.py --quick --out out/demo --timeout 600
       - name: Upload demo summary
         if: always()

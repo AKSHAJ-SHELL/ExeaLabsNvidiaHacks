@@ -48,6 +48,9 @@ FRIDGE_PUSH_END = np.radians(80)  # door angle the push is planned to
 FRIDGE_PUSH_ROLL = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])  # fingers stacked vertically
 # for the push, so the hand is narrow along the panel and its far finger stays off the edge
 FRIDGE_PULL_STEPS = 10  # control steps per quarter of the hooked pull and per sixth of the push
+FRIDGE_SETTLE_STEPS = 6  # held after sliding off the bar, so the door has stopped when its angle is read
+FRIDGE_REPLAN_IK = 0.02  # m: the push is re-planned only when the planned hook is reachable; past this (the
+# U kitchen's side-wall fridge plans 1.70 m) re-planning made the flailing arm fling the door open and count a success
 DOOR_SWITCH = np.radians(40)  # close_door: door angle where the push from the side hands over to the push from in front
 DOOR_SIDE_YAWS = (0.0, -0.4, 0.4)  # rad the hand turns from the panel's direction for the side push, chosen per task
 FLAP_OUT = 0.12  # m: how far out along the door normal the hand backs off after letting a flap door go
@@ -293,16 +296,27 @@ class ScriptedExpert(Policy):
                 a = a0 + m * FRIDGE_HOOK * k / 4
                 out.append((pt(a), ori(a), c, FRIDGE_PULL_STEPS, k < 4))
             a, q1 = a0 + m * FRIDGE_HOOK, FRIDGE_HOOK
-            far = hinge + FRIDGE_FAR * along(qa(q1)) + (h[2] - hinge[2]) * up  # clear of the free edge
-            out += [(pt(a) + FRIDGE_CLEAR * along(a), ori(a), c, s, True),
-                    (far - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s, True),
-                    (push(q1) - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s)]
-            for k in range(7):
-                q = q1 - np.radians(3) + (FRIDGE_PUSH_END - q1 + np.radians(3)) * k / 6
-                out.append((push(q), pori(q), c, FRIDGE_PULL_STEPS, k < 6))
-            q = FRIDGE_PUSH_END
-            out += [(push(q) - 0.12 * nrm(qa(q)), pori(q), c, s), (push(q) - 0.12 * nrm(qa(q)) + 0.1 * up, pori(q), c, s)]
-            return out
+            off = pt(a) + FRIDGE_CLEAR * along(a)
+            out += [(off, ori(a), c, s), (off, ori(a), c, FRIDGE_SETTLE_STEPS)]
+
+            def rest(q1):
+                # Round the free edge to the inside face and push on, planned for the door at q1. Sliding off the
+                # bar knocks the door back by an amount that depends on the hinge side and the room (about 10 deg),
+                # and the rounding point is only FRIDGE_BACK behind the panel, so act() calls this again with the
+                # angle measured after FRIDGE_SETTLE_STEPS and replaces the nominal plan built here for FRIDGE_HOOK.
+                far = hinge + FRIDGE_FAR * along(qa(q1)) + (h[2] - hinge[2]) * up  # clear of the free edge
+                wps = [(far - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s, True),
+                       (push(q1) - FRIDGE_BACK * nrm(qa(q1)), pori(q1), c, s)]
+                start = min(q1 - np.radians(3), FRIDGE_PUSH_END)
+                for k in range(7):
+                    q = start + (FRIDGE_PUSH_END - start) * k / 6
+                    wps.append((push(q), pori(q), c, FRIDGE_PULL_STEPS, k < 6))
+                q = FRIDGE_PUSH_END
+                return wps + [(push(q) - 0.12 * nrm(qa(q)), pori(q), c, s),
+                              (push(q) - 0.12 * nrm(qa(q)) + 0.1 * up, pori(q), c, s)]
+
+            self.fridge_replan = (sum(w[3] for w in out), rest, f'{task["fixture"]}_door')
+            return out + rest(q1)
         if fam in ("open_oven", "open_dishwasher"):
             # The bar sits on the outside of a bottom-hinged door, so a top-down grasp would put the hand body in
             # the panel as soon as the door tilts. The hand points into the panel with the fingers closing across
@@ -432,6 +446,7 @@ class ScriptedExpert(Policy):
 
     def reset(self, env, task: dict) -> None:
         self.env, self.last, self.held = env, None, 0
+        self.fridge_replan = None  # (plan step, phase-2 builder, door joint) set by the open_fridge plan
         if task["family"] in ("close_drawer", "close_door"):
             self.open_at = float(env.data.joint(task["joint"]).qpos[0])  # how far the part starts open
         wps = self._waypoints(env, task)
@@ -485,15 +500,19 @@ class ScriptedExpert(Policy):
         return max(longest_run(((q[:, j] <= lo[j] + band[j]) | (q[:, j] >= hi[j] - band[j]))) for j in range(7))
 
     @staticmethod
-    def _plan(env, waypoints) -> tuple[list[np.ndarray], float, float]:
+    def _plan(env, waypoints, start=None) -> tuple[list[np.ndarray], float, float]:
         """Joint-space plan for the waypoints: (targets per step, worst IK position error, peak |joint 7|). Every
-        target is 11 wide: 7 arm joints, the gripper, then the base pose (the parked one unless a waypoint drives)."""
+        target is 11 wide: 7 arm joints, the gripper, then the base pose (the parked one unless a waypoint drives).
+        `start` is the 11-wide target to continue from (default: HOME, gripper open, the parked base)."""
         from arrival.sim.collect import FPS
 
         q = np.array(HOME)
         plan: list[np.ndarray] = []
         base = env.base_pose()
         prev = np.concatenate([q, [getattr(env, "finger_open", FINGER_OPEN)], base])
+        if start is not None:
+            prev = np.asarray(start, dtype=float).copy()
+            q, base = prev[:7].copy(), prev[8:].copy()
         ik_error, q7 = 0.0, abs(q[6])
         chain: list[tuple[np.ndarray, int]] = []
         for pos, R, g, steps, *rest in waypoints:
@@ -526,7 +545,24 @@ class ScriptedExpert(Policy):
     def done(self) -> bool:
         return self.t >= len(self.plan)
 
+    def _replan_fridge(self) -> None:
+        """Replace the rest of the open_fridge plan with one built for the door angle measured now."""
+        _, rest, joint = self.fridge_replan
+        self.fridge_replan = None
+        wps = rest(float(self.env.data.joint(joint).qpos[0]))
+        flip = np.diag([-1.0, -1.0, 1.0])
+        plans = [self._plan(self.env, w, start=self.last) for w in
+                 (wps, [(p, None if R is None else R @ flip, *r) for p, R, *r in wps])]
+        best_err = min(err for _, err, _ in plans)
+        plan, err, _ = min((pl for pl in plans if pl[1] <= best_err + 0.005), key=lambda pl: pl[2])
+        self.plan = self.plan[:self.t] + plan
+        self.ik_error = max(self.ik_error, err)
+
     def act(self, obs: dict) -> np.ndarray:
+        if self.fridge_replan is not None and self.t == self.fridge_replan[0] and self.last is not None:
+            if self.ik_error <= FRIDGE_REPLAN_IK:
+                self._replan_fridge()
+            self.fridge_replan = None  # an arm that cannot follow the hook is not helped by a new push plan
         a = self.plan[min(self.t, len(self.plan) - 1)]
         if self.last is not None and self.t < len(self.plan) and getattr(self.env, "mobile", False):
             cur = self.env.base_pose()[:2]
