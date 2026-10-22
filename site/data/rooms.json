@@ -311,6 +311,7 @@
     0.97
    ],
    "yaw": 0.0,
+   "provenance": "authored",
    "colour": "#d94c33"
   },
   {
@@ -328,6 +329,7 @@
     0.95
    ],
    "yaw": 0.0,
+   "provenance": "authored",
    "colour": "#e6e6cc"
   },
   {
@@ -345,6 +347,7 @@
     0.935
    ],
    "yaw": 0.0,
+   "provenance": "authored",
    "colour": "#f2d933"
   }
  ],
@@ -456,6 +459,42 @@
    "friction": 0.7,
    "rgba": "0.3 0.3 0.32 1",
    "colour": "#4c4c52"
+  },
+  "book": {
+   "shape": "box",
+   "nominal_size": [
+    0.17,
+    0.075,
+    0.025
+   ],
+   "mass_kg": 0.3,
+   "friction": 0.6,
+   "rgba": "0.2 0.35 0.6 1",
+   "colour": "#335999"
+  },
+  "remote": {
+   "shape": "box",
+   "nominal_size": [
+    0.17,
+    0.045,
+    0.02
+   ],
+   "mass_kg": 0.1,
+   "friction": 0.6,
+   "rgba": "0.12 0.12 0.14 1",
+   "colour": "#1f1f24"
+  },
+  "laptop": {
+   "shape": "box",
+   "nominal_size": [
+    0.3,
+    0.21,
+    0.02
+   ],
+   "mass_kg": 1.2,
+   "friction": 0.6,
+   "rgba": "0.62 0.64 0.67 1",
+   "colour": "#9ea3ab"
   }
  }
 }

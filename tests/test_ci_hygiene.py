@@ -277,7 +277,7 @@ def test_ci_gates_portable_checks_on_every_os_and_rendering_on_linux():
     render = jobs["render"]
     assert render["runs-on"] == "ubuntu-latest" and not render.get("continue-on-error")
     commands = [step.get("run", "") for step in render["steps"]]
-    assert "python -m pytest -q -p no:cacheprovider" in commands
+    assert "python -m pytest -q -p no:cacheprovider -n auto" in commands  # the full suite, split over the CPUs
     assert not any("--no-render" in command for command in commands)
     assert any("preflight()" in command and "raise SystemExit(why)" in command for command in commands)
 
@@ -300,6 +300,23 @@ def test_ci_runs_the_offline_demo_and_uploads_its_summary():
     assert "out/demo/demo_summary.json" in up["with"]["path"] and "out/demo/index.html" in up["with"]["path"]
     setup = next(s for s in steps if str(s.get("uses", "")).startswith("actions/setup-python@"))
     assert setup["with"]["cache"] == "pip"
+
+
+def test_rendering_shards_split_the_test_files_exactly_once():
+    import conftest
+
+    render = _ci()["jobs"]["render"]
+    n = len(render["strategy"]["matrix"]["shard"])
+    assert render["strategy"]["matrix"]["shard"] == list(range(1, n + 1))
+    step = next(s for s in render["steps"] if "-n auto" in s.get("run", ""))
+    assert step["env"]["ARRIVAL_TEST_SHARD"] == f"${{{{ matrix.shard }}}}/{n}"
+    files = sorted(str(p.relative_to(REPO).as_posix()) for p in (REPO / "tests").glob("test_*.py"))
+    weights = json.loads(conftest.SHARD_WEIGHTS.read_text(encoding="utf-8"))
+    groups = conftest.shard_files(files, n, weights)
+    assert sorted(f for g in groups for f in g) == files  # every file in exactly one shard
+    loads = [sum(weights.get(f, 1.0) for f in g) for g in groups]
+    assert max(loads) <= 1.25 * min(loads)  # roughly even, or the slowest shard sets the wall time again
+    assert conftest.shard_files(files, n, weights) == groups  # the same split in every job and xdist worker
 
 
 def test_dependabot_and_ruff_config_exist():

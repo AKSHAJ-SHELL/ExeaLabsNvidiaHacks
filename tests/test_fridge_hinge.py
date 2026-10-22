@@ -77,3 +77,27 @@ def test_walkers_open_a_right_hinged_fridge_without_contact(mirrored, tmp_path, 
     assert r["fridge_visits"] >= 1
     assert r["attempts"] == r["successes"] == 6
     assert r["human_contacts"] == 0 and r["door_contacts"] == 0
+
+
+def _door_angle(twin, seed):
+    import numpy as np
+
+    from arrival.sim.collect import SimEnv, run_episode
+    from arrival.sim.policy import ScriptedExpert
+    from arrival.sim.tasks import finish_task, make_tasks
+
+    task = make_tasks(twin, ["open_fridge"], 1, seed=seed, people=0, log=QUIET)[0]
+    finish_task(task)
+    env = SimEnv(twin, task, res=16)
+    ep = run_episode(env, ScriptedExpert(), task)
+    env.close()
+    assert ep["success"], ep["detail"]
+    return float(np.degrees(ep["detail"]["qpos"]))
+
+
+def test_both_hinges_open_the_fridge_as_far(hero, mirrored):
+    # the push is planned to 80 deg on either hinge. The fingers used to slide off the bar closed, dragging it about
+    # 10 deg shut, and a right-hinged door then stopped at 66.8 deg (the hand pushed its free edge, not its inside)
+    left, right = _door_angle(hero, 0), _door_angle(mirrored, 0)
+    assert left > 75.0 and right > 75.0, (left, right)
+    assert abs(left - right) < 1.0, (left, right)

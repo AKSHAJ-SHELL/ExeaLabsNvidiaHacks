@@ -299,7 +299,8 @@ code { font-family: var(--font-mono); font-size: .875em; }
 .tray { display: grid; gap: .5rem; }
 @media (min-width: 721px) {                                        /* desktop: the cards are always out, so the toggle row (and its repeat of the task) goes */
   .dock .tray__toggle { display: none; }
-  .dock .tray:not(.is-open) .tasks { opacity: 1; transform: none; pointer-events: auto; visibility: visible; height: auto; overflow: visible; }
+  /* only while the dock is shown: visibility: visible on the cards overrides the hidden dock, and the invisible cards took the compare handle's drags */
+  .dock.is-on .tray:not(.is-open) .tasks { opacity: 1; transform: none; pointer-events: auto; visibility: visible; height: auto; overflow: visible; }
 }
 .tray__toggle { display: flex; align-items: center; gap: .75rem; min-height: var(--hit); padding: 0 .75rem; border: 1px solid var(--line-2); background: var(--panel); justify-self: start; max-width: 100%; transform-origin: 0 100%; transition: transform var(--t-fast) ease-out, border-color var(--t); }
 .tray__toggle:hover { border-color: var(--ink); } .tray__toggle:active { transform: scale(.98); }
@@ -489,7 +490,7 @@ code { font-family: var(--font-mono); font-size: .875em; }
   .topbar { padding-left: var(--gutter-l); padding-right: 1rem; }
   .brand .mono { display: none; }
   .hero { padding: 5rem 1rem 0 var(--gutter-l); }
-  .hero__deck { font-size: .9375rem; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .hero__deck { font-size: .9375rem; }  /* no line clamp: its last sentence says the room is an authored sample */
   .eyebrow { font-size: .625rem; }
   .hide-s { display: none; }
   .hud { padding-left: 1.5rem; padding-right: .5rem; top: 3.75rem; flex-direction: column; align-items: flex-start; gap: .25rem; }

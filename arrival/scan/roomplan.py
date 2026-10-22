@@ -56,6 +56,11 @@ def _apply(m: list[float], p: list[float]) -> list[float]:
     return [float(wx), float(-wz), float(wy)]
 
 
+def _wrap(a: float) -> float:
+    a = math.atan2(math.sin(a), math.cos(a))
+    return 0.0 if abs(a) < 1e-12 else a
+
+
 def _yaw(m: list[float]) -> float:
     # Local +X axis is the first column (indexes 0, 1, 2). Map Y-up -> Z-up the same way as positions.
     ax, ay = m[0], -m[2]
@@ -97,7 +102,9 @@ def _object(o: dict, i: int) -> dict:
         "category": category,
         "size": size,
         "position": _center(m),
-        "yaw": _yaw(m),
+        # an object's front is its local +Z, the opposite of what _yaw's +X heading gives (twin yaw 0 faces +y):
+        # without the half turn every cabinet, appliance and fridge of a real kitchen scan faced its wall
+        "yaw": _wrap(_yaw(m) + math.pi),
     }
 
 

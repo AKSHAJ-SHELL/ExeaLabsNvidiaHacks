@@ -22,8 +22,12 @@ PART_CLEAR = 0.13  # base centre to an open door or drawer: the column's radius 
 DRAWER_TRAVEL = {"put_in_drawer": 0.14, "open_drawer": 0.325, "close_drawer": 0.30}  # how far each has it pulled
 DRAWER_HANDLE = 0.062  # the bar's outer face past the closed carcass front (front 2 cm in, 7 cm standoff, 12 mm bar)
 WALL_CLEAR = 0.15  # base centre to the wall's face
-OPEN_DOOR_WALL_OUT = 0.12  # open_door: the base stands this much further out when the door is hinged within WALL_CLEAR
-# of a wall: the pull ends with the bar by that wall, and from the usual spot link7 grazes it for 22 steps (15 at 0.06)
+OPEN_DOOR_WALL_OUT = 0.12  # open_door: the base stands this much further out when the run's hinge end is drawn at least
+# OPEN_DOOR_INSIDE into a wall and the bar ends the pull within OPEN_DOOR_ROOM of that wall. The pull ends with the outer
+# face turned to the wall and the hand between them, and from the usual spot link7 grazes it (hero counter_b, 0.01 m
+# in: 22 steps, 0.9 mm; 15 steps at 0.06 out). In fuzzed rooms no door that opened from a run flush with a wall
+# grazed it, and there the further spot cost one door its last few degrees (1.067 to 1.024 rad)
+OPEN_DOOR_INSIDE, OPEN_DOOR_ROOM = 0.005, 0.06
 DRAWER_OPEN_PUT = 0.14  # start state for put_in_drawer: wide enough for a mug on the exposed tray, and the base
 # can then park straight in front without the pulled-out front reaching its column
 FRIDGE_BASE_ALONG = 0.1  # base centre past the door's free edge, along the front
@@ -122,14 +126,18 @@ def base_pose(twin: dict, task: dict, obj_xy=None, mobile: bool = False, arm: st
     on any wall. `obj_xy` is the object's xy at the start (the task's `start` when omitted). `mobile` moves the
     counter_to_counter stand spot MOBILE_STEP toward the target instead of midway: the base drives the rest.
     `arm` trims the stand spots that push with the closed fingertips (ARM_STANDOFF_TRIM). open_door stands
-    OPEN_DOOR_WALL_OUT further out when the door is hinged next to a wall. A task carrying
+    OPEN_DOOR_WALL_OUT further out when the run's hinge end is drawn into a wall and the bar ends the pull beside it,
+    and only when that further spot still passes the stand check. A task carrying
     `base_shift` (metres along the anchor fixture's local x, and out from the face of it the base stands at; set by
     the reach planner when the rule's spot cannot reach) stands that far from the rule's spot."""
     base, yaw, src = _stand_rule(twin, task, obj_xy, mobile, arm)
-    hinge = to_world((src["size"][0] / 2, src["size"][1] / 2), src)  # cabinet doors hinge at the run's +x end
-    if task["family"] == "open_door" and _wall_gap(twin, hinge) < WALL_CLEAR:
-        n = front(src)
-        base = (base[0] + n[0] * OPEN_DOOR_WALL_OUT, base[1] + n[1] * OPEN_DOOR_WALL_OUT, base[2])
+    if task["family"] == "open_door":
+        hinge_gap, handle_gap = _door_wall_gaps(twin, src, math.radians(80))  # where the expert's pull ends
+        if hinge_gap < -OPEN_DOOR_INSIDE and handle_gap < OPEN_DOOR_ROOM:
+            n = front(src)
+            out = (base[0] + n[0] * OPEN_DOOR_WALL_OUT, base[1] + n[1] * OPEN_DOOR_WALL_OUT, base[2])
+            if _stand_problem(twin, np.array(out[:2]), src, task=task) is None:
+                base = out
     if task.get("base_shift"):
         along, out = task["base_shift"]
         a = src.get("yaw", 0.0)
@@ -219,12 +227,6 @@ def _segment_distance(p, a, b) -> float:
     return float(np.linalg.norm(a + t * ab - p))
 
 
-def _wall_gap(twin: dict, xy) -> float:
-    """Distance from `xy` to the nearest wall face (inf in a room without walls)."""
-    walls = twin.get("walls") or []
-    return min((_segment_distance(xy, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
-               default=math.inf)
-
 def _close_door_gaps(twin: dict, c: dict) -> tuple[float, float]:
     """Distances from a cabinet door's hinge edge and from its handle, at the angle close_door starts from, to the
     nearest wall face square to the run (within 5 deg; a skewed wall leaves a different gap). The offsets are
@@ -250,6 +252,26 @@ def _close_door_gaps(twin: dict, c: dict) -> tuple[float, float]:
 def _footprint_distance(xy, f: dict) -> float:
     lx, ly = to_local(xy, f)
     return math.hypot(max(abs(lx) - f["size"][0] / 2, 0.0), max(abs(ly) - f["size"][1] / 2, 0.0))
+
+
+def _door_wall_gaps(twin: dict, c: dict, a: float) -> tuple[float, float]:
+    """Distances from a cabinet run's hinge end and from its door handle with the door at angle `a`, to the nearest
+    wall face square to the run (within 5 deg; a skewed wall leaves a different gap). The offsets are counter_xml's:
+    the hinge 2 cm in from the run's +x end and 1 cm behind the top's edge, the handle 6 cm in from the free edge and
+    5 cm out from the panel, the door turning clockwise from above."""
+    r = door_w(c, twin["fixtures"]) - 0.06
+    hx = c["size"][0] / 2 - 0.02 - r * math.cos(a) + 0.05 * math.sin(a)
+    hy = c["size"][1] / 2 - 0.01 + r * math.sin(a) + 0.05 * math.cos(a)
+    n = front(c)
+
+    def square(w):
+        dx, dy = w["end"][0] - w["start"][0], w["end"][1] - w["start"][1]
+        return abs(dx * n[1] - dy * n[0]) < math.sin(math.radians(5)) * math.hypot(dx, dy)
+
+    walls = [w for w in twin.get("walls") or [] if square(w)]
+    return tuple(min((_segment_distance(p, w["start"], w["end"]) - w.get("thickness", 0.0) / 2 for w in walls),
+                     default=math.inf)
+                 for p in (to_world((c["size"][0] / 2, c["size"][1] / 2), c), to_world((hx, hy), c)))
 
 
 def open_parts(twin: dict, task: dict) -> list[tuple[str, dict, tuple[float, float, float, float]]]:

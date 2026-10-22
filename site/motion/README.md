@@ -152,10 +152,10 @@ free to use).
 - **No result numbers appear anywhere.** `site/data/stats.json` does not exist on `main`, so nothing is quoted
   from it. The jittery "joint state" traces on the dataset card are decorative, not data.
 - The scan walk, the walker, the arm path and the points are illustrative animation, not captured data.
-- **Not done, and the videos say so:** the GR00T fine-tune and real kitchen scans. `pipeline` ends on a dashed
-  "NEXT, NOT BUILT YET" box; `pitch` closes on a status sheet (copied from the README status table, dated
-  Oct 19 2026) with GR00T fine-tune and real kitchen scans tagged NEXT, and "LeRobot dataset" tagged PARTLY
-  because the README says it passes our validator but has not been loaded by GR00T itself since the latest fixes.
+- **The pitch status sheet is dated Oct 21 2026.** Scan, simulation, the dataset and the GR00T fine-tune are
+  tagged done. The fine-tune line says 39 of 48 against 26 of 48, small samples. Real kitchen scans stay NEXT.
+  `pipeline.mp4` still ends on the older dashed "NEXT, NOT BUILT YET: GR00T fine-tune" card. The pitch does not
+  show that card: its clips are from 2.6 s, 5.8 s and 8.7 s of the pipeline.
 
 ## Audio
 
