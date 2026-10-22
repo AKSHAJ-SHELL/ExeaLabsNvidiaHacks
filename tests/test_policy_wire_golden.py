@@ -87,6 +87,17 @@ def test_bad_frame_shape_refused():
         encode_request({"state": STATE11, "ego_view": np.zeros((4, 4), np.uint8)}, "x")
 
 
+def test_inbound_policy_vectors_reject_json_booleans():
+    body = GOLDEN["arm"]["request"].copy()
+    body["state.single_arm"] = [True] + [0.0] * 6
+    with pytest.raises(ProtocolError, match="booleans"):
+        decode_request(body)
+    response = GOLDEN["arm"]["response"].copy()
+    response["action.gripper"] = [[False], [0.0], [0.0]]
+    with pytest.raises(ProtocolError, match="booleans"):
+        decode_response(response)
+
+
 def test_shim_maps_base_key():
     req = decode_request(GOLDEN["mobile"]["request"])
     obs = gr00t_shim.to_observation(req)
