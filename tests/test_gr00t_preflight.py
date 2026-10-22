@@ -1,6 +1,7 @@
 """The fine-tune command must match current sim data and reject placeholder data."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -30,7 +31,7 @@ def test_prepare_matches_dataset_modalities_and_stops_placeholder_runs(tmp_path,
     root, checkout = _dataset(tmp_path, monkeypatch)
     command = prepare_gr00t.prepare(root, checkout, tmp_path / "weights", steps=100)
     assert command[command.index("--dataset-path") + 1] == str(root)
-    assert command[command.index("--modality-config-path") + 1].endswith("configs/gr00t/arrival_panda_config.py")
+    assert Path(command[command.index("--modality-config-path") + 1]).as_posix().endswith("configs/gr00t/arrival_panda_config.py")
     assert command[command.index("--max-steps") + 1] == "100"
     path = root / "meta" / "embodiment.json"
     path.write_text(json.dumps({"joints_are_placeholder": True, "control": "absolute_joint_position"}))
@@ -61,7 +62,7 @@ def test_prepare_selects_existing_mobile_config(tmp_path, monkeypatch):
     path.write_text(json.dumps({"joints_are_placeholder": False, "base_actuated": True,
                                 "control": "absolute_joint_position"}))
     command = prepare_gr00t.prepare(root, checkout, tmp_path / "weights")
-    assert command[command.index("--modality-config-path") + 1].endswith(
+    assert Path(command[command.index("--modality-config-path") + 1]).as_posix().endswith(
         "configs/gr00t/arrival_panda_mobile_config.py")
     modality = root / "meta" / "modality.json"
     raw = json.loads(modality.read_text())
