@@ -161,7 +161,7 @@ def generate_instructions(family: str, object_name: str | None = None,
     except (TokenFactoryNotConfigured, Exception):
         instructions = []
 
-    instructions = instructions[:n]
+    instructions = list(dict.fromkeys(instructions))[:n]
     if not instructions:
         source = "template_fallback"
         templates = FALLBACK_TEMPLATES.get(family, WORDINGS.get(family, ["Do task {name}"]))
