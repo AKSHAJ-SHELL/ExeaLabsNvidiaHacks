@@ -10,6 +10,7 @@ that does not end with the job id (a hand-made room such as ``hero_kitchen``) is
 
 from __future__ import annotations
 
+import math
 import re
 import shutil
 import time
@@ -76,7 +77,8 @@ def gc(out_dir: Path, max_age_hours: float, now: float | None = None, dry_run: b
         if st is None or st.get("status") not in FINISHED or d.name != st.get("id"):
             continue
         stamp = st.get("finished_at") or st.get("created_unix")
-        if not isinstance(stamp, (int, float)) or now - stamp <= max_age_hours * 3600:
+        if (type(stamp) not in (int, float) or not math.isfinite(stamp)
+                or now - stamp <= max_age_hours * 3600):
             continue
         try:
             res = delete_job(out_dir, d.name, dry_run=dry_run)
