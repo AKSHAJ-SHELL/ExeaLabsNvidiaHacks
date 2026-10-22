@@ -26,6 +26,7 @@ from arrival.catalog.objects import OBJECT_SPECS  # noqa: E402
 from arrival.scan import bundle as scan_bundle  # noqa: E402
 from arrival.sim import robot  # noqa: E402
 from arrival.sim.collect import FPS, SUBSTEPS, SimEnv, run_episode  # noqa: E402
+from arrival.sim.export import BASE_SLICE  # noqa: E402
 from arrival.sim.people import limb_segments  # noqa: E402
 from arrival.sim.policy import ScriptedExpert  # noqa: E402
 from arrival.sim.scene import build_mjcf, part_names  # noqa: E402
@@ -34,6 +35,7 @@ from arrival.twin.compile import compile_twin  # noqa: E402
 
 FAMILIES = ["counter_to_sink", "open_drawer", "open_door", "open_fridge", "put_in_drawer", "wipe_counter"]
 OUT_FPS = 15
+KEEP = ("todo.json",)  # hand-edited files in site/data that this export does not generate; kept across a re-run
 PREVIEW_PX = 256
 PEOPLE = 2
 VISIBLE_GROUPS = (0, 1, 2)  # group 3 holds the hidden collision geoms
@@ -226,7 +228,8 @@ def pack_episode(rec: Recorder, fps: int) -> dict:
     dyn = [i for i in range(len(rec.names)) if moves[i]]
     static = {rec.names[i]: rnd(list(P[0, i]) + list(Q[0, i]), 4) for i in range(len(rec.names)) if not moves[i]}
     frames = np.concatenate([P[:, dyn], Q[:, dyn]], axis=-1).reshape(P.shape[0], -1)  # per node: x y z qw qx qy qz
-    states = np.round(resample(np.array(rec.states), FPS, fps), 4)
+    # arm joints and gripper only: the site reads 8 values per frame; the sim state also carries the base pose
+    states = np.round(resample(np.array(rec.states)[:, :BASE_SLICE["start"]], FPS, fps), 4)
     return {
         "n_frames": int(P.shape[0]),
         "nodes": {"dynamic": [rec.names[i] for i in dyn], "static": static},
@@ -448,7 +451,8 @@ nodes {dynamic:[name...], static:{name:[x,y,z,qw,qx,qy,qz]}}
 frames[t]            numbers: for each name in nodes.dynamic, in order, [x,y,z,qw,qx,qy,qz]  (length 7 * len(dynamic))
                      poses are world poses of body frames (limb nodes and cameras: of the geom / camera frame)
                      positions rounded to 1 mm, quaternions to 4 decimals, hemisphere-continuous (safe to nlerp)
-joint_states[t]      [joint1..joint7 (rad), gripper_opening_m (mean finger slide, 0..0.05)]  == the LeRobot observation.state
+joint_states[t]      [joint1..joint7 (rad), gripper_opening_m (mean finger slide, 0..0.05)]  == the first 8 values of the LeRobot
+                     observation.state (the dataset's last 3, the parked base pose, are left out)
 joint_names, people_xy[t][person] = [x,y] floor position, task_joint_q[t] (the drawer/door joint the task moves, or null)
 task {fixture, object_id, source, target, start, joint, handle}  (only the keys the family has)
 lights[]             {name, directional, pos, dir, diffuse, cutoff, castshadow} as built by the sim (key spot, fill, window)
@@ -497,10 +501,13 @@ def main(argv=None) -> int:
     ap.add_argument("--skip-dataset", action="store_true")
     a = ap.parse_args(argv)
     out, scratch = Path(a.out), Path(a.scratch)
+    kept = {n: (out / n).read_bytes() for n in KEEP if (out / n).is_file()}
     if out.exists():
         shutil.rmtree(out)
     (out / "episodes").mkdir(parents=True)
     (out / "frames").mkdir()
+    for n, data in kept.items():
+        (out / n).write_bytes(data)
     if scratch.exists():
         shutil.rmtree(scratch)
     log = lambda *x: print(*x, flush=True)  # noqa: E731
@@ -604,7 +611,8 @@ def main(argv=None) -> int:
         }
         log(f"loader_check ok={lc['ok']} frames={info['total_frames']}")
         ev = evaluate(twin, reachable, 1, seed=a.seed, people=PEOPLE, res=128, out_dir=scratch, log=log)
-        ev.pop("path", None)
+        for k in [k for k in ev if k == "path" or k.endswith("_path")]:  # local scratch paths, not site data
+            ev.pop(k)
         stats["eval"] = ev
         try:
             stats["cost"] = cost_mod.build(scratch)
@@ -646,6 +654,9 @@ def verify(out: Path) -> int:
         for cam in ("ego_view", "wrist"):
             for lab in ("mid", "end"):
                 assert (out / "frames" / f"{fam}_{cam}_{lab}.png").is_file(), (fam, cam, lab)
+    for p in out.rglob("*.json"):  # site/data is public: no machine paths
+        text = p.read_text()
+        assert str(Path.home()) not in text and str(out.resolve().parent) not in text, f"{p.name} holds a local path"
     total = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     assert total < 12e6, f"site/data is {total / 1e6:.1f} MB"
     assert not list(out.rglob("*.mp4"))

@@ -13,6 +13,8 @@ Setup note: this machine has a stray `tests` package in `~/miniconda3/lib/python
 
 ## 2. Check by hand (laptop, about an hour)
 
+Run on Oct 21 (#144): fresh clone, two workers, shard/kill/resume and the job buttons all pass; the run found and fixed a broken browser upload and a leftover progress journal. Docker was not run (not installed on that machine). The demo-site browser check is P4 (#195).
+
 | Check | How |
 |---|---|
 | Fresh clone on a clean venv | `make install && make test`, then `make demo` in under 5 minutes |
@@ -24,11 +26,11 @@ Setup note: this machine has a stray `tests` package in `~/miniconda3/lib/python
 
 ## 3. Known gaps from the laptop work
 
-- Open-door is not 100% with default eval settings: 3/4 and 1/2 in the last check, with walker contacts on `counter_a_door`.
-- 3 of 28 episodes in the G1 run (seed 5, all families, 32 px) are flagged for a joint at a limit, all close_door: joint 2 at the end of the sweep (#151 clears it) and, on `counter_a`, joint 7 on the approach. The close_door stand spot and hand tilt that clear the rest, and `counter_b` close_door's graze on the east wall, need #151's push height first.
-- The mirrored right-hinged fridge plan is not built; the scene only has a left hinge.
-- The memory cap (`ARRIVAL_MAX_JOB_MB`) was not measured on Linux.
-- `site/data` was not re-exported after the merged PRs, so its numbers are from the earlier pipeline run.
+Re-checked on `main` at c333ee1 (Oct 21):
+
+- Doors: `eval --families open_door,close_door --episodes 8 --people 2` at seeds 0 and 5 gives open_door 16/16 and close_door 16/16, no human contact. open_door has no arm contact (the `counter_b` east-wall graze is gone). close_door on `counter_a` still touches its own door panel with link4 (24 steps, 2.5 mm deep).
+- Joint limits: the G1 run (`sim --families all --episodes 28 --people 1 --seed 5`) has 0 of 28 episodes flagged by `validate --episodes` since #152.
+- The right-hinged fridge, the Linux memory-cap measurement (#192) and the `site/data` re-export are done.
 
 ## 4. Blocked (needs a GPU, cloud account or people)
 

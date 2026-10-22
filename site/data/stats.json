@@ -15,10 +15,10 @@
    "human_contact": false,
    "frames": 178,
    "duration_s": 11.8,
-   "min_human_distance_m": 0.2709,
+   "min_human_distance_m": 0.2706,
    "physics_detail": {
     "object_pos": [
-     1.6128,
+     1.6127,
      0.4173,
      0.75
     ],
@@ -36,7 +36,7 @@
    "human_contact": false,
    "frames": 110,
    "duration_s": 7.267,
-   "min_human_distance_m": 0.3244,
+   "min_human_distance_m": 0.3241,
    "physics_detail": {
     "joint": "counter_a_drawer0",
     "qpos": 0.2997
@@ -53,7 +53,7 @@
    "human_contact": false,
    "frames": 140,
    "duration_s": 9.267,
-   "min_human_distance_m": 0.2225,
+   "min_human_distance_m": 0.3576,
    "physics_detail": {
     "joint": "counter_a_door",
     "qpos": 1.1043
@@ -70,7 +70,7 @@
    "human_contact": false,
    "frames": 232,
    "duration_s": 15.4,
-   "min_human_distance_m": 0.375,
+   "min_human_distance_m": 0.3748,
    "physics_detail": {
     "joint": "fridge_1_door",
     "qpos": 1.3935
@@ -87,14 +87,14 @@
    "human_contact": false,
    "frames": 155,
    "duration_s": 10.267,
-   "min_human_distance_m": 0.295,
+   "min_human_distance_m": 0.1338,
    "physics_detail": {
     "object_pos": [
      1.1138,
      0.7566,
      0.6799
     ],
-    "object_speed": 0.0003,
+    "object_speed": 0.0002,
     "drawer_qpos": 0.1355
    },
    "episode_file": "episodes/put_in_drawer.json",
@@ -109,7 +109,7 @@
    "human_contact": false,
    "frames": 148,
    "duration_s": 9.8,
-   "min_human_distance_m": 0.3109,
+   "min_human_distance_m": 0.3037,
    "physics_detail": {
     "object_pos": [
      3.2375,
@@ -159,8 +159,8 @@
    128,
    128
   ],
-  "state_dim": 8,
-  "action_dim": 8,
+  "state_dim": 11,
+  "action_dim": 11,
   "format": "LeRobot v2.1 (GR00T layout)",
   "success_check": "physics",
   "grasp": "friction",
@@ -169,20 +169,20 @@
    "errors": [],
    "warnings": [
     {
-     "code": "stats_no_quantiles",
-     "msg": "stats.json observation.state has no q01/q99; the recomputed values are in the --json report (the writer only stores min/max/mean/std)"
+     "code": "fixed_base_constant",
+     "msg": "observation.state dims [10] are the parked base pose and constant (std 0): train with configs/gr00t/arrival_panda_config.py (arm and gripper only), not the mobile config"
     },
     {
-     "code": "stats_no_quantiles",
-     "msg": "stats.json action has no q01/q99; the recomputed values are in the --json report (the writer only stores min/max/mean/std)"
+     "code": "fixed_base_constant",
+     "msg": "action dims [10] are the parked base pose and constant (std 0): train with configs/gr00t/arrival_panda_config.py (arm and gripper only), not the mobile config"
     }
    ],
    "info": {
     "episodes": 6,
     "frames": 1278,
     "fps": 20,
-    "state_dim": 8,
-    "action_dim": 8,
+    "state_dim": 11,
+    "action_dim": 11,
     "horizon": 16,
     "windows": 1278,
     "padded_windows": 90,
@@ -192,6 +192,7 @@
      "ego_view",
      "wrist"
     ],
+    "base": "fixed",
     "relative_action_range": [
      -1.8591,
      2.1634
@@ -202,8 +203,8 @@
    "attempts": 6,
    "successes": 6,
    "dropped": 0,
-   "seconds": 23.52,
-   "demos_per_hour": 918.5,
+   "seconds": 39.01,
+   "demos_per_hour": 553.7,
    "human_contacts": 0,
    "families": {
     "counter_to_sink": {
@@ -261,11 +262,24 @@
  "eval": {
   "room_id": "hero_kitchen",
   "policy": "scripted",
+  "run_id": "1128fad8234544a1a421f94c10bc0967",
+  "checkpoint_id": "scripted-expert",
+  "checkpoint_id_source": "scripted",
+  "manifest_id": "23c4ff7a44f89a9c25c2162784736f1d36f30b81c5a6f9dc3291115ce026271a",
+  "twin_sha256": "c63cefd5538634f0041d66dd55cb345206448a6597ab03cd4b576087036d33c1",
+  "runtime": {
+   "python": "3.11.14",
+   "mujoco": "3.16.0",
+   "numpy": "2.4.6"
+  },
   "episodes_per_family": 1,
   "seed": 5,
   "people": 2,
   "holdout": false,
   "resolution": 128,
+  "base": "fixed",
+  "arm": "procedural",
+  "omitted_families": [],
   "families": {
    "counter_to_sink": {
     "episodes": 1,
@@ -275,11 +289,12 @@
      0.2065,
      1.0
     ],
+    "observed_episodes": 1,
     "mean_seconds": 11.8,
-    "mean_wall_seconds": 5.074,
+    "mean_wall_seconds": 6.893,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.3408,
+    "min_human_distance_m": 0.3407,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 0,
     "arm_contact_max_depth_m": 0.0
@@ -292,11 +307,12 @@
      0.2065,
      1.0
     ],
+    "observed_episodes": 1,
     "mean_seconds": 7.3,
-    "mean_wall_seconds": 3.337,
+    "mean_wall_seconds": 4.166,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.3143,
+    "min_human_distance_m": 0.3084,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 0,
     "arm_contact_max_depth_m": 0.0
@@ -309,14 +325,15 @@
      0.2065,
      1.0
     ],
+    "observed_episodes": 1,
     "mean_seconds": 9.3,
-    "mean_wall_seconds": 4.633,
+    "mean_wall_seconds": 5.312,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.2988,
+    "min_human_distance_m": 0.3335,
     "ik_error_max": 0.0,
-    "arm_contact_episodes": 1,
-    "arm_contact_max_depth_m": 0.0009
+    "arm_contact_episodes": 0,
+    "arm_contact_max_depth_m": 0.0
    },
    "open_fridge": {
     "episodes": 1,
@@ -326,11 +343,12 @@
      0.2065,
      1.0
     ],
+    "observed_episodes": 1,
     "mean_seconds": 15.4,
-    "mean_wall_seconds": 5.494,
+    "mean_wall_seconds": 9.264,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.2895,
+    "min_human_distance_m": 0.2503,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 0,
     "arm_contact_max_depth_m": 0.0
@@ -343,11 +361,12 @@
      0.2065,
      1.0
     ],
+    "observed_episodes": 1,
     "mean_seconds": 10.3,
-    "mean_wall_seconds": 3.475,
+    "mean_wall_seconds": 5.941,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.2756,
+    "min_human_distance_m": 0.4411,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 1,
     "arm_contact_max_depth_m": 0.0017
@@ -360,11 +379,12 @@
      0.2065,
      1.0
     ],
+    "observed_episodes": 1,
     "mean_seconds": 9.8,
-    "mean_wall_seconds": 3.815,
+    "mean_wall_seconds": 5.809,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.3195,
+    "min_human_distance_m": 0.3227,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 0,
     "arm_contact_max_depth_m": 0.0
@@ -378,10 +398,11 @@
     0.6097,
     1.0
    ],
+   "observed_episodes": 6,
    "human_contacts": 0,
    "errors": 0,
-   "arm_contact_episodes": 2,
-   "wall_seconds": 25.83
+   "arm_contact_episodes": 1,
+   "wall_seconds": 37.39
   }
  },
  "cost": {
@@ -392,14 +413,15 @@
     "family": null,
     "attempts": 6,
     "successes": 6,
-    "seconds": 23.52,
+    "seconds": 39.01,
     "human_contacts": 0,
+    "frames": null,
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 918.4,
-    "seconds_per_demo": 3.92,
+    "demos_per_hour": 553.7,
+    "seconds_per_demo": 6.502,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 23.52
+    "local_cpu_wall_seconds": 39.01
    },
    {
     "source": "report",
@@ -409,6 +431,7 @@
     "successes": 1,
     "seconds": null,
     "human_contacts": 0,
+    "frames": null,
     "dropped": 0,
     "drop_rate": 0.0,
     "demos_per_hour": null,
@@ -424,6 +447,7 @@
     "successes": 1,
     "seconds": null,
     "human_contacts": 0,
+    "frames": null,
     "dropped": 0,
     "drop_rate": 0.0,
     "demos_per_hour": null,
@@ -439,6 +463,7 @@
     "successes": 1,
     "seconds": null,
     "human_contacts": 0,
+    "frames": null,
     "dropped": 0,
     "drop_rate": 0.0,
     "demos_per_hour": null,
@@ -454,6 +479,7 @@
     "successes": 1,
     "seconds": null,
     "human_contacts": 0,
+    "frames": null,
     "dropped": 0,
     "drop_rate": 0.0,
     "demos_per_hour": null,
@@ -469,6 +495,7 @@
     "successes": 1,
     "seconds": null,
     "human_contacts": 0,
+    "frames": null,
     "dropped": 0,
     "drop_rate": 0.0,
     "demos_per_hour": null,
@@ -484,6 +511,7 @@
     "successes": 1,
     "seconds": null,
     "human_contacts": 0,
+    "frames": null,
     "dropped": 0,
     "drop_rate": 0.0,
     "demos_per_hour": null,
@@ -497,14 +525,17 @@
     "family": "counter_to_sink",
     "attempts": 1,
     "successes": 1,
-    "seconds": 5.074,
+    "seconds": 6.893,
     "human_contacts": 0,
+    "frames": null,
+    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 709.5,
-    "seconds_per_demo": 5.074,
+    "demos_per_hour": 522.3,
+    "seconds_per_demo": 6.893,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 5.074
+    "local_cpu_wall_seconds": 6.893
    },
    {
     "source": "eval",
@@ -512,14 +543,17 @@
     "family": "open_drawer",
     "attempts": 1,
     "successes": 1,
-    "seconds": 3.337,
+    "seconds": 4.166,
     "human_contacts": 0,
+    "frames": null,
+    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 1078.8,
-    "seconds_per_demo": 3.337,
+    "demos_per_hour": 864.1,
+    "seconds_per_demo": 4.166,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 3.337
+    "local_cpu_wall_seconds": 4.166
    },
    {
     "source": "eval",
@@ -527,14 +561,17 @@
     "family": "open_door",
     "attempts": 1,
     "successes": 1,
-    "seconds": 4.633,
+    "seconds": 5.312,
     "human_contacts": 0,
+    "frames": null,
+    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 777.0,
-    "seconds_per_demo": 4.633,
+    "demos_per_hour": 677.7,
+    "seconds_per_demo": 5.312,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 4.633
+    "local_cpu_wall_seconds": 5.312
    },
    {
     "source": "eval",
@@ -542,14 +579,17 @@
     "family": "open_fridge",
     "attempts": 1,
     "successes": 1,
-    "seconds": 5.494,
+    "seconds": 9.264,
     "human_contacts": 0,
+    "frames": null,
+    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 655.3,
-    "seconds_per_demo": 5.494,
+    "demos_per_hour": 388.6,
+    "seconds_per_demo": 9.264,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 5.494
+    "local_cpu_wall_seconds": 9.264
    },
    {
     "source": "eval",
@@ -557,14 +597,17 @@
     "family": "put_in_drawer",
     "attempts": 1,
     "successes": 1,
-    "seconds": 3.475,
+    "seconds": 5.941,
     "human_contacts": 0,
+    "frames": null,
+    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 1036.0,
-    "seconds_per_demo": 3.475,
+    "demos_per_hour": 606.0,
+    "seconds_per_demo": 5.941,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 3.475
+    "local_cpu_wall_seconds": 5.941
    },
    {
     "source": "eval",
@@ -572,14 +615,17 @@
     "family": "wipe_counter",
     "attempts": 1,
     "successes": 1,
-    "seconds": 3.815,
+    "seconds": 5.809,
     "human_contacts": 0,
+    "frames": null,
+    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 943.6,
-    "seconds_per_demo": 3.815,
+    "demos_per_hour": 619.7,
+    "seconds_per_demo": 5.809,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 3.815
+    "local_cpu_wall_seconds": 5.809
    },
    {
     "source": "eval",
@@ -587,14 +633,17 @@
     "family": null,
     "attempts": 6,
     "successes": 6,
-    "seconds": 25.83,
+    "seconds": 37.39,
     "human_contacts": 0,
+    "frames": null,
+    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 836.2,
-    "seconds_per_demo": 4.305,
+    "demos_per_hour": 577.7,
+    "seconds_per_demo": 6.232,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 25.83
+    "local_cpu_wall_seconds": 37.39
    }
   ],
   "dollars": {
@@ -627,44 +676,56 @@
   "comparison": {
    "measured": false,
    "reason": "no teleop baseline"
+  },
+  "metering": {
+   "jobs": 0,
+   "wall_seconds": null,
+   "episodes_attempted": null,
+   "episodes_succeeded": null,
+   "frames": null,
+   "upload_bytes": null,
+   "zip_bytes": null,
+   "dataset_bytes": null,
+   "note": "measured on the local machine by arrival work; not priced (local CPU is $0, no Nebius product was used)"
   }
  },
  "files": {
-  "README.md": 7176,
-  "episodes/counter_to_sink.json": 286005,
-  "episodes/open_door.json": 228899,
-  "episodes/open_drawer.json": 175717,
-  "episodes/open_fridge.json": 372744,
-  "episodes/put_in_drawer.json": 257944,
-  "episodes/wipe_counter.json": 238641,
-  "frames/counter_to_sink_ego_view_end.png": 49393,
-  "frames/counter_to_sink_ego_view_mid.png": 45147,
-  "frames/counter_to_sink_wrist_end.png": 32577,
-  "frames/counter_to_sink_wrist_mid.png": 34082,
-  "frames/open_door_ego_view_end.png": 35298,
-  "frames/open_door_ego_view_mid.png": 31863,
-  "frames/open_door_wrist_end.png": 15414,
-  "frames/open_door_wrist_mid.png": 12258,
-  "frames/open_drawer_ego_view_end.png": 39301,
-  "frames/open_drawer_ego_view_mid.png": 38095,
+  "README.md": 7278,
+  "episodes/counter_to_sink.json": 286457,
+  "episodes/open_door.json": 228422,
+  "episodes/open_drawer.json": 175945,
+  "episodes/open_fridge.json": 372861,
+  "episodes/put_in_drawer.json": 257068,
+  "episodes/wipe_counter.json": 239387,
+  "frames/counter_to_sink_ego_view_end.png": 49078,
+  "frames/counter_to_sink_ego_view_mid.png": 45157,
+  "frames/counter_to_sink_wrist_end.png": 32366,
+  "frames/counter_to_sink_wrist_mid.png": 34123,
+  "frames/open_door_ego_view_end.png": 35122,
+  "frames/open_door_ego_view_mid.png": 31859,
+  "frames/open_door_wrist_end.png": 14841,
+  "frames/open_door_wrist_mid.png": 12256,
+  "frames/open_drawer_ego_view_end.png": 38367,
+  "frames/open_drawer_ego_view_mid.png": 38079,
   "frames/open_drawer_wrist_end.png": 17483,
-  "frames/open_drawer_wrist_mid.png": 15430,
-  "frames/open_fridge_ego_view_end.png": 37735,
-  "frames/open_fridge_ego_view_mid.png": 35712,
-  "frames/open_fridge_wrist_end.png": 4734,
-  "frames/open_fridge_wrist_mid.png": 7815,
-  "frames/put_in_drawer_ego_view_end.png": 42362,
-  "frames/put_in_drawer_ego_view_mid.png": 42532,
-  "frames/put_in_drawer_wrist_end.png": 6854,
-  "frames/put_in_drawer_wrist_mid.png": 59435,
-  "frames/wipe_counter_ego_view_end.png": 29385,
-  "frames/wipe_counter_ego_view_mid.png": 29312,
-  "frames/wipe_counter_wrist_end.png": 35349,
-  "frames/wipe_counter_wrist_mid.png": 16258,
+  "frames/open_drawer_wrist_mid.png": 15434,
+  "frames/open_fridge_ego_view_end.png": 37742,
+  "frames/open_fridge_ego_view_mid.png": 35505,
+  "frames/open_fridge_wrist_end.png": 4728,
+  "frames/open_fridge_wrist_mid.png": 7816,
+  "frames/put_in_drawer_ego_view_end.png": 42365,
+  "frames/put_in_drawer_ego_view_mid.png": 42535,
+  "frames/put_in_drawer_wrist_end.png": 6855,
+  "frames/put_in_drawer_wrist_mid.png": 59507,
+  "frames/wipe_counter_ego_view_end.png": 27952,
+  "frames/wipe_counter_ego_view_mid.png": 29337,
+  "frames/wipe_counter_wrist_end.png": 35356,
+  "frames/wipe_counter_wrist_mid.png": 16260,
   "geoms.json": 34258,
-  "rooms.json": 6838,
+  "rooms.json": 7484,
   "scan_points.bin": 180000,
   "scan_points.json": 842,
-  "stats.json": 13634
+  "stats.json": 15616,
+  "todo.json": 25060
  }
 }
