@@ -196,6 +196,8 @@ def to_markdown(summary: dict) -> str:
             tape = "not measured"
         elif "error" in t:
             tape = f"n/a ({t['error']})"
+        elif t.get("max_abs_error_m") is None:
+            tape = "n/a (no comparable dimensions)"
         else:
             tape = (f"{t['max_abs_error_m'] * 100:.1f} cm max" + ("" if t["tape_measured"] else " (authored, not tape)"))
         lines.append(f"| {r['room']} | {r.get('geometry_source') or '-'} | {_cell(st['normalize'])} | "
