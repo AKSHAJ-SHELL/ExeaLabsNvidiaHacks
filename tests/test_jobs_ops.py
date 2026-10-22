@@ -737,38 +737,57 @@ def test_claim_clears_old_progress(tmp_path):
     assert status_of(out, job)["progress"] is None
 
 
-def test_memory_cap_off_by_default_and_on_other_platforms():
-    from arrival.jobs.child import apply_memory_cap
-
-    class Boom:
-        def __getattr__(self, name):
-            raise AssertionError("resource must not be touched")
-
+def test_memory_limit_is_off_by_default_and_read_in_megabytes():
     assert Limits().max_job_bytes == 0
-    assert apply_memory_cap(0, platform="linux", resource=Boom()) is False
-    assert apply_memory_cap(1 << 30, platform="darwin", resource=Boom()) is False
-
-
-def test_memory_cap_env_and_linux_call_with_a_fake_resource():
-    from arrival.jobs.child import apply_memory_cap
-
     assert Limits.from_env({"ARRIVAL_MAX_JOB_MB": "512"}).max_job_bytes == 512 * 1024 * 1024
-    calls = []
-
-    class Fake:
-        RLIMIT_AS = 9
-        RLIM_INFINITY = -1
-        getrlimit = staticmethod(lambda which: (-1, -1))
-        setrlimit = staticmethod(lambda which, pair: calls.append((which, pair)))
-
-    assert apply_memory_cap(1 << 30, platform="linux", resource=Fake) is True
-    assert calls == [(9, (1 << 30, -1))]
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="RLIMIT_AS is enforced on Linux only (not measured here)")
-def test_memory_cap_makes_a_big_allocation_fail():
-    code = ("from arrival.jobs.child import apply_memory_cap\n"
-            "assert apply_memory_cap(512*1024*1024)\n"
-            "try:\n    bytearray(2*1024**3)\nexcept MemoryError:\n    print('capped')\n")
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
-    assert "capped" in r.stdout, r.stderr
+# allocates `MB` megabytes in a grandchild (the way the job's video encoder is a process of its own) and waits
+GRANDCHILD_ALLOCATES = ("import subprocess, sys, time; "
+                        "subprocess.Popen([sys.executable, '-c', 'import time; b = b\"x\" * ({MB} << 20); time.sleep(60)']); "
+                        "time.sleep(60)")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="tree_rss reads /proc or ps; not measured on Windows")
+def test_tree_rss_counts_the_processes_a_child_starts():
+    p = subprocess.Popen([sys.executable, "-c", GRANDCHILD_ALLOCATES.format(MB=200)])
+    try:
+        rss, t0 = 0, time.monotonic()
+        while rss < 200 << 20 and time.monotonic() - t0 < 20:
+            time.sleep(0.2)
+            rss = worker.tree_rss(p.pid) or 0
+        assert rss >= 200 << 20  # the grandchild's 200 MB count toward the child
+    finally:
+        p.kill()
+        p.wait()
+    assert worker.tree_rss(os.getpid()) > 0 and worker.tree_rss(2 ** 22 + 12345) is None
+
+
+STAGE_THEN_ALLOCATE = ("import sys, json, time; from pathlib import Path; p = Path(sys.argv[1]) / 'status.json'; "
+                       "s = json.loads(p.read_text()); s['stage'] = 'sim'; p.write_text(json.dumps(s)); "
+                       "b = b'x' * (300 << 20); time.sleep(120)")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="tree_rss reads /proc or ps; not measured on Windows")
+def test_job_over_memory_limit_is_killed_and_recorded_with_its_stage(tmp_path):
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "big.json", data=b"{}")
+    t0 = time.monotonic()
+    st = run_once(out, limits=Limits(max_job_seconds=60, max_job_bytes=100 << 20, job_retries=2), isolate=True,
+                  log=QUIET, child_cmd=[sys.executable, "-c", STAGE_THEN_ALLOCATE])
+    assert time.monotonic() - t0 < 30  # killed once it passes 100 MB, not after the child's 120 s sleep
+    assert st["status"] == "failed" and st["stage"] == "sim" and st["job_attempts"] == 1  # not retried
+    assert st["error"].startswith("MemoryLimitError: the job used ") and st["error"].endswith(
+        " MB resident, over the 100 MB limit (ARRIVAL_MAX_JOB_MB), during stage 'sim'")
+    assert float(st["error"].split("used ")[1].split(" MB")[0]) > 100
+    assert "MemoryLimitError" in (jobs_of(out) / job["id"] / "error.txt").read_text()
+    assert status_of(out, job)["status"] == "failed" and not (jobs_of(out) / job["id"] / LOCK).exists()
+
+
+def test_job_under_memory_limit_is_not_killed(tmp_path):
+    out = tmp_path / "out"
+    create_job(jobs_of(out), "small.json", data=b"{}")
+    small = "import time, sys; b = b'x' * (20 << 20); time.sleep(1.5); sys.exit(7)"
+    st = run_once(out, limits=Limits(max_job_seconds=60, max_job_bytes=1 << 30, job_retries=0), isolate=True,
+                  log=QUIET, child_cmd=[sys.executable, "-c", small])
+    assert st["status"] == "failed" and st["error"].startswith("WorkerProcessError") and "code 7" in st["error"]

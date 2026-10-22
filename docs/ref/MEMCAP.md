@@ -40,6 +40,26 @@ None of these is the `MemoryError` that `child.py` described. The native librari
 
 ## What this means
 
-- `RLIMIT_AS` can't serve as a memory limit for these jobs: the right value depends on the host's core count, and going over it crashes the job instead of failing it with a clear reason.
-- Leave it off (the default) on Linux as well. If it must be set, use at least 1.5 times the `VmPeak` measured on that host.
-- The next step in this PR is a resident-memory limit enforced by the worker. It reads the child's resident memory in the loop that already enforces `max_job_seconds`, and fails the job with a clear message.
+`RLIMIT_AS` can't serve as a memory limit for these jobs. The right value depends on the host's core count, and going over it crashes the job instead of failing it with a clear reason.
+
+## The limit now: resident memory, checked by the worker
+
+`ARRIVAL_MAX_JOB_MB` now limits resident memory. Every 0.5 s (`MEM_TICK`), `run_isolated` reads the resident memory of the child and every process under it with `arrival.jobs.worker.tree_rss` (`/proc` on Linux, `ps` elsewhere). Past the limit it kills the child, records `MemoryLimitError: the job used N MB resident, over the M MB limit (ARRIVAL_MAX_JOB_MB), during stage '...'` and does not retry, the same as a timeout. `child.py` no longer sets `RLIMIT_AS`.
+
+The same job and image, with the new limit:
+
+| `ARRIVAL_MAX_JOB_MB` | 18 CPUs | 2 CPUs |
+|---:|---|---|
+| off | done, 2/2, 42 s | |
+| 2048 | done, 2/2 | |
+| 1024 | done, 2/2 | |
+| 600 | done, 2/2 | done, 2/2, 69 s |
+| 300 | failed after 21 s: `MemoryLimitError: the job used 337 MB resident, over the 300 MB limit (ARRIVAL_MAX_JOB_MB), during stage 'sim'` | failed after 16 s, the same error |
+
+The job uses the same memory on both hosts, so one value works on both. Leave headroom over the roughly 365 MB this small job peaks at. Longer jobs, more people or a higher `--res` use more, so set it from a run of the job sizes you serve.
+
+## Limits of the check
+
+- It samples every 0.5 s, so a spike shorter than that can pass unseen. The check stops runaway growth; it does not guarantee a hard ceiling.
+- It needs the child process: with `max_job_seconds` 0 (`isolate` off) the job runs in the worker and nothing is checked.
+- Windows was not measured; `tree_rss` uses `ps` there, which a stock Windows doesn't have, so the check reads nothing and never kills.
