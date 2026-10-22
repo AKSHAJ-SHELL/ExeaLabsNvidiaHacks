@@ -277,7 +277,7 @@ def test_ci_gates_portable_checks_on_every_os_and_rendering_on_linux():
     render = jobs["render"]
     assert render["runs-on"] == "ubuntu-latest" and not render.get("continue-on-error")
     commands = [step.get("run", "") for step in render["steps"]]
-    assert "python -m pytest -q -p no:cacheprovider" in commands
+    assert "python -m pytest -q -p no:cacheprovider -n auto" in commands  # the full suite, split over the CPUs
     assert not any("--no-render" in command for command in commands)
     assert any("preflight()" in command and "raise SystemExit(why)" in command for command in commands)
 

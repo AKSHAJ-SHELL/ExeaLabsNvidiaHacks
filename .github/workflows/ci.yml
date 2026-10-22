@@ -76,7 +76,8 @@ jobs:
                   if key in os.environ:
                       stream.write(f"{key}={os.environ[key]}\n")
       - name: Full suite with rendering
-        run: python -m pytest -q -p no:cacheprovider
+        # split across the runner's CPUs (pytest-xdist): one test at a time, the suite outgrew the 75-minute limit
+        run: python -m pytest -q -p no:cacheprovider -n auto
       - name: Offline one-command demo (same as make demo)
         run: python scripts/demo_all.py --quick --out out/demo --timeout 600
       - name: Upload demo summary
