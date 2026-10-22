@@ -52,6 +52,8 @@ def test_synthetic_bundle_points_land_on_floor_plane(tmp_path, unit):
     (lambda m: m["frames"][0].update(camera_to_room=[float("nan")] * 16), "nonfinite_transform"),
     (lambda m: m.update(rgb_size=[True, 48]), "bad_size"),
     (lambda m: m.update(depth_size=[64, True]), "bad_size"),
+    (lambda m: m["frames"][0]["intrinsics"].update(fx=True), "intrinsics"),
+    (lambda m: m["frames"][0]["intrinsics"].update(cx="32"), "intrinsics"),
 ])
 def test_malformed_manifest_rejected_with_distinct_code(tmp_path, mutate, code):
     root = rgbd.write_synthetic_bundle(tmp_path)
