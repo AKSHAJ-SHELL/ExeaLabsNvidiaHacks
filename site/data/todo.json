@@ -782,7 +782,7 @@
       "Claude Code",
       "AKSHAJ-SHELL"
      ],
-     "note": "DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The cap was measured on Linux in Docker (docs/ref/MEMCAP.md, #192): it limits address space, which follows the core count, and past it the native libraries crash instead of raising MemoryError, so leave it off or set it at least 1.5 times the measured peak."
+     "note": "DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The memory cap counts resident memory: the worker reads the job's process tree every 0.5 s and kills it past ARRIVAL_MAX_JOB_MB with a MemoryLimitError naming the stage (#192). The old RLIMIT_AS cap followed the core count and crashed jobs (docs/ref/MEMCAP.md)."
     },
     {
      "id": "L31",
