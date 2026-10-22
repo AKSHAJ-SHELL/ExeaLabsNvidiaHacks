@@ -17,8 +17,9 @@ and one line in ``out/usage/jobs.jsonl``; ``arrival.eval.cost`` reads both.
 A failed attempt goes back to the queue up to ``limits.job_retries`` times (``requeue_failed``), unless the failure
 would only repeat (``retryable``): a bad upload or a request over a limit, a layout the sim cannot use, a dataset with
 nothing usable in it, or the wall-clock timeout. ``job_attempts`` in ``status.json`` counts the starts and
-``retry_errors`` keeps the error of each attempt that was retried. The requeue is written while the worker still
-holds ``claim.lock``, so no other worker can take the job before this one lets go of it.
+``retry_errors`` keeps the error of each attempt that was retried. The requeue writes ``not_before`` (``limits.job_retry_backoff``
+seconds, doubling per attempt, capped at 300) and is written while the worker still holds ``claim.lock``, so no other
+worker can take the job before this one lets go of it and the backoff has elapsed.
 """
 
 from __future__ import annotations
@@ -307,8 +308,8 @@ class Heartbeat:
 
 def claim_next(jobs_root: Path, worker: str | None = None) -> tuple[Path, dict] | None:
     """Claim the oldest queued job by ``created_unix`` (then id): create its ``claim.lock`` exclusively, then mark it
-    running and count the start in ``job_attempts``. Safe with several workers; None when nothing is claimable. The
-    caller must ``release`` the job when done."""
+    running and count the start in ``job_attempts``. A queued job whose ``not_before`` is still in the future is
+    skipped. Safe with several workers; None when nothing is claimable. The caller must ``release`` the job when done."""
     jobs_root = Path(jobs_root)
     worker = worker or worker_id()
     if not jobs_root.is_dir():
@@ -323,12 +324,19 @@ def claim_next(jobs_root: Path, worker: str | None = None) -> tuple[Path, dict] 
         except (TypeError, ValueError):
             continue
         if st.get("status") == "queued" and "id" in st:
+            ready = st.get("not_before")
+            if isinstance(ready, (int, float)) and ready > time.time():
+                continue
             queued.append((created, d.name, d))
     for _, _, job_dir in sorted(queued):
         if not _create_lock(job_dir / LOCK, worker):
             continue  # another worker owns it
         st = _read_status(job_dir)  # re-read under the lock: it may have finished or been cancelled since the scan
         if st is None or st.get("status") != "queued":
+            _unlink(job_dir / LOCK)
+            continue
+        ready = st.get("not_before")
+        if isinstance(ready, (int, float)) and ready > time.time():
             _unlink(job_dir / LOCK)
             continue
         n = st.get("job_attempts")
@@ -350,9 +358,10 @@ def release(job_dir: Path) -> None:
 
 def requeue_failed(job_dir: Path, status: dict, limits: Limits, log=print) -> bool:
     """Turn a failed attempt's ``status`` back into ``queued`` when retries are left and no cancel was asked for: the
-    attempt's ``error`` moves to ``retry_errors``, so ``error`` stays null on a job that is not finished. The caller
-    holds ``claim.lock`` and writes the status, so the job is claimable only after ``release``. Returns False, and
-    leaves ``status`` alone, when the failure stands."""
+    attempt's ``error`` moves to ``retry_errors``, so ``error`` stays null on a job that is not finished. ``not_before``
+    is now plus ``limits.job_retry_backoff`` seconds, doubling per attempt, capped at 300. The caller holds
+    ``claim.lock`` and writes the status, so the job is claimable only after ``release`` and that time. Returns False,
+    and leaves ``status`` alone, when the failure stands."""
     errors = status.get("retry_errors") if isinstance(status.get("retry_errors"), list) else []
     if len(errors) >= limits.job_retries:
         if limits.job_retries:
@@ -361,8 +370,10 @@ def requeue_failed(job_dir: Path, status: dict, limits: Limits, log=print) -> bo
     if (Path(job_dir) / CANCEL).exists():
         log(f"[work] {status['id']}: not retried, a cancel was requested")
         return False
+    delay = min(300, limits.job_retry_backoff * (2 ** len(errors)))
     status.update({"status": "queued", "stage": None, "started_at": None, "finished_at": None, "worker": None,
-                   "error": None, "retry_errors": [*errors, status.get("error")]})
+                   "error": None, "retry_errors": [*errors, status.get("error")],
+                   "not_before": int(time.time() + delay)})
     log(f"[work] {status['id']}: queued again, retry {len(errors) + 1} of {limits.job_retries}")
     return True
 
