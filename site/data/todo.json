@@ -774,11 +774,15 @@
      "size": "M",
      "priority": "should",
      "issue": 68,
-     "pr": [],
+     "pr": [
+      192
+     ],
      "authors": [
       "AvnehSBhatia",
-      "Claude Code"
-     ]
+      "Claude Code",
+      "AKSHAJ-SHELL"
+     ],
+     "note": "DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The cap was measured on Linux in Docker (docs/ref/MEMCAP.md, #192): it limits address space, which follows the core count, and past it the native libraries crash instead of raising MemoryError, so leave it off or set it at least 1.5 times the measured peak."
     },
     {
      "id": "L31",
