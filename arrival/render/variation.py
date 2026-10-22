@@ -151,6 +151,14 @@ class CosmosClient:
                  prompt: str = "same scene, different lighting and surface appearance"):
         from arrival import config as settings
 
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Cosmos timeout must be a finite number above zero")
+        if type(retries) is not int or retries < 0:
+            raise ValueError("Cosmos retries must be a nonnegative integer")
+        if type(backoff) not in (int, float) or not math.isfinite(backoff) or backoff < 0:
+            raise ValueError("Cosmos backoff must be a finite, nonnegative number")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Cosmos prompt must be a nonempty string")
         self.url = url if url is not None else settings.get("COSMOS_URL")
         self.timeout, self.retries, self.backoff, self.prompt = timeout, retries, backoff, prompt
         self.model, self.version = "unknown", "unknown"
