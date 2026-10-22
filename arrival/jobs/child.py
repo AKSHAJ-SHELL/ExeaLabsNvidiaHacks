@@ -17,9 +17,11 @@ from arrival.jobs.worker import _read_status, process
 
 def apply_memory_cap(max_bytes: int, platform: str | None = None, resource=None) -> bool:
     """Cap this process's address space (``RLIMIT_AS``) at ``max_bytes``. Linux only, and only when ``max_bytes`` > 0:
-    anywhere else (macOS does not enforce RLIMIT_AS/RLIMIT_DATA) it does nothing and returns False. A job that
-    allocates past the cap gets ``MemoryError`` and fails like any other stage error. The cap counts address space,
-    not resident memory, so set it well above what a job really uses."""
+    anywhere else (macOS does not enforce RLIMIT_AS/RLIMIT_DATA) it does nothing and returns False. The cap counts
+    address space, not resident memory: a 2-episode hero_kitchen job peaks at 5.7 GB of address space on 18 cores
+    for 0.36 GB resident, and the address space grows with the core count. Past the cap the native libraries abort
+    or segfault rather than raise ``MemoryError`` (measured in docs/ref/MEMCAP.md), so leave it off or set it at
+    least 1.5 times the peak measured on the host."""
     if not max_bytes or max_bytes <= 0 or (platform or sys.platform) != "linux":
         return False
     if resource is None:
