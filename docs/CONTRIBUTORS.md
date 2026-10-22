@@ -7,7 +7,7 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 ## Commits by author
 
 ```
-   224	redmythic1
+   225	redmythic1
     60	aarochu
     39	Aadi Tiwari
     13	Jahan Marbin
@@ -164,6 +164,15 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 - #150 [CAP-2] Record RGB-D frames in the iOS app during a RoomPlan scan (merged)
 - #151 close_door: push the panel above the bar (G1 joint_at_limit 5 -> 3); re-measure open_door (open)
 
+### @AKSHAJ-SHELL (6)
+
+- #53 [MAN-2] Cabinet fronts collide where they are drawn; arm clipping test (closed)
+- #55 [POL-4] Count arm-fixture contacts in eval (merged)
+- #57 [SIM-5] A scanned office becomes a room the arm can work in (merged)
+- #156 [P2] Three consented real kitchen scans with tape measurements; licence check of the public scans (open)
+- #163 CI: mark the three tests that render in a child process as render (main's portable jobs are red) (open)
+- #192 Job memory cap on Linux: measured (RLIMIT_AS crashes jobs and follows core count); resident-memory limit in the worker (open)
+
 ### @IshaanM05 (6)
 
 - #9 DEM-3: pin video writer to the FFMPEG backend (merged)
@@ -181,14 +190,6 @@ Work on this repository's laptop pass was done by the repo owner with Claude Cod
 - #123 build(deps): bump actions/checkout from 4 to 7 (open)
 - #124 build(deps): bump actions/upload-artifact from 4 to 7 (open)
 - #125 build(deps-dev): bump ruff from 0.11.13 to 0.17.1 (open)
-
-### @AKSHAJ-SHELL (5)
-
-- #53 [MAN-2] Cabinet fronts collide where they are drawn; arm clipping test (closed)
-- #55 [POL-4] Count arm-fixture contacts in eval (merged)
-- #57 [SIM-5] A scanned office becomes a room the arm can work in (merged)
-- #156 [P2] Three consented real kitchen scans with tape measurements; licence check of the public scans (open)
-- #163 CI: mark the three tests that render in a child process as render (main's portable jobs are red) (open)
 
 ### @Anandb71 (3)
 
