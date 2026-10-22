@@ -217,7 +217,9 @@ class LeRobotWriter:
                 raise ValueError(f"episode {ep}: video policy 'all' needs frames for {missing}")
         clips = {}
         for name, frames in (videos or {}).items():
-            frames = np.asarray(frames, dtype=np.uint8)
+            frames = np.asarray(frames)
+            if frames.dtype != np.uint8:
+                raise ValueError(f"episode {ep}: video {name} must contain uint8 RGB pixels, got {frames.dtype}")
             if frames.ndim != 4 or frames.shape[0] != n or frames.shape[3] != 3:
                 raise ValueError(f"episode {ep}: video {name} shape {frames.shape} != ({n},H,W,3)")
             if self.video_policy == "all" or self.wants_video(ep):

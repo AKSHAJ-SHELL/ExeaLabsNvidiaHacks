@@ -290,3 +290,15 @@ def test_writer_checks_videos_before_writing_and_closes_sidecar(tmp_path):
     assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
     w.close()
     assert w._sidecar.closed
+
+
+def test_writer_rejects_video_pixel_coercion_before_writing(tmp_path):
+    import numpy as np
+
+    w = _writer(tmp_path, policy="all")
+    z = np.zeros((2, 2))
+    bad = np.full((2, 32, 32, 3), 300, dtype=np.int16)
+    with pytest.raises(ValueError, match="uint8 RGB pixels"):
+        w.add_episode(z, z, [0, .05], "task", True, videos={"ego_view": bad})
+    assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
+    w.close()
