@@ -87,6 +87,16 @@ def test_bad_frame_shape_refused():
         encode_request({"state": STATE11, "ego_view": np.zeros((4, 4), np.uint8)}, "x")
 
 
+@pytest.mark.parametrize("frame", [np.full((2, 2, 3), 300, np.int16),
+                                   np.full((2, 2, 3), np.nan, np.float32),
+                                   np.zeros((2, 2, 3), bool)])
+def test_camera_encoder_does_not_coerce_bad_pixel_types(frame):
+    obs = _obs()
+    obs["ego_view"] = frame
+    with pytest.raises(ProtocolError, match="uint8"):
+        encode_request(obs, "x")
+
+
 def test_shim_maps_base_key():
     req = decode_request(GOLDEN["mobile"]["request"])
     obs = gr00t_shim.to_observation(req)
