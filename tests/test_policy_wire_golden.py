@@ -87,6 +87,16 @@ def test_bad_frame_shape_refused():
         encode_request({"state": STATE11, "ego_view": np.zeros((4, 4), np.uint8)}, "x")
 
 
+@pytest.mark.parametrize("instruction", [None, "", "  ", 3])
+def test_policy_requests_require_a_named_task(instruction):
+    with pytest.raises(ProtocolError, match="non-empty string"):
+        encode_request(_obs(), instruction)
+    body = GOLDEN["arm"]["request"].copy()
+    body["annotation.human.task_description"] = instruction
+    with pytest.raises(ProtocolError, match="non-empty string"):
+        decode_request(body)
+
+
 def test_shim_maps_base_key():
     req = decode_request(GOLDEN["mobile"]["request"])
     obs = gr00t_shim.to_observation(req)
