@@ -310,7 +310,7 @@ svg text{white-space:pre}
 </head>
 <body>
 <div id="root" data-composition-id="pitch" data-start="0" data-duration="24.4" data-width="1920" data-height="1080">
-  <svg id="base" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Arrival launch video: robots are trained on generic kitchens and have never seen your sink; Arrival scans a room once and produces robot training data for that exact room; scan to twin, simulate, dataset; the GR00T fine-tune and real scans are not done yet."></svg>
+  <svg id="base" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Arrival launch video: robots are trained on generic kitchens and have never seen your sink; Arrival scans a room once and produces robot training data for that exact room; scan to twin, simulate, dataset; GR00T fine-tune scored 39 of 48 against 26 of 48 on small samples, with no base or generic cell; real kitchen scans are not done yet."></svg>
   <div id="crop">
     <video id="v1" src="../pipeline.mp4" data-start="9.6" data-duration="3.0" data-media-start="2.6" data-track-index="1" muted playsinline preload="auto" data-layout-allow-overflow></video>
     <video id="v2" src="../pipeline.mp4" data-start="12.6" data-duration="3.0" data-media-start="5.8" data-track-index="2" muted playsinline preload="auto" data-layout-allow-overflow></video>
@@ -486,12 +486,12 @@ svg text{white-space:pre}
   var tb = [D.rect(G4, TBX, TBY, TBW, HH + RH * 5, "ink", { "stroke-width": 3 }), D.line(G4, TBX, TBY + HH, TBX + TBW, TBY + HH, "ink", { "stroke-width": 2 })];
   for (var r = 1; r < 5; r++) tb.push(D.line(G4, TBX, TBY + HH + r * RH, TBX + TBW, TBY + HH + r * RH, "hair"));
   D.draw(tl, tb, t4 + 0.1, 0.8, { ease: "power2.inOut", stagger: 0.04 });
-  D.typeText(tl, G4, TBX + 24, TBY + 34, "STATUS FROM THE README, OCT 19 2026", "lbl sm", t4 + 0.5, 50);
+  D.typeText(tl, G4, TBX + 24, TBY + 34, "STATUS FROM THE README, OCT 21 2026", "lbl sm", t4 + 0.5, 50);
   var rows = [
     { a: "Scan to twin", n: "SAMPLE KITCHEN + 2 PUBLIC ROOMPLAN EXPORTS", s: "DONE" },
     { a: "Simulation, with people", n: "MUJOCO, PHYSICS-CHECKED TASKS", s: "DONE" },
-    { a: "LeRobot dataset", n: "PASSES OUR VALIDATOR, NOT YET LOADED BY GR00T", s: "PARTLY" },
-    { a: "GR00T fine-tune", n: "NOT BUILT", s: "NEXT" },
+    { a: "LeRobot dataset", n: "GR00T N1.7 TRAINED ON THIS DATASET", s: "DONE" },
+    { a: "GR00T fine-tune", n: "39/48 VS 26/48, SMALL N, NO BASE CELL", s: "DONE" },
     { a: "Real kitchen scans", n: "NONE YET", s: "NEXT" }
   ];
   rows.forEach(function (rw, i) {
@@ -513,8 +513,8 @@ svg text{white-space:pre}
   var st = D.g(G4), lock = D.g(G4);
   var stN = disp(st, 1240, 340, "Not done yet.", 66);
   var stRule = D.line(st, 1240, 262, 1800, 262, "ink", { "stroke-width": 2 });
-  var stSq = [0, 1].map(function (i) { return D.rect(st, 1240, 428 + i * 58 - 20, 20, 20, "sigfill"); });
-  var stT = ["GR00T FINE-TUNE", "REAL KITCHEN SCANS"].map(function (s, i) { return D.text(st, 1280, 428 + i * 58, s, "lbl", { "font-size": 26 }); });
+  var stSq = [0].map(function (i) { return D.rect(st, 1240, 428 + i * 58 - 20, 20, 20, "sigfill"); });
+  var stT = ["REAL KITCHEN SCANS"].map(function (s, i) { return D.text(st, 1280, 428 + i * 58, s, "lbl", { "font-size": 26 }); });
   D.prep([stRule]);
   tl.to(stRule, { strokeDashoffset: 0, duration: 0.5 }, t4 + 0.6);
   tl.from(stN, { opacity: 0, y: 24, duration: 0.6, ease: "power3.out" }, t4 + 0.8);

@@ -1,18 +1,18 @@
 {
  "as_of": "2026-10-21",
  "repo": "AvnehSBhatia/ExeaLabsNvidiaHacks",
- "source": "README to-do, gh pr list and gh issue list on 2026-10-21, with PRs #96 to #100 and #102 to #117 merged into feat/demo-site; teammate PRs #118, #126-#150 and #152-#155 merged on feat/gap-fixes",
+ "source": "README to-do, refreshed after #194 landed the integration on main and #193, #195, #196, #197 and #198 were merged into feat/more-prs-2. Submission fields checked against https://nebiusglobalaihackathon.devpost.com/ and the official rules.",
  "counts": {
-  "done": 54,
-  "review": 1,
+  "done": 55,
+  "review": 3,
   "todo": 0,
   "blocked": 16,
-  "total": 71
+  "total": 74
  },
  "prs": {
-  "merged": 44,
-  "open": 28,
-  "closed_unmerged": 4
+  "merged": 128,
+  "open": 16,
+  "closed_unmerged": 13
  },
  "groups": [
   {
@@ -319,8 +319,8 @@
   },
   {
    "id": "review",
-   "title": "In review",
-   "blurb": "Pull requests against main. All are merged into feat/demo-site and none is on main yet, so none counts as done.",
+   "title": "On main (#194)",
+   "blurb": "Integrated on feat/more-prs-2 and merged to main in #194. A row is shipped only when main has it.",
    "items": [
     {
      "id": "L1",
@@ -782,12 +782,12 @@
       "Claude Code",
       "AKSHAJ-SHELL"
      ],
-     "note": "DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The cap was measured on Linux in Docker (docs/ref/MEMCAP.md, #192): it limits address space, which follows the core count, and past it the native libraries crash instead of raising MemoryError, so leave it off or set it at least 1.5 times the measured peak."
+     "note": "DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The memory cap counts resident memory: the worker reads the job's process tree every 0.5 s and kills it past ARRIVAL_MAX_JOB_MB with a MemoryLimitError naming the stage (#192). The old RLIMIT_AS cap followed the core count and crashed jobs (docs/ref/MEMCAP.md)."
     },
     {
      "id": "L31",
      "title": "Synchronized ego, wrist and exocentric capture from one simulation state, with a side-by-side preview and an optional three-camera GR00T config",
-     "status": "review",
+     "status": "done",
      "owner_kind": "laptop",
      "size": "M",
      "priority": "nice",
@@ -796,7 +796,44 @@
      "authors": [
       "rishith-c"
      ],
-     "note": "From rishith-c/feat/ego-exocentric-capture, merged on feat/more-prs-2 with its commit author kept. Offline key and schema checks only; no three-view GR00T training or inference has been run."
+     "note": "From rishith-c/feat/ego-exocentric-capture, merged on feat/more-prs-2 and on main via #194. Offline key and schema checks only; no three-view GR00T training or inference has been run."
+    }
+   ]
+  },
+  {
+   "id": "branch",
+   "title": "On this branch, not on main",
+   "blurb": "Merged into feat/more-prs-2 after #194. Not on main yet, so not shipped.",
+   "items": [
+    {
+     "id": "L32",
+     "title": "Demo page clicks: stage buttons, the scan/twin divider, and the phone disclaimer",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      195
+     ],
+     "authors": [
+      "AKSHAJ-SHELL"
+     ],
+     "note": "Checked in a browser at 1024 px and 375 px, both themes. The faded hero was still taking the stage-button clicks, the hidden dock cards were taking the divider drag, and on a phone the intro covered the disclaimer. Offline asset checks already passed. Not deployed (C2)."
+    },
+    {
+     "id": "L33",
+     "title": "Re-export site/data and stop the exporter deleting todo.json",
+     "status": "review",
+     "owner_kind": "laptop",
+     "size": "S",
+     "priority": "should",
+     "pr": [
+      196
+     ],
+     "authors": [
+      "JmarbinGG"
+     ],
+     "note": "State rows are 11 wide; the page packs the first 8 (arm and gripper). Absolute paths are stripped. todo.json is kept across a re-export. Checked with the exporter tests and a headless page load."
     }
    ]
   },
@@ -923,7 +960,7 @@
      "size": "L",
      "priority": "must",
      "issue": 66,
-     "note": "Fan-out with done-markers, retry and resume is built. arrival fanout --backend nebius runs shards as Serverless AI Jobs with an Object Storage bucket, tested only against in-process fakes of both APIs. It has never run against Nebius; the one small real run needs an account.",
+     "note": "Fan-out with done-markers, retry and resume is built. arrival fanout --backend nebius runs shards as Serverless AI Jobs with an Object Storage bucket, tested only against in-process fakes of both APIs. It has never run against Nebius. The hackathon rules count a project as running on Nebius only if it calls the Token Factory inference API or runs on Nebius AI Cloud (Serverless Jobs, Serverless Endpoints, or DevPods). Neither has been done.",
      "authors": [
       "AvnehSBhatia",
       "Claude Code"
@@ -940,7 +977,7 @@
      "pr": [
       115
      ],
-     "note": "Smoke test (#115), /healthz, docker-compose.yml and docs/DEPLOY.md are written and tested on a laptop. TLS, the domain, a real seeded room and a run on a host are still blocked.",
+     "note": "Smoke test (#115), /healthz, docker-compose.yml and docs/DEPLOY.md are written and tested on a laptop. The Devpost form does not require a demo URL on the Physical AI track. The static site is still undeployed: cd site && vercel --prod, then put the live URL in the README and on the form if you submit one. #195 checked http://localhost:8765 at 1024 px and 375 px in both themes.",
      "authors": [
       "JmarbinGG"
      ]
@@ -1021,12 +1058,15 @@
     },
     {
      "id": "P4",
-     "title": "Refresh the pitch video with real footage; check the demo page in a browser",
-     "status": "blocked",
+     "title": "Rendered pitch video, 24 seconds, with the fine-tune result",
+     "status": "review",
      "owner_kind": "people",
      "size": "S",
-     "priority": "should",
-     "authors": []
+     "priority": "must",
+     "authors": [
+      "AvnehSBhatia"
+     ],
+     "note": "site/motion/pitch.mp4 is the submission video: 24.4 seconds, public-repo file, no studio recording and no copyrighted music. The closing sheet says the fine-tune is 39 of 48 against 26 of 48, small samples, and that real kitchen scans are still not done. Devpost still wants this file on public YouTube (SUB). docs/media/demo.mp4 remains the silent 31-second code render."
     },
     {
      "id": "OWN",
@@ -1036,6 +1076,23 @@
      "size": "S",
      "note": "Repo owner only",
      "authors": []
+    }
+   ]
+  },
+  {
+   "id": "submit",
+   "title": "Devpost form",
+   "blurb": "Nebius x NVIDIA Global AI Hackathon, https://nebiusglobalaihackathon.devpost.com/. Deadline Friday, October 30, 2026, 10:00am Pacific. Physical AI is the track: a demo URL is not required, and with no robot the video needs at least one minute of the key modules (P4).",
+   "items": [
+    {
+     "id": "SUB",
+     "title": "Fill the Devpost form: Physical AI, description, public repo, and feedback",
+     "status": "blocked",
+     "owner_kind": "people",
+     "size": "S",
+     "priority": "must",
+     "authors": [],
+     "note": "Required on the form: the track, a text description of what it is, why, and how it works, a public GitHub URL whose About section shows the Apache 2.0 license, a README with setup instructions, the YouTube link (P4), and written feedback on Token Factory, AI Cloud, and the NVIDIA models used. Highlight GR00T and any Nemotron or Token Factory use. English. A demo URL is optional on this track (C2). If the project existed before August 26, 2026, say what changed during the submission period. The project has to run as the video and the text describe, and the rules require a real Token Factory call or a Nebius AI Cloud run (C1)."
     }
    ]
   }
