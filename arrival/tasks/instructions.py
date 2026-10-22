@@ -8,6 +8,7 @@ Results are cached locally so tests and offline runs work without API keys.
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 
@@ -126,6 +127,10 @@ def generate_instructions(family: str, object_name: str | None = None,
     caching and deterministic template fallback. Only real model output is cached: a fallback
     (no key, network error, unusable reply) is recomputed so configuring the key later takes effect.
     """
+    if type(n) is not int or n < 1:
+        raise ValueError("n must be a positive whole number")
+    if type(eval_ratio) not in (int, float) or not math.isfinite(eval_ratio) or not 0 < eval_ratio < 1:
+        raise ValueError("eval_ratio must be finite and between 0 and 1")
     key = _cache_key(family, object_name, fixture_name, n, role, eval_ratio)
     cache = load_cache(cache_path)
     hit = cache.get(key)
