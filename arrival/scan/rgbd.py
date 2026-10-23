@@ -138,9 +138,12 @@ def load_manifest(directory) -> Manifest:
         if not isinstance(k, dict):
             _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
         try:
-            fx, fy, cx, cy = (float(k[n]) for n in ("fx", "fy", "cx", "cy"))
+            values = [k[n] for n in ("fx", "fy", "cx", "cy")]
         except (KeyError, TypeError, ValueError):
             _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
+        if any(type(value) not in (int, float) for value in values):
+            _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
+        fx, fy, cx, cy = map(float, values)
         if not all(math.isfinite(x) for x in (fx, fy, cx, cy)) or fx <= 0 or fy <= 0:
             _fail("intrinsics", f"frame {fid} intrinsics must be finite with fx, fy > 0")
         T = _matrix(e.get("camera_to_room"), f"frame {fid} camera_to_room")
