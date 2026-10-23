@@ -187,6 +187,17 @@ def test_cosmos_client_rejects_grayscale_response():
         srv.server_close()
 
 
+@pytest.mark.parametrize("settings,reason", [
+    ({"timeout": 0}, "timeout"), ({"timeout": float("nan")}, "timeout"),
+    ({"retries": -1}, "retries"), ({"retries": True}, "retries"),
+    ({"backoff": float("inf")}, "backoff"), ({"backoff": -0.1}, "backoff"),
+    ({"prompt": "  "}, "prompt"),
+])
+def test_cosmos_client_rejects_invalid_transport_controls(settings, reason):
+    with pytest.raises(ValueError, match=reason):
+        variation.CosmosClient("https://example.invalid", **settings)
+
+
 def test_server_down_falls_back_cleanly(dataset, tmp_path):
     srv = serve(lambda img: img)
     port = srv.server_port
