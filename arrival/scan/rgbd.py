@@ -237,10 +237,18 @@ def project(points: np.ndarray, K: np.ndarray, T: np.ndarray) -> tuple[np.ndarra
 def look_at(eye, target, up=(0.0, 0.0, 1.0)) -> np.ndarray:
     """Camera-to-room 4x4 (ARKit axes) for a camera at `eye` looking at `target`, room Z up."""
     eye, target, up = (np.asarray(a, float) for a in (eye, target, up))
+    if any(a.shape != (3,) or not np.isfinite(a).all() for a in (eye, target, up)):
+        raise ValueError("eye, target and up must be finite 3D vectors")
     f = target - eye
-    f /= np.linalg.norm(f)
+    distance = np.linalg.norm(f)
+    if distance < 1e-9:
+        raise ValueError("eye and target must be distinct")
+    f /= distance
     right = np.cross(f, up)
-    right /= np.linalg.norm(right)
+    right_norm = np.linalg.norm(right)
+    if right_norm < 1e-9:
+        raise ValueError("up must not be parallel to the viewing direction")
+    right /= right_norm
     true_up = np.cross(right, f)
     T = np.eye(4)
     T[:3, 0], T[:3, 1], T[:3, 2], T[:3, 3] = right, true_up, -f, eye

@@ -29,6 +29,16 @@ def test_unproject_known_pixel_roundtrips():
     assert np.allclose(uv[0], [52, 14], atol=1e-6) and abs(d[0] - 2.0) < 1e-6
 
 
+@pytest.mark.parametrize("eye,target,up,reason", [
+    ((1, 2, 3), (1, 2, 3), (0, 0, 1), "distinct"),
+    ((0, 0, 0), (0, 0, 1), (0, 0, 1), "parallel"),
+    ((float("nan"), 0, 0), (1, 0, 0), (0, 0, 1), "finite"),
+])
+def test_look_at_rejects_degenerate_camera_poses(eye, target, up, reason):
+    with pytest.raises(ValueError, match=reason):
+        rgbd.look_at(eye, target, up)
+
+
 @pytest.mark.parametrize("unit", ["m", "mm"])
 def test_synthetic_bundle_points_land_on_floor_plane(tmp_path, unit):
     m = rgbd.load_manifest(rgbd.write_synthetic_bundle(tmp_path, depth_unit=unit))
