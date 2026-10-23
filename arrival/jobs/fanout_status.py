@@ -58,7 +58,12 @@ class StatusRecorder:
 
     def _describe(self, job_id: str) -> dict:
         describe = getattr(self.backend, "describe", None)
-        return describe(job_id) if describe else {}
+        if describe is None:
+            return {}
+        try:
+            return describe(job_id) or {}
+        except Exception:  # optional metadata must not lose a submitted job
+            return {}
 
     def _end(self, job_id: str, outcome: str, stage: str | None = None, reason: str | None = None) -> None:
         self._close(*self._open.pop(job_id), outcome, stage, reason)
