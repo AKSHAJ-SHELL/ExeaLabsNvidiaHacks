@@ -156,6 +156,8 @@ class LeRobotWriter:
                  robot_type: str = "robocasa_panda", chunks_size: int = CHUNKS_SIZE):
         if video_policy not in ("all", "sparse", "none"):
             raise ValueError(f"unknown video policy {video_policy!r}")
+        if type(fps) is not int or fps < 1:
+            raise ValueError("fps must be a positive integer")
         self.root = Path(root)
         self.room_id = room_id
         self.video_policy = video_policy
