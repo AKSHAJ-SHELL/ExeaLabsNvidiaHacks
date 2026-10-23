@@ -10,6 +10,7 @@ episodes are re-indexed and the result validates. Nothing is regenerated and not
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +28,9 @@ def subset_dataset(src: str | Path, out_dir: str | Path = "out", families: list[
                    min_drawer_opening: float | None = None, log=print) -> dict:
     from arrival.sim.export import SimDatasetWriter
 
+    if min_drawer_opening is not None and (type(min_drawer_opening) not in (int, float) or
+                                           not math.isfinite(min_drawer_opening) or min_drawer_opening < 0):
+        raise SubsetError("min_drawer_opening must be a finite, nonnegative distance in metres")
     root = _find_dataset(Path(src))
     meta = root / "meta"
     info = json.loads((meta / "info.json").read_text())
