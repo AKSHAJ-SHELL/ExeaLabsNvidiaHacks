@@ -274,6 +274,27 @@ def test_writer_rejects_invalid_chunk_size_before_creating_dataset(tmp_path, chu
     assert not (tmp_path / "ds").exists()
 
 
+
+@pytest.mark.parametrize("names", [["../outside"], ["ego_view", "ego_view"], ["ego/view"], []])
+def test_writer_rejects_unsafe_or_duplicate_camera_keys(tmp_path, names):
+    with pytest.raises(ValueError, match="camera name|video_keys"):
+        _writer(tmp_path, policy="all", video_keys=names)
+    assert not (tmp_path / "ds").exists()
+
+
+def test_writer_rejects_unsafe_supplied_video_name_before_writing(tmp_path):
+    import numpy as np
+
+    w = _writer(tmp_path, policy="all")
+    z = np.zeros((2, 2))
+    clip = np.zeros((2, 32, 32, 3), np.uint8)
+    with pytest.raises(ValueError, match="camera name"):
+        w.add_episode(z, z, [0, .05], "task", True, videos={"ego_view": clip, "../outside": clip})
+    assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
+    assert not (tmp_path / "outside").exists()
+    w.close()
+
+
 def test_writer_rejects_nan_and_leaves_no_orphan(tmp_path):
     import numpy as np
 
