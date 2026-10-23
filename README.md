@@ -58,7 +58,7 @@ Built for the NVIDIA × Nebius hackathon by Exea Labs and a team of 30. **Want t
 | GR00T-format dataset + validator | ✅ Passes our validator, and the layout matches GR00T's loader source. ⚠️ Not yet loaded by GR00T itself since the latest fixes |
 | Local web page: browse, download, upload | ✅ Works. Redesigned page: room cards with previews and stats, drag-and-drop upload, live job stages. Uploads are processed by `python -m arrival work` on the same machine (twin, sim dataset, zip); a killed worker's jobs are requeued. The static demo page was checked in a browser at 1024 px and 375 px (#195, on this branch, not on main). ⚠️ No cloud fan-out yet, and no public URL |
 | VLM planner (Nemotron) / VLA client (GR00T server) | ✅ VLM planner (Nemotron) wired into sim collection with Token Factory and offline cache fixture (POL-1); dynamic instruction generation with held-out eval set (POL-2). ⚠️ VLA client tested offline |
-| GR00T N1.7 fine-tune and paired evaluation | ✅ Fine-tunes of GR00T N1.7-3B on `hero_kitchen_sim` ran on one 96 GB GPU and were scored in the sim on identical trials (`docs/07-eval.md`, "Results so far"). Best so far 39 of 48 trials (81%) against 26 of 48 for the clean-data baseline (paired sign test p = 0.007): clean data plus DART demos with the marginal drawer pulls removed. ⚠️ Small samples; the generic-RoboCasa and base-GR00T cells of the usefulness protocol (DAT-3) are not run, so `usefulness` stays `null` |
+| GR00T N1.7 fine-tune and paired evaluation | ✅ Fine-tunes of GR00T N1.7-3B on `hero_kitchen_sim` ran on one 96 GB GPU on Cosmos (not Nebius) and were scored in the sim on identical trials (`docs/07-eval.md`, "Results so far"). Best so far 39 of 48 trials (81%) against 26 of 48 for the clean-data baseline (paired sign test p = 0.007): clean data plus DART demos with the marginal drawer pulls removed. ⚠️ Small samples; the generic-RoboCasa and base-GR00T cells of the usefulness protocol (DAT-3) are not run, so `usefulness` stays `null` |
 | MimicGen, splats, Cosmos, Nebius scale-out | ❌ Not built yet. This is what remains for the hackathon: the DAT-3 baseline cells and real scans (CAP-3) |
 
 There are two datasets. `python -m arrival sim` writes **physics-simulated** data with real joint states (`arrival_physically_valid: true`). `python -m arrival demo` writes a fast **scripted placeholder** with zero joint values (`arrival_physically_valid: false`). Never train on the placeholder.
@@ -155,14 +155,14 @@ Integrated on feat/more-prs-2 and merged to main in #194. A row is shipped only 
 | L30 | Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The memory cap counts resident memory: the worker reads the job's process tree every 0.5 s and kills it past ARRIVAL_MAX_JOB_MB with a MemoryLimitError naming the stage (#192). The old RLIMIT_AS cap followed the core count and crashed jobs (docs/ref/MEMCAP.md). | M | should | Shipped | #192 | @AvnehSBhatia, Claude Code, @AKSHAJ-SHELL |
 | L31 | Synchronized ego, wrist and exocentric capture from one simulation state, with a side-by-side preview and an optional three-camera GR00T config From rishith-c/feat/ego-exocentric-capture, merged on feat/more-prs-2 and on main via #194. Offline key and schema checks only; no three-view GR00T training or inference has been run. | M | nice | Shipped | none | @rishith-c |
 
-### On this branch, not on main (2)
+### Landed after #194 (2)
 
-Merged into feat/more-prs-2 after #194. Not on main yet, so not shipped.
+Merged to main in #202.
 
 | id | what | size | priority | status | PRs or issue | who |
 |---|---|---|---|---|---|---|
-| L32 | Demo page clicks: stage buttons, the scan/twin divider, and the phone disclaimer Checked in a browser at 1024 px and 375 px, both themes. The faded hero was still taking the stage-button clicks, the hidden dock cards were taking the divider drag, and on a phone the intro covered the disclaimer. Offline asset checks already passed. Not deployed (C2). | S | should | In review | #195 | @AKSHAJ-SHELL |
-| L33 | Re-export site/data and stop the exporter deleting todo.json State rows are 11 wide; the page packs the first 8 (arm and gripper). Absolute paths are stripped. todo.json is kept across a re-export. Checked with the exporter tests and a headless page load. | S | should | In review | #196 | @JmarbinGG |
+| L32 | Demo page clicks: stage buttons, the scan/twin divider, and the phone disclaimer Checked in a browser at 1024 px and 375 px, both themes. The faded hero was still taking the stage-button clicks, the hidden dock cards were taking the divider drag, and on a phone the intro covered the disclaimer. Offline asset checks already passed. Not deployed (C2). | S | should | Shipped | #195 | @AKSHAJ-SHELL |
+| L33 | Re-export site/data and stop the exporter deleting todo.json State rows are 11 wide; the page packs the first 8 (arm and gripper). Absolute paths are stripped. todo.json is kept across a re-export. Checked with the exporter tests and a headless page load. | S | should | Shipped | #196 | @JmarbinGG |
 
 ### Laptop: next (0)
 
@@ -177,7 +177,7 @@ A GPU host with 40 GB or more, or a Linux box.
 
 | id | what | size | priority | status | PRs or issue | who |
 |---|---|---|---|---|---|---|
-| G1 | Real GR00T loader check and fine-tune on hero_kitchen_sim GR00T N1.7-3B fine-tuned on one 96 GB GPU and scored in the sim on identical trials. Best 39 of 48 (81%) against 26 of 48 for the clean-data baseline (paired sign test p = 0.007): clean data plus DART demos with the marginal drawer pulls removed. Self-reported in #165 and #63; small samples, and the base-GR00T and generic-RoboCasa cells (G3, G4) are not run, so `usefulness` stays null. Weights: https://huggingface.co/Ish1105/arrival-gr00t-n17-run4 (NVIDIA Open Model License, not the repo's Apache 2.0). The same card reports clean plus unfiltered DART at 22 of 48. | M | must | Shipped | #165 | @IshaanM05 |
+| G1 | Real GR00T loader check and fine-tune on hero_kitchen_sim GR00T N1.7-3B fine-tuned on one 96 GB GPU and scored in the sim on identical trials. Best 39 of 48 (81%) against 26 of 48 for the clean-data baseline (paired sign test p = 0.007): clean data plus DART demos with the marginal drawer pulls removed. Self-reported in #165 and #63; small samples, and the base-GR00T and generic-RoboCasa cells (G3, G4) are not run, so `usefulness` stays null. Weights: https://huggingface.co/Ish1105/arrival-gr00t-n17-run4 (NVIDIA Open Model License, not the repo's Apache 2.0). The same card reports clean plus unfiltered DART at 22 of 48. The fine-tunes ran on one 96 GB GPU on Cosmos, not on Nebius. | M | must | Shipped | #165 | @IshaanM05 |
 | G2 | Real GR00T policy server: chunking, both camera keys, golden-file test Wire-format golden test and the 8-float and 11-float schemas are done. The shim has not run against a real GR00T server. | M | must | Blocked | none | @AvnehSBhatia, Claude Code |
 | G3 | Three-cell held-out eval, 50 episodes per cell, Wilson intervals | L | must | Blocked | issue #64 | unassigned |
 | G4 | Generic-RoboCasa baseline dataset and fine-tune | M | must | Blocked | issue #64 | unassigned |
