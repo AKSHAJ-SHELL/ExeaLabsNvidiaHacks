@@ -4,6 +4,7 @@ import json
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from arrival.scan import rgbd
 
@@ -86,6 +87,19 @@ def test_non_object_frame_raises_manifest_error(tmp_path):
     with pytest.raises(rgbd.ManifestError) as e:
         rgbd.load_manifest(root)
     assert e.value.code == "frames"
+
+
+@pytest.mark.parametrize("unit", ["m", "mm"])
+def test_depth_loader_rejects_wrong_pixel_type(tmp_path, unit):
+    m = rgbd.load_manifest(rgbd.write_synthetic_bundle(tmp_path, depth_unit=unit))
+    frame = m.frames[0]
+    if unit == "m":
+        np.save(frame.depth, np.ones((m.depth_size[1], m.depth_size[0]), np.float64))
+    else:
+        Image.fromarray(np.ones((m.depth_size[1], m.depth_size[0]), np.uint8)).save(frame.depth)
+    with pytest.raises(rgbd.ManifestError) as e:
+        rgbd.load_depth(m, frame)
+    assert e.value.code == "depth_dtype"
 
 
 def test_frame_symlink_cannot_escape_bundle(tmp_path):
