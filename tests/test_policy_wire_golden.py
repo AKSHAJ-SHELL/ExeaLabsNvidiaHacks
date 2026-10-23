@@ -111,6 +111,13 @@ def test_camera_encoder_does_not_coerce_bad_pixel_types(frame):
     with pytest.raises(ProtocolError, match="uint8"):
         encode_request(obs, "x")
 
+def test_image_decoder_rejects_trailing_non_base64_data():
+    valid = GOLDEN["arm"]["request"]["video.ego_view"]
+    with pytest.raises(ProtocolError, match="undecodable image"):
+        decode_image(valid + "!not-an-image")
+    with pytest.raises(ProtocolError, match="base64 string"):
+        decode_image(123)
+
 
 def test_shim_maps_base_key():
     req = decode_request(GOLDEN["mobile"]["request"])

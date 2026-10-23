@@ -51,8 +51,10 @@ def encode_image(img: np.ndarray) -> str:
 def decode_image(s: str) -> np.ndarray:
     from PIL import Image
 
+    if not isinstance(s, str):
+        raise ProtocolError("encoded image must be a base64 string")
     try:
-        return np.asarray(Image.open(io.BytesIO(base64.b64decode(s))).convert("RGB"))
+        return np.asarray(Image.open(io.BytesIO(base64.b64decode(s, validate=True))).convert("RGB"))
     except Exception as e:
         raise ProtocolError(f"undecodable image: {e}") from e
 
