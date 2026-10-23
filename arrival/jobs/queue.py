@@ -52,6 +52,10 @@ def create_job(jobs_root: Path, filename: str, data: bytes | None = None,
     ``extra_status`` keys are merged into the status. With ``max_queue`` > 0, raise ``QueueFull`` when that
     many jobs are already queued or running. The count is not atomic with the write, so concurrent uploads can
     overshoot the limit by a few; it bounds the queue, it is not an exact gate."""
+    if (data is None) == (src is None):
+        raise ValueError("provide exactly one of data or src")
+    if type(offset) is not int or offset < 0 or type(length) is not int or length < 0:
+        raise ValueError("offset and length must be nonnegative whole numbers")
     jobs_root = Path(jobs_root)
     if max_queue and count_active(jobs_root) >= max_queue:
         raise QueueFull(f"queue is full: {max_queue} jobs are queued or running")
