@@ -8,6 +8,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from PIL import Image
+
 from arrival.scan.bundle import load_room, validate
 
 
@@ -21,6 +23,11 @@ def bundle_from_photos(paths: list, room_id: str, scans_dir: str | Path = "scans
     for p in paths:
         if not p.is_file():
             raise ValueError(f"photo not found: {p}")
+        try:
+            with Image.open(p) as image:
+                image.verify()
+        except Exception as exc:
+            raise ValueError(f"photo is not a readable image: {p}") from exc
     scans_dir = Path(scans_dir)
     template = load_room(template_room, scans_dir)
     photo_dir = scans_dir / room_id / "photos"
