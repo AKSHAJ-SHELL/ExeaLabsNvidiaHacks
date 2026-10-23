@@ -218,6 +218,12 @@ def test_no_cosmos_url_is_skipped_not_labelled(dataset, tmp_path, monkeypatch):
     assert s["arrival_appearance_variation"] == "none" and s["skipped"] == 16
 
 
+@pytest.mark.parametrize("url", ["file:///tmp/cosmos.png", "ftp://example.com/image", "https:///missing-host"])
+def test_cosmos_client_requires_an_http_endpoint(url):
+    with pytest.raises(ValueError, match="COSMOS_URL"):
+        variation.CosmosClient(url)
+
+
 def test_geometry_shift_is_rejected(dataset, tmp_path):
     srv = serve(lambda img: np.roll(img, 12, axis=1))
     try:

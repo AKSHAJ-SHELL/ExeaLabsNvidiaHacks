@@ -15,6 +15,7 @@ import math
 import shutil
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -160,6 +161,10 @@ class CosmosClient:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Cosmos prompt must be a nonempty string")
         self.url = url if url is not None else settings.get("COSMOS_URL")
+        if self.url:
+            parsed = urllib.parse.urlsplit(self.url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError("COSMOS_URL must be an HTTP or HTTPS endpoint")
         self.timeout, self.retries, self.backoff, self.prompt = timeout, retries, backoff, prompt
         self.model, self.version = "unknown", "unknown"
 
