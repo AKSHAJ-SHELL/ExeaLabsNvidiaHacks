@@ -2,6 +2,7 @@ import hashlib
 import http.server
 import io
 import json
+import shutil
 import threading
 
 import imageio.v2 as imageio
@@ -116,6 +117,16 @@ def test_invalid_geometry_thresholds_rejected_before_copy(tmp_path, option, valu
 def test_bad_frame_count_is_rejected():
     with pytest.raises(ValueError, match="n_frames"):
         variation.select_frames(0, -1, 0)
+
+
+def test_invalid_source_is_rejected_before_copy(dataset, tmp_path):
+    broken = tmp_path / "broken"
+    shutil.copytree(dataset, broken)
+    (broken / "meta" / "modality.json").unlink()
+    dst = tmp_path / "copy"
+    with pytest.raises(ValueError, match="source dataset does not validate"):
+        variation.vary_dataset(broken, dst)
+    assert not dst.exists()
 
 
 @pytest.mark.parametrize("fps", [0, -1, True, 20.5, "20"])
