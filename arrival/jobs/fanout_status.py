@@ -43,6 +43,10 @@ class StatusRecorder:
                     raise ShardError(f"unreadable status record {key}: {e}") from e
             else:
                 rec = {"run_id": cfg.run_id, "shard": i, "shards": cfg.shards, "attempts": []}
+            if (not isinstance(rec, dict) or rec.get("run_id") != cfg.run_id or rec.get("shard") != i
+                    or rec.get("shards") != cfg.shards or not isinstance(rec.get("attempts"), list)
+                    or any(not isinstance(a, dict) or "outcome" not in a for a in rec["attempts"])):
+                raise ShardError(f"invalid status record {key}: identity or attempts do not match this shard")
             for a in rec["attempts"]:
                 if a["outcome"] == "running":
                     a.update(outcome="abandoned", reason="the orchestrator stopped before this attempt ended")
