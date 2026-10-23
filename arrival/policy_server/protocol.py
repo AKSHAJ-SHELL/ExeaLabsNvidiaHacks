@@ -58,6 +58,8 @@ def decode_image(s: str) -> np.ndarray:
 def encode_request(obs: dict, instruction: str, schema: str = "arm") -> dict:
     """obs has 'state' (8 or 11 floats) and one frame per camera; the wrist frame is sent whenever the env has it.
     schema "arm" sends the first 8 state floats (an 11-float sim state loses its base columns); "mobile" needs 11."""
+    if not isinstance(instruction, str) or not instruction.strip():
+        raise ProtocolError("instruction must be a non-empty string")
     state = np.asarray(obs["state"], dtype=float)
     dim = _schema(schema)
     if state.ndim != 1 or state.shape[0] < dim or state.shape[0] not in SCHEMA_DIM.values():
@@ -92,8 +94,8 @@ def decode_request(body: dict) -> dict:
         video[k] = decode_image(body[f"video.{k}"])
     arm, grip = _vec(body, "state.single_arm", ARM_DOF), _vec(body, "state.gripper", 1)
     parts = [arm, grip] + ([_vec(body, "state.base", BASE_DOF)] if "state.base" in body else [])
-    if not isinstance(body.get(TASK_KEY), str):
-        raise ProtocolError(f"missing {TASK_KEY}")
+    if not isinstance(body.get(TASK_KEY), str) or not body[TASK_KEY].strip():
+        raise ProtocolError(f"{TASK_KEY} must be a non-empty string")
     return {"video": video, "state": np.concatenate(parts), "instruction": body[TASK_KEY]}
 
 
