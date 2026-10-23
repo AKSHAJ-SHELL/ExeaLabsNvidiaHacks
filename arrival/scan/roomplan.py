@@ -11,6 +11,7 @@ from arrival.catalog.fixtures import default_size
 from arrival.scan.bundle import MAX_COORD_M, MAX_DIM_M, ScanBundleError, numbers, validate
 
 SNAP_TOL = math.radians(5.0)
+CURVE_STEP = math.radians(15.0)
 MIN_WALL_THICKNESS = 0.1
 SURFACES = ("walls", "doors", "windows", "openings", "floors")
 PORTALS = (("doors", "door"), ("windows", "window"), ("openings", "opening"))
@@ -90,6 +91,44 @@ def _wall(w: dict) -> dict:
         "height": float(dim[1]),
         "thickness": thickness if thickness > 0 else MIN_WALL_THICKNESS,
     }
+
+
+def _angle(value) -> float | None:
+    """A finite number of radians, or a Measurement-style `{"value": ...}` object."""
+    if isinstance(value, dict):
+        value = value.get("value")
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+        return float(value)
+    return None
+
+
+def _walls(w: dict) -> list[dict]:
+    """One straight wall, or chord segments when `curve` has startAngle, endAngle and a positive radius."""
+    curve = w.get("curve")
+    if not isinstance(curve, dict):
+        return [_wall(w)]
+    start, end = _angle(curve.get("startAngle")), _angle(curve.get("endAngle"))
+    radius = curve.get("radius")
+    if (start is None or end is None or not (
+            isinstance(radius, (int, float)) and not isinstance(radius, bool)
+            and math.isfinite(radius) and radius > 0)):
+        return [_wall(w)]
+    sweep = end - start
+    if abs(sweep) < 1e-12:
+        return [_wall(w)]
+    n = max(2, math.ceil(abs(sweep) / CURVE_STEP))
+    m, dim = w["transform"], w["dimensions"]
+    center = curve.get("center")
+    cx = cz = 0.0
+    if isinstance(center, (list, tuple)) and len(center) >= 2:
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in center[:2]):
+            cx, cz = float(center[0]), float(center[1])
+    pts = [_apply(m, [cx + radius * math.cos(start + sweep * i / n), 0.0,
+                      cz + radius * math.sin(start + sweep * i / n)])[:2] for i in range(n + 1)]
+    thickness = float(min(dim[0], dim[2]))
+    ident = _ident(w, "wall")
+    return [{"id": ident, "start": pts[i], "end": pts[i + 1], "height": float(dim[1]),
+             "thickness": thickness if thickness > 0 else MIN_WALL_THICKNESS} for i in range(n)]
 
 
 def _object(o: dict, i: int) -> dict:
@@ -280,7 +319,7 @@ def to_bundle(roomplan: dict, room_id: str, story: int | None = None) -> dict:
     ScanBundleError, with the offending item named, for an export the twin cannot be built from."""
     roomplan, story, story_count = _select_story(_flatten(_clean(roomplan)), story)
     z0 = _floor_height(roomplan)
-    walls = [_wall(w) for w in roomplan.get("walls", [])]
+    walls = [seg for w in roomplan.get("walls", []) for seg in _walls(w)]
     _unique(walls)
     wall_ids = {w["id"] for w in walls}
     fixtures = [_object(o, i) for i, o in enumerate(roomplan.get("objects", [])) if _kept(o)]
