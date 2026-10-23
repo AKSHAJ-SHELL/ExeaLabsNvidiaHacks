@@ -102,7 +102,8 @@ def load_cache(cache_path: Path | str | None = None) -> dict:
     p = Path(cache_path) if cache_path else DEFAULT_CACHE
     if p.is_file():
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            value = json.loads(p.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else {}
         except Exception:
             return {}
     return {}
