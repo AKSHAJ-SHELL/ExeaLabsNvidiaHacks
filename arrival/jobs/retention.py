@@ -49,7 +49,7 @@ def delete_job(out_dir: Path, job_id: str, dry_run: bool = False) -> dict | None
         return None
     out = Path(out_dir)
     status = _read_status(out / "jobs" / job_id)
-    if status is None:
+    if status is None or status.get("id") != job_id:
         return None
     if status.get("status") not in FINISHED:
         raise JobBusy(f"{job_id} is {status.get('status')}; cancel it first")
