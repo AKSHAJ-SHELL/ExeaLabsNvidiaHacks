@@ -106,13 +106,20 @@ def decode_request(body: dict) -> dict:
 def _vec(body: dict, key: str, n: int) -> np.ndarray:
     if key not in body:
         raise ProtocolError(f"missing {key}")
-    try:
-        v = np.asarray(body[key], dtype=float)
-    except (TypeError, ValueError) as e:
-        raise ProtocolError(f"{key} is not numeric: {e}") from e
+    v = _numeric_array(body[key], key)
     if v.shape != (n,) or not np.isfinite(v).all():
         raise ProtocolError(f"{key} must be {n} finite floats, got shape {list(v.shape)}")
     return v
+
+
+def _numeric_array(value, key: str) -> np.ndarray:
+    try:
+        raw = np.asarray(value, dtype=object)
+        if any(isinstance(item, (bool, np.bool_)) for item in raw.flat):
+            raise ProtocolError(f"{key} must contain numbers, not booleans")
+        return np.asarray(value, dtype=float)
+    except (TypeError, ValueError) as e:
+        raise ProtocolError(f"{key} is not numeric: {e}") from e
 
 
 def encode_response(chunk: np.ndarray) -> dict:
@@ -144,10 +151,7 @@ def decode_response(out: dict, schema: str | None = None) -> np.ndarray:
     for key, n in zip(keys, (ARM_DOF, 1, BASE_DOF)):
         if key not in out:
             raise ProtocolError(f"response is missing {key}")
-        try:
-            a = np.asarray(out[key], dtype=float)
-        except (TypeError, ValueError) as e:
-            raise ProtocolError(f"{key} is not numeric: {e}") from e
+        a = _numeric_array(out[key], key)
         if a.ndim != 2 or a.shape[1] != n:
             raise ProtocolError(f"{key} must be a chunk of shape [T,{n}], got {list(a.shape)}")
         if a.shape[0] < 1:
