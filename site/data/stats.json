@@ -15,7 +15,7 @@
    "human_contact": false,
    "frames": 178,
    "duration_s": 11.8,
-   "min_human_distance_m": 0.2706,
+   "min_human_distance_m": 0.2628,
    "physics_detail": {
     "object_pos": [
      1.6127,
@@ -36,7 +36,7 @@
    "human_contact": false,
    "frames": 110,
    "duration_s": 7.267,
-   "min_human_distance_m": 0.3241,
+   "min_human_distance_m": 0.2824,
    "physics_detail": {
     "joint": "counter_a_drawer0",
     "qpos": 0.2997
@@ -53,7 +53,7 @@
    "human_contact": false,
    "frames": 140,
    "duration_s": 9.267,
-   "min_human_distance_m": 0.3576,
+   "min_human_distance_m": 0.2966,
    "physics_detail": {
     "joint": "counter_a_door",
     "qpos": 1.1043
@@ -68,9 +68,9 @@
    "exported": true,
    "success": true,
    "human_contact": false,
-   "frames": 232,
-   "duration_s": 15.4,
-   "min_human_distance_m": 0.3748,
+   "frames": 236,
+   "duration_s": 15.667,
+   "min_human_distance_m": 0.2992,
    "physics_detail": {
     "joint": "fridge_1_door",
     "qpos": 1.3935
@@ -87,7 +87,7 @@
    "human_contact": false,
    "frames": 155,
    "duration_s": 10.267,
-   "min_human_distance_m": 0.1338,
+   "min_human_distance_m": 0.1712,
    "physics_detail": {
     "object_pos": [
      1.1138,
@@ -109,7 +109,7 @@
    "human_contact": false,
    "frames": 148,
    "duration_s": 9.8,
-   "min_human_distance_m": 0.3037,
+   "min_human_distance_m": 0.2817,
    "physics_detail": {
     "object_pos": [
      3.2375,
@@ -138,7 +138,7 @@
  "dataset": {
   "physically_valid": true,
   "generator": "mujoco_scripted_ik",
-  "frames": 1278,
+  "frames": 1284,
   "episodes": 6,
   "attempts": 6,
   "successes": 6,
@@ -179,12 +179,12 @@
    ],
    "info": {
     "episodes": 6,
-    "frames": 1278,
+    "frames": 1284,
     "fps": 20,
     "state_dim": 11,
     "action_dim": 11,
     "horizon": 16,
-    "windows": 1278,
+    "windows": 1284,
     "padded_windows": 90,
     "short_episodes": 0,
     "videos_decoded": 6,
@@ -194,8 +194,8 @@
     ],
     "base": "fixed",
     "relative_action_range": [
-     -1.8591,
-     2.1634
+     -1.7351,
+     1.8667
     ]
    }
   },
@@ -203,8 +203,8 @@
    "attempts": 6,
    "successes": 6,
    "dropped": 0,
-   "seconds": 39.01,
-   "demos_per_hour": 553.7,
+   "seconds": 104.7,
+   "demos_per_hour": 206.3,
    "human_contacts": 0,
    "families": {
     "counter_to_sink": {
@@ -262,15 +262,15 @@
  "eval": {
   "room_id": "hero_kitchen",
   "policy": "scripted",
-  "run_id": "1128fad8234544a1a421f94c10bc0967",
+  "run_id": "27cf9ea9dae6429e9405d423e48bc830",
   "checkpoint_id": "scripted-expert",
   "checkpoint_id_source": "scripted",
-  "manifest_id": "23c4ff7a44f89a9c25c2162784736f1d36f30b81c5a6f9dc3291115ce026271a",
-  "twin_sha256": "c63cefd5538634f0041d66dd55cb345206448a6597ab03cd4b576087036d33c1",
+  "manifest_id": "5083028ee6191a9669d53b9ba05f1754b84a6201742e0283a55530a542c352f9",
+  "twin_sha256": "9da2d7658d7792e8ce3d927dbd63fa4141f48e640ce2a5277780deb5119e6472",
   "runtime": {
-   "python": "3.11.14",
+   "python": "3.13.7",
    "mujoco": "3.16.0",
-   "numpy": "2.4.6"
+   "numpy": "2.2.6"
   },
   "episodes_per_family": 1,
   "seed": 5,
@@ -291,10 +291,10 @@
     ],
     "observed_episodes": 1,
     "mean_seconds": 11.8,
-    "mean_wall_seconds": 6.893,
+    "mean_wall_seconds": 15.933,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.3407,
+    "min_human_distance_m": 0.2768,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 0,
     "arm_contact_max_depth_m": 0.0
@@ -309,10 +309,10 @@
     ],
     "observed_episodes": 1,
     "mean_seconds": 7.3,
-    "mean_wall_seconds": 4.166,
+    "mean_wall_seconds": 9.057,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.3084,
+    "min_human_distance_m": 0.2745,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 0,
     "arm_contact_max_depth_m": 0.0
@@ -327,10 +327,10 @@
     ],
     "observed_episodes": 1,
     "mean_seconds": 9.3,
-    "mean_wall_seconds": 5.312,
+    "mean_wall_seconds": 11.634,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.3335,
+    "min_human_distance_m": 0.3101,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 0,
     "arm_contact_max_depth_m": 0.0
@@ -344,11 +344,11 @@
      1.0
     ],
     "observed_episodes": 1,
-    "mean_seconds": 15.4,
-    "mean_wall_seconds": 9.264,
+    "mean_seconds": 15.7,
+    "mean_wall_seconds": 29.052,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.2503,
+    "min_human_distance_m": 0.2971,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 0,
     "arm_contact_max_depth_m": 0.0
@@ -363,10 +363,10 @@
     ],
     "observed_episodes": 1,
     "mean_seconds": 10.3,
-    "mean_wall_seconds": 5.941,
+    "mean_wall_seconds": 13.646,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.4411,
+    "min_human_distance_m": 0.15,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 1,
     "arm_contact_max_depth_m": 0.0017
@@ -381,10 +381,10 @@
     ],
     "observed_episodes": 1,
     "mean_seconds": 9.8,
-    "mean_wall_seconds": 5.809,
+    "mean_wall_seconds": 13.542,
     "human_contacts": 0,
     "errors": [],
-    "min_human_distance_m": 0.3227,
+    "min_human_distance_m": 0.2876,
     "ik_error_max": 0.0,
     "arm_contact_episodes": 0,
     "arm_contact_max_depth_m": 0.0
@@ -402,7 +402,7 @@
    "human_contacts": 0,
    "errors": 0,
    "arm_contact_episodes": 1,
-   "wall_seconds": 37.39
+   "wall_seconds": 93.04
   }
  },
  "cost": {
@@ -413,15 +413,15 @@
     "family": null,
     "attempts": 6,
     "successes": 6,
-    "seconds": 39.01,
+    "seconds": 104.7,
     "human_contacts": 0,
     "frames": null,
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 553.7,
-    "seconds_per_demo": 6.502,
+    "demos_per_hour": 206.3,
+    "seconds_per_demo": 17.45,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 39.01
+    "local_cpu_wall_seconds": 104.7
    },
    {
     "source": "report",
@@ -525,17 +525,17 @@
     "family": "counter_to_sink",
     "attempts": 1,
     "successes": 1,
-    "seconds": 6.893,
+    "seconds": 15.933,
     "human_contacts": 0,
     "frames": null,
-    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "run_id": "27cf9ea9dae6429e9405d423e48bc830",
     "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 522.3,
-    "seconds_per_demo": 6.893,
+    "demos_per_hour": 225.9,
+    "seconds_per_demo": 15.933,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 6.893
+    "local_cpu_wall_seconds": 15.933
    },
    {
     "source": "eval",
@@ -543,17 +543,17 @@
     "family": "open_drawer",
     "attempts": 1,
     "successes": 1,
-    "seconds": 4.166,
+    "seconds": 9.057,
     "human_contacts": 0,
     "frames": null,
-    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "run_id": "27cf9ea9dae6429e9405d423e48bc830",
     "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 864.1,
-    "seconds_per_demo": 4.166,
+    "demos_per_hour": 397.5,
+    "seconds_per_demo": 9.057,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 4.166
+    "local_cpu_wall_seconds": 9.057
    },
    {
     "source": "eval",
@@ -561,17 +561,17 @@
     "family": "open_door",
     "attempts": 1,
     "successes": 1,
-    "seconds": 5.312,
+    "seconds": 11.634,
     "human_contacts": 0,
     "frames": null,
-    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "run_id": "27cf9ea9dae6429e9405d423e48bc830",
     "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 677.7,
-    "seconds_per_demo": 5.312,
+    "demos_per_hour": 309.4,
+    "seconds_per_demo": 11.634,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 5.312
+    "local_cpu_wall_seconds": 11.634
    },
    {
     "source": "eval",
@@ -579,17 +579,17 @@
     "family": "open_fridge",
     "attempts": 1,
     "successes": 1,
-    "seconds": 9.264,
+    "seconds": 29.052,
     "human_contacts": 0,
     "frames": null,
-    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "run_id": "27cf9ea9dae6429e9405d423e48bc830",
     "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 388.6,
-    "seconds_per_demo": 9.264,
+    "demos_per_hour": 123.9,
+    "seconds_per_demo": 29.052,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 9.264
+    "local_cpu_wall_seconds": 29.052
    },
    {
     "source": "eval",
@@ -597,17 +597,17 @@
     "family": "put_in_drawer",
     "attempts": 1,
     "successes": 1,
-    "seconds": 5.941,
+    "seconds": 13.646,
     "human_contacts": 0,
     "frames": null,
-    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "run_id": "27cf9ea9dae6429e9405d423e48bc830",
     "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 606.0,
-    "seconds_per_demo": 5.941,
+    "demos_per_hour": 263.8,
+    "seconds_per_demo": 13.646,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 5.941
+    "local_cpu_wall_seconds": 13.646
    },
    {
     "source": "eval",
@@ -615,17 +615,17 @@
     "family": "wipe_counter",
     "attempts": 1,
     "successes": 1,
-    "seconds": 5.809,
+    "seconds": 13.542,
     "human_contacts": 0,
     "frames": null,
-    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "run_id": "27cf9ea9dae6429e9405d423e48bc830",
     "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 619.7,
-    "seconds_per_demo": 5.809,
+    "demos_per_hour": 265.8,
+    "seconds_per_demo": 13.542,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 5.809
+    "local_cpu_wall_seconds": 13.542
    },
    {
     "source": "eval",
@@ -633,17 +633,17 @@
     "family": null,
     "attempts": 6,
     "successes": 6,
-    "seconds": 37.39,
+    "seconds": 93.04,
     "human_contacts": 0,
     "frames": null,
-    "run_id": "1128fad8234544a1a421f94c10bc0967",
+    "run_id": "27cf9ea9dae6429e9405d423e48bc830",
     "checkpoint_id": "scripted-expert",
     "dropped": 0,
     "drop_rate": 0.0,
-    "demos_per_hour": 577.7,
-    "seconds_per_demo": 6.232,
+    "demos_per_hour": 232.2,
+    "seconds_per_demo": 15.507,
     "attempts_per_demo": 1.0,
-    "local_cpu_wall_seconds": 37.39
+    "local_cpu_wall_seconds": 93.04
    }
   ],
   "dollars": {
@@ -690,42 +690,42 @@
   }
  },
  "files": {
-  "README.md": 7278,
-  "episodes/counter_to_sink.json": 286457,
-  "episodes/open_door.json": 228422,
-  "episodes/open_drawer.json": 175945,
-  "episodes/open_fridge.json": 372861,
-  "episodes/put_in_drawer.json": 257068,
-  "episodes/wipe_counter.json": 239387,
-  "frames/counter_to_sink_ego_view_end.png": 49078,
-  "frames/counter_to_sink_ego_view_mid.png": 45157,
-  "frames/counter_to_sink_wrist_end.png": 32366,
-  "frames/counter_to_sink_wrist_mid.png": 34123,
-  "frames/open_door_ego_view_end.png": 35122,
-  "frames/open_door_ego_view_mid.png": 31859,
-  "frames/open_door_wrist_end.png": 14841,
-  "frames/open_door_wrist_mid.png": 12256,
-  "frames/open_drawer_ego_view_end.png": 38367,
-  "frames/open_drawer_ego_view_mid.png": 38079,
-  "frames/open_drawer_wrist_end.png": 17483,
-  "frames/open_drawer_wrist_mid.png": 15434,
-  "frames/open_fridge_ego_view_end.png": 37742,
-  "frames/open_fridge_ego_view_mid.png": 35505,
-  "frames/open_fridge_wrist_end.png": 4728,
-  "frames/open_fridge_wrist_mid.png": 7816,
-  "frames/put_in_drawer_ego_view_end.png": 42365,
-  "frames/put_in_drawer_ego_view_mid.png": 42535,
-  "frames/put_in_drawer_wrist_end.png": 6855,
-  "frames/put_in_drawer_wrist_mid.png": 59507,
-  "frames/wipe_counter_ego_view_end.png": 27952,
-  "frames/wipe_counter_ego_view_mid.png": 29337,
-  "frames/wipe_counter_wrist_end.png": 35356,
-  "frames/wipe_counter_wrist_mid.png": 16260,
+  "episodes\\counter_to_sink.json": 288109,
+  "episodes\\open_door.json": 227597,
+  "episodes\\open_drawer.json": 176458,
+  "episodes\\open_fridge.json": 381522,
+  "episodes\\put_in_drawer.json": 259225,
+  "episodes\\wipe_counter.json": 241138,
+  "frames\\counter_to_sink_ego_view_end.png": 50943,
+  "frames\\counter_to_sink_ego_view_mid.png": 46205,
+  "frames\\counter_to_sink_wrist_end.png": 32494,
+  "frames\\counter_to_sink_wrist_mid.png": 34948,
+  "frames\\open_door_ego_view_end.png": 35325,
+  "frames\\open_door_ego_view_mid.png": 32267,
+  "frames\\open_door_wrist_end.png": 17292,
+  "frames\\open_door_wrist_mid.png": 12396,
+  "frames\\open_drawer_ego_view_end.png": 39166,
+  "frames\\open_drawer_ego_view_mid.png": 38863,
+  "frames\\open_drawer_wrist_end.png": 18212,
+  "frames\\open_drawer_wrist_mid.png": 15332,
+  "frames\\open_fridge_ego_view_end.png": 38318,
+  "frames\\open_fridge_ego_view_mid.png": 34485,
+  "frames\\open_fridge_wrist_end.png": 4710,
+  "frames\\open_fridge_wrist_mid.png": 10223,
+  "frames\\put_in_drawer_ego_view_end.png": 43503,
+  "frames\\put_in_drawer_ego_view_mid.png": 43389,
+  "frames\\put_in_drawer_wrist_end.png": 6292,
+  "frames\\put_in_drawer_wrist_mid.png": 59247,
+  "frames\\wipe_counter_ego_view_end.png": 29626,
+  "frames\\wipe_counter_ego_view_mid.png": 29754,
+  "frames\\wipe_counter_wrist_end.png": 35373,
+  "frames\\wipe_counter_wrist_mid.png": 15971,
   "geoms.json": 34258,
-  "rooms.json": 7484,
+  "README.md": 7384,
+  "rooms.json": 7983,
   "scan_points.bin": 180000,
-  "scan_points.json": 842,
-  "stats.json": 15616,
-  "todo.json": 25060
+  "scan_points.json": 891,
+  "stats.json": 16328,
+  "todo.json": 30059
  }
 }

@@ -1,4 +1,4 @@
-"""TWN-3: every Apple object category, doors/windows/openings, polygonCorners floors, islands, stories."""
+"""TWN-3: every Apple object category, doors/windows/openings, polygonCorners floors, islands, stories, curved walls."""
 
 import copy
 import json
@@ -229,3 +229,34 @@ def test_single_story_defaults():
     b = roomplan.load(REPO / "scans" / "hero_kitchen" / "roomplan.json", "hero_kitchen")
     assert b["story"] == 0 and b["story_count"] == 1
     assert b["doors"] == [] and b["windows"] == [] and b["openings"] == [] and b["floors"] == []
+
+
+def _circumcenter(a, b, c):
+    (ax, ay), (bx, by), (cx, cy) = a, b, c
+    d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d
+    uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d
+    return ux, uy
+
+
+@pytest.mark.parametrize("sweep,n_seg", [(math.pi / 2, 6), (math.radians(10), 2)])
+def test_curved_wall_is_approximated_by_chords(sweep, n_seg):
+    """A wall with curve {startAngle, endAngle, radius} becomes equal chords every 15°, at least two."""
+    radius = 4.0
+    rp = _room()
+    rp["walls"][0]["curve"] = {"startAngle": 0.0, "endAngle": sweep, "radius": radius}
+    b = roomplan.to_bundle(rp, "r")
+    segs = [w for w in b["walls"] if w["id"] == "north" or w["id"].startswith("north_")]
+    assert len(segs) == n_seg
+    for i, w in enumerate(segs[:-1]):
+        assert w["end"] == pytest.approx(segs[i + 1]["start"], abs=1e-6)
+    chord = 2 * radius * math.sin(sweep / (2 * n_seg))
+    for w in segs:
+        assert math.dist(w["start"], w["end"]) == pytest.approx(chord, abs=1e-6)
+        assert w["height"] == pytest.approx(H)
+        assert w["thickness"] > 0
+    pts = [segs[0]["start"]] + [w["end"] for w in segs]
+    cx, cy = _circumcenter(pts[0], pts[1], pts[2])
+    assert all(math.hypot(p[0] - cx, p[1] - cy) == pytest.approx(radius, abs=1e-6) for p in pts)
+    assert math.dist(pts[0], pts[-1]) == pytest.approx(2 * radius * math.sin(sweep / 2), abs=1e-6)
+    assert compile_twin(b)["walls"]

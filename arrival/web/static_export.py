@@ -106,7 +106,7 @@ def _rewrite(html: str, depth: int, zips: set[str]) -> str:
 
 def _read(path: Path):
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
@@ -151,49 +151,76 @@ def export_site(out_dir: str | Path = "out", scans_dir: str | Path = "scans", de
     """Crawl the local page and write the static copy at ``dest`` (replaced if it exists). Returns a summary dict;
     raises ExportError when the crawl fails or the link check finds a broken link."""
     out_dir, scans_dir, dest = Path(out_dir), Path(scans_dir), Path(dest)
-    if dest.resolve() == Path(".").resolve() or dest.resolve() in (out_dir.resolve(), scans_dir.resolve()):
+    dest_res = dest.resolve()
+    out_res = out_dir.resolve()
+    scans_res = scans_dir.resolve()
+    cwd_res = Path(".").resolve()
+
+    if dest_res == cwd_res or dest_res in (out_res, scans_res):
         raise ExportError(f"refusing to export over {dest}")
+    if dest_res in cwd_res.parents or dest_res in out_res.parents or dest_res in scans_res.parents:
+        raise ExportError(f"refusing to export to ancestor directory {dest}")
+    if dest.is_file():
+        raise ExportError(f"refusing to export over existing file {dest}")
+
     server = make_server("127.0.0.1", 0, out_dir, scans_dir)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
     tmp = dest.with_name(dest.name + ".tmp")
-    shutil.rmtree(tmp, ignore_errors=True)
-    try:
-        index = _get(base + "/").decode("utf-8")
-        rooms = sorted(set(re.findall(r"href='/rooms/([a-z0-9_]+)'", index)))
-        pages = {"index.html": (index, 0)}
-        for room in rooms:
-            pages[f"rooms/{room}/index.html"] = (_get(f"{base}/rooms/{room}").decode("utf-8"), 2)
-        previews = sorted({p for html, _ in pages.values() for p in re.findall(r"/previews/([A-Za-z0-9_.-]+)", html)
-                           if PREVIEW_RE.match(p)})
-        for name in previews:
-            _get(f"{base}/previews/{name}", tmp / "previews" / name)
-        zipped = set()
-        if zips:
-            for name in sorted(set(re.findall(r"/download/([a-z0-9_]+)", "".join(h for h, _ in pages.values())))):
-                _get(f"{base}/download/{name}", tmp / "downloads" / f"{name}.zip")
-                zipped.add(name)
-        for rel, (html, depth) in pages.items():
-            target = tmp / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(_rewrite(html, depth, zipped), encoding="utf-8")
-        (tmp / "data").mkdir(parents=True, exist_ok=True)
-        rows = [room_data(r, out_dir, scans_dir) for r in rooms if ID_RE.match(r)]
-        for row in rows:
-            (tmp / "data" / f"{row['room_id']}.json").write_text(json.dumps(row, indent=2) + "\n")
-        (tmp / "data" / "index.json").write_text(json.dumps(
-            {"rooms": [r["room_id"] for r in rows], "datasets_present": {r["room_id"]: sorted(r["datasets"]) for r in rows},
-             "zips_included": sorted(zipped), "note": "static snapshot; no server, no uploads"}, indent=2) + "\n")
-        (tmp / ".nojekyll").write_text("")  # GitHub Pages: serve every file as-is
-    finally:
-        server.shutdown()
-        server.server_close()
-    broken = link_check(tmp)
-    if broken:
+    if tmp.is_dir() and not tmp.is_symlink():
         shutil.rmtree(tmp, ignore_errors=True)
-        raise ExportError("broken links in the export:\n  " + "\n  ".join(broken[:20]))
-    shutil.rmtree(dest, ignore_errors=True)
-    tmp.rename(dest)
+    elif tmp.exists() or tmp.is_symlink():
+        tmp.unlink(missing_ok=True)
+
+    try:
+        try:
+            index = _get(base + "/").decode("utf-8")
+            rooms = sorted(set(re.findall(r"href='/rooms/([a-z0-9_]+)'", index)))
+            pages = {"index.html": (index, 0)}
+            for room in rooms:
+                pages[f"rooms/{room}/index.html"] = (_get(f"{base}/rooms/{room}").decode("utf-8"), 2)
+            previews = sorted({p for html, _ in pages.values() for p in re.findall(r"/previews/([A-Za-z0-9_.-]+)", html)
+                               if PREVIEW_RE.match(p)})
+            for name in previews:
+                _get(f"{base}/previews/{name}", tmp / "previews" / name)
+            zipped = set()
+            if zips:
+                for name in sorted(set(re.findall(r"/download/([a-z0-9_]+)", "".join(h for h, _ in pages.values())))):
+                    _get(f"{base}/download/{name}", tmp / "downloads" / f"{name}.zip")
+                    zipped.add(name)
+            for rel, (html, depth) in pages.items():
+                target = tmp / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(_rewrite(html, depth, zipped), encoding="utf-8")
+            (tmp / "data").mkdir(parents=True, exist_ok=True)
+            rows = [room_data(r, out_dir, scans_dir) for r in rooms if ID_RE.match(r)]
+            for row in rows:
+                (tmp / "data" / f"{row['room_id']}.json").write_text(json.dumps(row, indent=2) + "\n", encoding="utf-8")
+            (tmp / "data" / "index.json").write_text(json.dumps(
+                {"rooms": [r["room_id"] for r in rows], "datasets_present": {r["room_id"]: sorted(r["datasets"]) for r in rows},
+                 "zips_included": sorted(zipped), "note": "static snapshot; no server, no uploads"}, indent=2) + "\n", encoding="utf-8")
+            (tmp / ".nojekyll").write_text("", encoding="utf-8")
+        finally:
+            server.shutdown()
+            server.server_close()
+
+        broken = link_check(tmp)
+        if broken:
+            raise ExportError("broken links in the export:\n  " + "\n  ".join(broken[:20]))
+
+        if dest.exists() or dest.is_symlink():
+            if dest.is_dir() and not dest.is_symlink():
+                shutil.rmtree(dest, ignore_errors=True)
+            else:
+                dest.unlink(missing_ok=True)
+        tmp.rename(dest)
+    except Exception:
+        if tmp.is_dir() and not tmp.is_symlink():
+            shutil.rmtree(tmp, ignore_errors=True)
+        elif tmp.exists() or tmp.is_symlink():
+            tmp.unlink(missing_ok=True)
+        raise
+
     empty = [r["room_id"] for r in rows if not r["datasets"]]
     if empty:
         log(f"[export-site] warning: no dataset under {out_dir}/datasets for {', '.join(empty)}; "

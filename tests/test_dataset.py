@@ -262,6 +262,39 @@ def _writer(tmp_path, **kw):
     return LeRobotWriter(tmp_path / "ds", "room", kw.pop("policy", "none"), state_dim=2, action_dim=2, **kw)
 
 
+@pytest.mark.parametrize("fps", [0, -1, True, 20.5, "20"])
+def test_writer_rejects_invalid_fps_before_creating_dataset(tmp_path, fps):
+    with pytest.raises(ValueError, match="fps"):
+        _writer(tmp_path, fps=fps)
+
+@pytest.mark.parametrize("chunks_size", [0, -1, True, 2.5, "1000"])
+def test_writer_rejects_invalid_chunk_size_before_creating_dataset(tmp_path, chunks_size):
+    with pytest.raises(ValueError, match="chunks_size"):
+        _writer(tmp_path, chunks_size=chunks_size)
+    assert not (tmp_path / "ds").exists()
+
+
+
+@pytest.mark.parametrize("names", [["../outside"], ["ego_view", "ego_view"], ["ego/view"], []])
+def test_writer_rejects_unsafe_or_duplicate_camera_keys(tmp_path, names):
+    with pytest.raises(ValueError, match="camera name|video_keys"):
+        _writer(tmp_path, policy="all", video_keys=names)
+    assert not (tmp_path / "ds").exists()
+
+
+def test_writer_rejects_unsafe_supplied_video_name_before_writing(tmp_path):
+    import numpy as np
+
+    w = _writer(tmp_path, policy="all")
+    z = np.zeros((2, 2))
+    clip = np.zeros((2, 32, 32, 3), np.uint8)
+    with pytest.raises(ValueError, match="camera name"):
+        w.add_episode(z, z, [0, .05], "task", True, videos={"ego_view": clip, "../outside": clip})
+    assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
+    assert not (tmp_path / "outside").exists()
+    w.close()
+
+
 def test_writer_rejects_nan_and_leaves_no_orphan(tmp_path):
     import numpy as np
 
@@ -278,6 +311,18 @@ def test_writer_rejects_nan_and_leaves_no_orphan(tmp_path):
     json.loads((tmp_path / "ds" / "meta" / "stats.json").read_text(), parse_constant=lambda c: pytest.fail(c))
 
 
+@pytest.mark.parametrize("instruction", [None, "", "  ", 5])
+def test_writer_rejects_missing_task_instruction_before_writing(tmp_path, instruction):
+    import numpy as np
+
+    w = _writer(tmp_path)
+    z = np.zeros((2, 2))
+    with pytest.raises(ValueError, match="instruction must be a nonempty string"):
+        w.add_episode(z, z, [0, .05], instruction, True)
+    assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
+    w.close()
+
+
 def test_writer_checks_videos_before_writing_and_closes_sidecar(tmp_path):
     import numpy as np
 
@@ -290,3 +335,15 @@ def test_writer_checks_videos_before_writing_and_closes_sidecar(tmp_path):
     assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
     w.close()
     assert w._sidecar.closed
+
+
+def test_writer_rejects_video_pixel_coercion_before_writing(tmp_path):
+    import numpy as np
+
+    w = _writer(tmp_path, policy="all")
+    z = np.zeros((2, 2))
+    bad = np.full((2, 32, 32, 3), 300, dtype=np.int16)
+    with pytest.raises(ValueError, match="uint8 RGB pixels"):
+        w.add_episode(z, z, [0, .05], "task", True, videos={"ego_view": bad})
+    assert not list((tmp_path / "ds").glob("data/**/*.parquet"))
+    w.close()

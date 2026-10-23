@@ -307,3 +307,20 @@ def test_walkers_keep_out_of_the_door_the_robot_opens(twin):
         without += bool(inside(Walkers(2, floor, **kw)))
         assert not inside(Walkers(2, floor, keep=[(hinge, radius)], **kw)), seed
     assert without > 0
+
+
+def test_people_never_phase_through_each_other(twin):
+    """Multiple walkers maintain interpersonal separation (min dist >= 0.40 m) across all frames."""
+    floor = (0.4, 1.65, 3.6, 2.7)
+    base = (2.6, 1.0, 0.75)
+    for n in (2, 3):
+        for seed in (2, 5, 7, 16, 18):
+            m = mujoco.MjModel.from_xml_string(build_mjcf(twin, base, n_people=n, people_seed=seed))
+            d = mujoco.MjData(m)
+            w = Walkers(n, floor, seed=seed, base_xy=base[:2], front_y=0.75, fixtures=twin["fixtures"])
+            for _ in range(300):
+                w.step(m, d, 0.05)
+                for i in range(n):
+                    for j in range(i + 1, n):
+                        dist = float(np.linalg.norm(w.pos[i] - w.pos[j]))
+                        assert dist >= 0.40, f"Walkers {i} and {j} phased through each other: dist={dist:.3f} m (seed {seed}, n={n})"

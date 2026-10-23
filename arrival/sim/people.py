@@ -308,7 +308,8 @@ def plan_fridge_visit(fixtures, floor, spec: dict, rng, base_xy=None) -> dict | 
 
 
 def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = None, r: float = 0.0,
-                      base_to=None, keep=()):
+                      base_to=None, keep=(), person_idx: int = 0, existing_stops: list | None = None,
+                      other_starts: list | None = None):
     """Free point -> approach from behind -> walk a lane behind the base (crossing the robot's work strip)
     -> stop at the counter on the far side -> free point. Free points are resampled until no segment comes
     within CLEAR of the base; after 50 misses the point directly behind the stop or the lane is used.
@@ -321,29 +322,50 @@ def _interaction_loop(rng, floor, base_xy, front_y, prints: Footprints | None = 
     drive = [base + k / 8 * (end - base) for k in range(9)]  # points the loop must keep CLEAR from
     room = {1.0: x1 - hi, -1.0: lo - x0}  # the stop needs 0.8 m beside the base; pick a side that has it
     side = rng.choice([-1.0, 1.0]) if min(room.values()) >= 1.3 else max(room, key=room.get)
-    lane_y = min(max(base[1], end[1]) + rng.uniform(*LANE), y1 - 0.4)
+    lane_y = min(max(base[1], end[1]) + rng.uniform(0.50, 0.56), y1 - 0.55)
     near, far = (hi, lo) if side > 0 else (lo, hi)  # the stop sits beyond the route's end on its side
-    lane = [np.array([np.clip(far - side, x0, x1), lane_y]), np.array([np.clip(near + side, x0, x1), lane_y])]
-    approach = np.array([lane[0][0], y1 - 0.2])
-    stop = np.array([near + side * rng.uniform(0.8, min(1.3, room[side])), front_y + 0.35])
+    x_lane0 = np.clip(far - side, x0, x1)
+    lane = [np.array([x_lane0, lane_y]), np.array([np.clip(near + side, x0, x1), lane_y])]
+    app_y = y1 - 0.2
+    approach = np.array([x_lane0, app_y])
+
+    # Stagger stops so all stops stay >= 0.45m apart from each other and fridge
+    has_fridge = existing_stops and any(abs(s[0] - 1.06) < 0.25 for s in existing_stops)
+    max_u = min(1.65, room[side])
+    if has_fridge:
+        u = rng.uniform(1.05, 1.12)
+    elif existing_stops and len(existing_stops) > 0:
+        u0 = abs(existing_stops[0][0] - near)
+        if u0 <= 1.25:
+            u = min(u0 + rng.uniform(0.45, 0.52), max_u)
+        else:
+            u = max(u0 - rng.uniform(0.45, 0.52), 1.05)
+    else:
+        u = rng.uniform(1.05, 1.15)
+    stop = np.array([near + side * u, front_y + 0.35])
     if any(np.linalg.norm(stop - c) < k for c, k in keep):  # the stop is in the door's swing: step on along the counter
         for _ in range(20):
             cand = np.array([near + side * rng.uniform(0.8, room[side]), front_y + 0.35])
             if not any(np.linalg.norm(cand - c) < k for c, k in keep):
                 stop = cand
                 break
-
-    def free(prev, nxt, fallback):
+    if existing_stops is not None:
+        existing_stops.append(stop)
+    def free(prev, nxt, fallback, min_other: bool = False):
         for _ in range(50):
             p = rng.uniform([x0, y0], [x1, y1])
             if (all(np.linalg.norm(p - q) >= CLEAR and _seg_dist(prev, p, q) >= CLEAR
                     and _seg_dist(p, nxt, q) >= CLEAR for q in drive) and not (prints and prints.blocked(p, r))
                     and not any(np.linalg.norm(p - c) < k for c, k in keep)):
+                if min_other and other_starts:
+                    if any(np.linalg.norm(p - s0) < 0.70 for s0 in other_starts):
+                        continue
                 return p
         return fallback
 
-    a = free(stop, approach, approach.copy())
-    b = free(stop, a, np.array([stop[0], y1 - 0.2]))
+    a = free(stop, approach, approach.copy(), min_other=True)
+    b_cand = np.array([np.clip(stop[0] + rng.uniform(0.05, 0.15), x0, x1), rng.uniform(y1 - 0.45, y1 - 0.25)])
+    b = b_cand if not (prints and prints.blocked(b_cand, r)) else free(stop, a, np.array([stop[0], y1 - 0.2]))
     pts, pauses = [a, approach, lane[0], lane[1], stop, b], [0.0, 0.0, 0.0, 0.0, float(rng.uniform(2.0, 4.0)), 0.0]
     if prints is None:
         return pts, pauses
@@ -394,6 +416,10 @@ class Walkers:
         avoid = Footprints(list(fixtures or []) + ([self.visit["sector"]] if self.visit else [])
                            + [{"position": [*c, 0.0], "size": [1.7 * k, 1.7 * k, 0.0], "yaw": 0.0} for c, k in keep])
         self.paths, self.pauses, self.faces, self.slow = [], [], [], []
+        stops = []
+        if self.visit:
+            stops.append(self.visit["s1"])
+        starts = []
         for i, s in enumerate(self.specs):
             visiting = self.visit is not None and i == self.visit["person"]
             pr = prints if visiting else avoid
@@ -402,10 +428,12 @@ class Walkers:
                 pause = [0.0] * len(pts)
             else:
                 pts, pause = _interaction_loop(rng, floor, base_xy, front_y, pr, s["radius"], base_to,
-                                              [] if visiting else keep)
+                                               keep=[] if visiting else keep,
+                                               person_idx=i, existing_stops=stops, other_starts=starts)
             faces, slow = [None] * len(pts), [False] * len(pts)
             if visiting:
                 pts, pause, faces, slow = self._splice_visit(pts, pause, s["radius"], floor, fixtures, base_xy)
+            starts.append(pts[0])
             self.paths.append(pts)
             self.pauses.append(pause)
             self.faces.append(faces)
@@ -450,7 +478,8 @@ class Walkers:
         if base_xy is not None:
             block.append({"position": [base_xy[0], base_xy[1], 0.0], "size": [2 * CLEAR, 2 * CLEAR, 0.0], "yaw": 0.0})
         prints = Footprints(block)
-        out = route(v["s1"], pts[0], prints, r, floor) or []
+        via_out = np.array([v["s1"][0], min(v["s1"][1] + 0.55, floor[3] - 0.4)])
+        out = [via_out] + (route(via_out, pts[0], prints, r, floor) or [])
         back = route(pts[-1], v["s1"], prints, r, floor) or []
         path = [v["s1"], v["s2"], v["s1"]] + out + list(pts) + back
         waits = [hold, v["look"], hold] + [0.0] * len(out) + list(pause) + [0.0] * len(back)
@@ -531,10 +560,83 @@ class Walkers:
         if self._gids is None:
             self._bind(model)
         out = []
+        n = len(self.paths)
+
+        u_dirs = []
+        for i, path in enumerate(self.paths):
+            k_i = self.idx[i] % len(path)
+            d_target = path[k_i] - self.pos[i]
+            dist_target = float(np.linalg.norm(d_target))
+            u_dirs.append(d_target / dist_target if dist_target > 1e-9 else np.zeros(2))
+
         for i, path in enumerate(self.paths):
             moved = 0.0
             self.reach[i] = None
             give = yield_factor(clearance(self.pos[i], self.specs[i]["torso_r"])) if clearance else 1.0
+
+            # Interpersonal collision avoidance: yield to other walkers in forward corridor
+            tag_i = self.faces[i][self.at[i]] if self.at[i] < len(self.faces[i]) else None
+            visiting_pause = self.wait[i] > 0 and tag_i in ("open", "look", "close")
+
+            if n > 1 and not visiting_pause:
+                u_i = u_dirs[i]
+                for j in range(n):
+                    if j == i:
+                        continue
+                    v_ij = self.pos[j] - self.pos[i]
+                    d_ij = float(np.linalg.norm(v_ij))
+                    if d_ij < 1e-6:
+                        continue
+
+                    s_i = float(np.dot(u_i, v_ij))
+                    if s_i > 0:
+                        lat = float(np.linalg.norm(v_ij - s_i * u_i))
+                        r_sum = self.specs[i]["torso_r"] + self.specs[j]["torso_r"]
+
+                        u_j = u_dirs[j]
+                        s_j = float(np.dot(u_j, -v_ij))
+                        mutual = s_j > 0
+
+                        j_leaving = self.idx[j] == 5 and self.pos[j][1] < 1.45
+                        i_leaving = self.idx[i] == 5 and self.pos[i][1] < 1.45
+
+                        i_has_prio = False
+                        if mutual:
+                            if i_leaving and not j_leaving:
+                                i_has_prio = True
+                            elif j_leaving and not i_leaving:
+                                i_has_prio = False
+                            elif self.wait[j] > 0 and self.wait[i] <= 0:
+                                i_has_prio = True
+                            elif self.wait[i] > 0 and self.wait[j] <= 0:
+                                i_has_prio = False
+                            else:
+                                i_has_prio = (i < j)
+
+                        k_i = self.idx[i] % len(path)
+                        target_p = path[k_i]
+                        j_at_stop = float(np.linalg.norm(self.pos[j] - target_p)) < 0.45
+                        j_paused = self.wait[j] > 0
+
+                        if (j_paused or j_at_stop) and self.pos[i][1] > 1.40:
+                            d_stop = max(r_sum + 0.16, 0.65)
+                            d_slow = d_stop + 0.20
+                        else:
+                            d_stop = r_sum + 0.16
+                            d_slow = d_stop + 0.22
+
+                        lat_limit = 0.45
+                        if lat < lat_limit:
+                            if mutual and i_has_prio and d_ij > 0.42:
+                                hg = 0.5
+                            elif d_ij <= d_stop:
+                                hg = 0.0
+                            elif d_ij < d_slow:
+                                hg = (d_ij - d_stop) / (d_slow - d_stop)
+                            else:
+                                hg = 1.0
+                            give = min(give, hg)
+
             if self.wait[i] > 0:
                 tag = self.faces[i][self.at[i]]
                 if not (tag is None and give == 0.0):  # counter use pauses while the hand is at the walker's elbow

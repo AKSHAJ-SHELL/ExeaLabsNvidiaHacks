@@ -130,7 +130,9 @@ def _blank_video(path: Path) -> str | None:
                 blank += float(np.asarray(f, dtype=np.float32).std()) < BLANK_STD
     except Exception as e:  # noqa: BLE001 - an undecodable video is a bad episode, not a crash
         return f"{path.name}: cannot decode ({e})"
-    if total and blank / total > BLANK_FRACTION:
+    if total == 0:
+        return f"{path.name}: video has no frames"
+    if blank / total > BLANK_FRACTION:
         return f"{path.parent.name}: {blank}/{total} frames are near-uniform (pixel std < {BLANK_STD})"
     return None
 

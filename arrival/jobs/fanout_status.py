@@ -43,6 +43,10 @@ class StatusRecorder:
                     raise ShardError(f"unreadable status record {key}: {e}") from e
             else:
                 rec = {"run_id": cfg.run_id, "shard": i, "shards": cfg.shards, "attempts": []}
+            if (not isinstance(rec, dict) or rec.get("run_id") != cfg.run_id or rec.get("shard") != i
+                    or rec.get("shards") != cfg.shards or not isinstance(rec.get("attempts"), list)
+                    or any(not isinstance(a, dict) or "outcome" not in a for a in rec["attempts"])):
+                raise ShardError(f"invalid status record {key}: identity or attempts do not match this shard")
             for a in rec["attempts"]:
                 if a["outcome"] == "running":
                     a.update(outcome="abandoned", reason="the orchestrator stopped before this attempt ended")
@@ -54,7 +58,12 @@ class StatusRecorder:
 
     def _describe(self, job_id: str) -> dict:
         describe = getattr(self.backend, "describe", None)
-        return describe(job_id) if describe else {}
+        if describe is None:
+            return {}
+        try:
+            return describe(job_id) or {}
+        except Exception:  # optional metadata must not lose a submitted job
+            return {}
 
     def _end(self, job_id: str, outcome: str, stage: str | None = None, reason: str | None = None) -> None:
         self._close(*self._open.pop(job_id), outcome, stage, reason)

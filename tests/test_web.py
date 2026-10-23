@@ -227,12 +227,12 @@ def test_job_download_streams_zip(server):
     import json as _json
 
     srv, out = server
-    d = out / "jobs" / "job_cafe0001"
+    d = out / "jobs" / "job_cafe0000000000000000000000000001"
     d.mkdir(parents=True)
     payload = b"PK-not-really-but-bytes" * 100000
     (d / "dataset.zip").write_bytes(payload)
-    (d / "status.json").write_text(_json.dumps({"id": "job_cafe0001", "status": "done", "room_id": "r", "zip": "x"}))
-    status, body = _get(srv, "/jobs/job_cafe0001/download")
+    (d / "status.json").write_text(_json.dumps({"id": "job_cafe0000000000000000000000000001", "status": "done", "room_id": "r", "zip": "x"}))
+    status, body = _get(srv, "/jobs/job_cafe0000000000000000000000000001/download")
     assert status == 200 and body == payload
 
 

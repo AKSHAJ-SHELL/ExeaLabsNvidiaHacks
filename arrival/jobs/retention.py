@@ -10,6 +10,7 @@ that does not end with the job id (a hand-made room such as ``hero_kitchen``) is
 
 from __future__ import annotations
 
+import math
 import re
 import shutil
 import time
@@ -49,7 +50,7 @@ def delete_job(out_dir: Path, job_id: str, dry_run: bool = False) -> dict | None
         return None
     out = Path(out_dir)
     status = _read_status(out / "jobs" / job_id)
-    if status is None:
+    if status is None or status.get("id") != job_id:
         return None
     if status.get("status") not in FINISHED:
         raise JobBusy(f"{job_id} is {status.get('status')}; cancel it first")
@@ -66,9 +67,12 @@ def delete_job(out_dir: Path, job_id: str, dry_run: bool = False) -> dict | None
 
 def gc(out_dir: Path, max_age_hours: float, now: float | None = None, dry_run: bool = False, log=print) -> dict:
     """Delete finished jobs whose ``finished_at`` (else ``created_unix``) is older than ``max_age_hours``."""
-    if not max_age_hours or max_age_hours <= 0:
-        raise ValueError("max_age_hours must be > 0")
+    if (type(max_age_hours) not in (int, float) or not math.isfinite(max_age_hours)
+            or max_age_hours <= 0):
+        raise ValueError("max_age_hours must be finite and > 0")
     now = time.time() if now is None else now
+    if type(now) not in (int, float) or not math.isfinite(now):
+        raise ValueError("now must be a finite timestamp")
     root = Path(out_dir) / "jobs"
     removed, freed = [], 0
     for d in sorted(root.iterdir()) if root.is_dir() else []:
@@ -76,7 +80,8 @@ def gc(out_dir: Path, max_age_hours: float, now: float | None = None, dry_run: b
         if st is None or st.get("status") not in FINISHED or d.name != st.get("id"):
             continue
         stamp = st.get("finished_at") or st.get("created_unix")
-        if not isinstance(stamp, (int, float)) or now - stamp <= max_age_hours * 3600:
+        if (type(stamp) not in (int, float) or not math.isfinite(stamp)
+                or now - stamp <= max_age_hours * 3600):
             continue
         try:
             res = delete_job(out_dir, d.name, dry_run=dry_run)

@@ -20,7 +20,7 @@ from arrival.jobs.limits import LimitError, Limits, QueueFull
 from arrival.jobs.queue import count_active, create_job, read_job, write_status
 from arrival.jobs.retention import JobBusy, delete_job, gc
 from arrival.jobs.worker import (CANCEL, LOCK, Heartbeat, UnsupportedLayout, UnusableDataset, build_usage, cancel_job,
-                                 claim_next, process, reap_stale, release, retryable, run_once, work)
+                                 claim_next, process, reap_stale, release, requeue_failed, retryable, run_once, work)
 from arrival.web.app import make_server
 
 REPO = Path(__file__).resolve().parents[1]
@@ -59,12 +59,14 @@ def test_limits_defaults_env_and_ceilings():
     lim = Limits.from_env({})
     assert lim.max_upload_bytes == 200 * 1024 * 1024 and lim.max_episodes == 100 and lim.max_people == 4
     assert lim.max_job_seconds == 1800 and lim.max_queue == 20 and lim.retention_hours is None and lim.job_retries == 2
+    assert lim.job_retry_backoff == 5
     env = {"ARRIVAL_MAX_UPLOAD_MB": "1.5", "ARRIVAL_MAX_EPISODES": "3", "ARRIVAL_MAX_PEOPLE": "2",
            "ARRIVAL_MAX_JOB_SECONDS": "9.5", "ARRIVAL_MAX_QUEUE": "7", "ARRIVAL_RETENTION_HOURS": "24",
-           "ARRIVAL_JOB_RETRIES": "0"}
+           "ARRIVAL_JOB_RETRIES": "0", "ARRIVAL_JOB_RETRY_BACKOFF": "8"}
     lim = Limits.from_env(env)
     assert (lim.max_upload_bytes, lim.max_episodes, lim.max_people) == (int(1.5 * 1024 * 1024), 3, 2)
     assert (lim.max_job_seconds, lim.max_queue, lim.retention_hours, lim.job_retries) == (9.5, 7, 24.0, 0)
+    assert lim.job_retry_backoff == 8
     lim.check_request(3, 2)
     with pytest.raises(LimitError, match="episodes 4"):
         lim.check_request(4, 1)
@@ -194,7 +196,7 @@ def test_job_over_wall_clock_limit_is_killed_and_recorded_with_its_stage(tmp_pat
 def test_child_that_dies_is_retried_then_recorded_not_left_running(tmp_path):
     out = tmp_path / "out"
     job = create_job(jobs_of(out), "k.json", data=b"{}")
-    kw = dict(limits=Limits(max_job_seconds=30, job_retries=1), isolate=True, log=QUIET,
+    kw = dict(limits=Limits(max_job_seconds=30, job_retries=1, job_retry_backoff=0), isolate=True, log=QUIET,
               child_cmd=[sys.executable, "-c", "import sys; sys.exit(7)"])
     st = run_once(out, **kw)
     assert st["status"] == "queued" and st["error"] is None and "code 7" in st["retry_errors"][0]
@@ -431,13 +433,13 @@ def test_a_transient_failure_is_retried_and_the_job_then_succeeds(tmp_path, monk
     written = []  # every status this worker writes, as a client polling the job could see it
     write = worker.write_status
     monkeypatch.setattr(worker, "write_status", lambda d, s: written.append(s["status"]) or write(d, s))
-    first = run_once(out, log=QUIET)
+    first = run_once(out, limits=Limits(job_retry_backoff=0), log=QUIET)
     assert first["status"] == "queued" and first["job_attempts"] == 1 and first["error"] is None
     assert first["retry_errors"] == ["OSError: [Errno 28] No space left on device"]
     assert first["stage"] is None and first["finished_at"] is None and first["worker"] is None
     assert "failed" not in written  # the capture app stops polling at "failed"; a job that will run again never shows it
     assert status_of(out, job) == first and not (jobs_of(out) / job["id"] / LOCK).exists()
-    second = run_once(out, log=QUIET)
+    second = run_once(out, limits=Limits(job_retry_backoff=0), log=QUIET)
     assert second["status"] == "done" and second["job_attempts"] == 2 and second["error"] is None
     assert second["retry_errors"] == first["retry_errors"] and Path(second["zip"]).is_file()
     assert run_once(out, log=QUIET) is None
@@ -453,7 +455,8 @@ CRASH_ONCE = ("import sys, json; from pathlib import Path; p = Path(sys.argv[1])
 def test_a_child_that_dies_once_is_retried_and_the_next_attempt_finishes(tmp_path):
     out = tmp_path / "out"
     job = create_job(jobs_of(out), "k.json", data=b"{}")
-    kw = dict(limits=Limits(max_job_seconds=30), isolate=True, log=QUIET, child_cmd=[sys.executable, "-c", CRASH_ONCE])
+    kw = dict(limits=Limits(max_job_seconds=30, job_retry_backoff=0), isolate=True, log=QUIET,
+              child_cmd=[sys.executable, "-c", CRASH_ONCE])
     first = run_once(out, **kw)  # killed, as by the OOM killer: the parent records it and queues the job again
     assert first["status"] == "queued" and first["job_attempts"] == 1
     assert first["retry_errors"][0].startswith("WorkerProcessError") and "code 9" in first["retry_errors"][0]
@@ -466,7 +469,7 @@ def test_retries_run_out_and_the_job_fails_with_its_last_error_and_attempts(tmp_
     out = tmp_path / "out"
     job = create_job(jobs_of(out), "k.json", data=HERO_SCAN)
     fake_sim(monkeypatch, lambda n: RuntimeError(f"renderer lost its context ({n})"))
-    limits = Limits(job_retries=retries)
+    limits = Limits(job_retries=retries, job_retry_backoff=0)
     states = [run_once(out, limits=limits, log=QUIET)["status"] for _ in range(retries + 1)]
     assert states == ["queued"] * retries + ["failed"] and run_once(out, limits=limits, log=QUIET) is None
     st = status_of(out, job)
@@ -498,12 +501,13 @@ def test_a_job_queued_for_a_retry_stays_locked_until_its_worker_lets_go(tmp_path
     job = create_job(jobs_of(out), "k.json", data=HERO_SCAN)
     fake_sim(monkeypatch, lambda n: OSError("flaky disk") if n == 1 else {})
     d, st = claim_next(jobs_of(out), "w1")
-    assert process(d, st, out, log=QUIET)["status"] == "queued" and (d / LOCK).exists()  # w1 has not released it yet
+    limits = Limits(job_retry_backoff=0)
+    assert process(d, st, out, limits=limits, log=QUIET)["status"] == "queued" and (d / LOCK).exists()  # w1 has not released it yet
     assert claim_next(jobs_of(out), "w2") is None and reap_stale(jobs_of(out), 120, log=QUIET) == 0
     release(d)
     d2, st2 = claim_next(jobs_of(out), "w2")
     assert (st2["id"], st2["worker"], st2["job_attempts"]) == (job["id"], "w2", 2)
-    assert process(d2, st2, out, log=QUIET)["status"] == "done"
+    assert process(d2, st2, out, limits=limits, log=QUIET)["status"] == "done"
 
 
 def test_racing_workers_run_each_attempt_of_a_retried_job_once(tmp_path, monkeypatch):
@@ -517,7 +521,7 @@ def test_racing_workers_run_each_attempt_of_a_retried_job_once(tmp_path, monkeyp
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline and any(status_of(out, {"id": i})["status"] in ("queued", "running")
                                                   for i in ids):
-            if run_once(out, worker=name, log=QUIET) is None:
+            if run_once(out, worker=name, limits=Limits(job_retry_backoff=0), log=QUIET) is None:
                 time.sleep(0.01)
 
     ts = [threading.Thread(target=racer, args=(f"w{i}",)) for i in range(3)]
@@ -551,6 +555,58 @@ def test_work_cli_takes_retries_from_the_env_then_the_flag(tmp_path, monkeypatch
     assert main(["work", "--once", "--out", str(tmp_path)]) == 0 and seen["limits"].job_retries == 5
     assert main(["work", "--once", "--retries", "0", "--out", str(tmp_path)]) == 0 and seen["limits"].job_retries == 0
     assert main(["work", "--once", "--retries", "-1", "--out", str(tmp_path)]) == 2
+
+
+def test_requeue_sets_not_before_with_exponential_backoff(tmp_path):
+    d = tmp_path / "job_x"
+    d.mkdir()
+    st = {"id": "job_x", "status": "failed", "error": "OSError: disk"}
+    limits = Limits(job_retries=5, job_retry_backoff=5)
+    t0 = time.time()
+    assert requeue_failed(d, st, limits, log=QUIET)
+    assert st["status"] == "queued" and t0 + 4 <= st["not_before"] <= t0 + 6
+    st["error"] = "OSError: disk again"
+    t1 = time.time()
+    assert requeue_failed(d, st, limits, log=QUIET)
+    assert t1 + 9 <= st["not_before"] <= t1 + 11
+    st["error"] = "OSError: disk still"
+    t2 = time.time()
+    assert requeue_failed(d, st, Limits(job_retries=5, job_retry_backoff=200), log=QUIET)
+    assert t2 + 299 <= st["not_before"] <= t2 + 302  # 200 * 4 would be 800, capped at 300
+
+
+def test_claim_skips_a_queued_job_until_not_before(tmp_path):
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "k.json", data=b"{}")
+    d = jobs_of(out) / job["id"]
+    write_status(d, {**status_of(out, job), "not_before": int(time.time()) + 60})
+    assert claim_next(jobs_of(out)) is None
+    write_status(d, {**status_of(out, job), "not_before": int(time.time()) - 1})
+    assert claim_next(jobs_of(out))[1]["id"] == job["id"]
+
+
+def test_claim_skips_a_waiting_retry_and_takes_the_next_ready_job(tmp_path):
+    out = tmp_path / "out"
+    waiting = create_job(jobs_of(out), "a.json", data=b"{}")
+    ready = create_job(jobs_of(out), "b.json", data=b"{}")
+    write_status(jobs_of(out) / waiting["id"],
+                 {**status_of(out, waiting), "created_unix": 1, "not_before": int(time.time()) + 60})
+    write_status(jobs_of(out) / ready["id"], {**status_of(out, ready), "created_unix": 2})
+    d, st = claim_next(jobs_of(out))
+    assert st["id"] == ready["id"] and d.name == ready["id"]
+
+
+def test_a_requeued_job_is_not_claimed_before_not_before(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    job = create_job(jobs_of(out), "k.json", data=HERO_SCAN)
+    fake_sim(monkeypatch, lambda n: OSError("flaky disk") if n == 1 else {})
+    limits = Limits(job_retry_backoff=60)
+    first = run_once(out, limits=limits, log=QUIET)
+    assert first["status"] == "queued" and first["not_before"] > time.time()
+    assert run_once(out, limits=limits, log=QUIET) is None
+    write_status(jobs_of(out) / job["id"], {**status_of(out, job), "not_before": int(time.time()) - 1})
+    second = run_once(out, limits=limits, log=QUIET)
+    assert second["status"] == "done" and second["job_attempts"] == 2
 
 
 # ---- retention -------------------------------------------------------------------------------------------------

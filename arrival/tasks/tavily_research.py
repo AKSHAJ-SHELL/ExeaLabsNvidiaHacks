@@ -100,7 +100,11 @@ class TavilyResearchAgent:
     def _load_cache(self) -> dict:
         if self.cache_path and self.cache_path.is_file():
             try:
-                return json.loads(self.cache_path.read_text(encoding="utf-8"))
+                value = json.loads(self.cache_path.read_text(encoding="utf-8"))
+                if not isinstance(value, dict):
+                    return {}
+                return {key: item for key, item in value.items()
+                        if isinstance(key, str) and isinstance(item, dict)}
             except Exception as e:
                 self.log(f"[tavily] cache read error ({e}); using empty cache")
                 return {}
