@@ -92,7 +92,11 @@ class _Handler(BaseHTTPRequestHandler):
         chunk = self.server.act(req["state"])
         if chunk is None:
             return self._send(500, {"error": "mock server set to fail"})
-        self._send(200, encode_response(chunk))
+        try:
+            body = encode_response(chunk)
+        except ProtocolError as e:  # a bad chunk is a server fault: answer 500 rather than dropping the connection
+            return self._send(500, {"error": str(e)})
+        self._send(200, body)
 
 
 def main(argv=None) -> int:

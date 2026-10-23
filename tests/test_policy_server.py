@@ -99,11 +99,22 @@ def test_client_queues_chunk_and_fails_clearly():
             c.act(_obs())
 
 
-def test_client_rejects_malformed_server_reply():
+def test_server_answers_500_for_an_invalid_chunk():
     class Bad(MockPolicyServer):
         def act(self, state):
             return np.zeros((0, 8))
     with Bad() as srv:
+        c = VLAClient(srv.url)
+        c.reset(None, {"instruction": "x"})
+        with pytest.raises(urllib.error.HTTPError) as e:
+            c.act(_obs())
+        assert e.value.code == 500
+
+
+def test_client_rejects_malformed_server_reply(monkeypatch):
+    from arrival.policy_server import mock_server  # a reply the server's own encoder would refuse to build
+    monkeypatch.setattr(mock_server, "encode_response", lambda chunk: {"action.single_arm": [], "action.gripper": []})
+    with MockPolicyServer() as srv:
         c = VLAClient(srv.url)
         c.reset(None, {"instruction": "x"})
         with pytest.raises(ProtocolError):
