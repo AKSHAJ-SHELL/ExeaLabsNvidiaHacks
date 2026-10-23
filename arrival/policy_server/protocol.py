@@ -41,16 +41,20 @@ class ProtocolError(ValueError):
 def encode_image(img: np.ndarray) -> str:
     from PIL import Image
 
+    if not isinstance(img, np.ndarray) or img.ndim != 3 or img.shape[2] != 3 or img.dtype != np.uint8:
+        raise ProtocolError("camera frame must be an HxWx3 uint8 array")
     buf = io.BytesIO()
-    Image.fromarray(np.asarray(img, dtype=np.uint8)).save(buf, format="PNG")
+    Image.fromarray(img).save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
 
 def decode_image(s: str) -> np.ndarray:
     from PIL import Image
 
+    if not isinstance(s, str):
+        raise ProtocolError("encoded image must be a base64 string")
     try:
-        return np.asarray(Image.open(io.BytesIO(base64.b64decode(s))).convert("RGB"))
+        return np.asarray(Image.open(io.BytesIO(base64.b64decode(s, validate=True))).convert("RGB"))
     except Exception as e:
         raise ProtocolError(f"undecodable image: {e}") from e
 
@@ -58,6 +62,8 @@ def decode_image(s: str) -> np.ndarray:
 def encode_request(obs: dict, instruction: str, schema: str = "arm") -> dict:
     """obs has 'state' (8 or 11 floats) and one frame per camera; the wrist frame is sent whenever the env has it.
     schema "arm" sends the first 8 state floats (an 11-float sim state loses its base columns); "mobile" needs 11."""
+    if not isinstance(instruction, str) or not instruction.strip():
+        raise ProtocolError("instruction must be a non-empty string")
     state = np.asarray(obs["state"], dtype=float)
     dim = _schema(schema)
     if state.ndim != 1 or state.shape[0] < dim or state.shape[0] not in SCHEMA_DIM.values():
@@ -92,28 +98,40 @@ def decode_request(body: dict) -> dict:
         video[k] = decode_image(body[f"video.{k}"])
     arm, grip = _vec(body, "state.single_arm", ARM_DOF), _vec(body, "state.gripper", 1)
     parts = [arm, grip] + ([_vec(body, "state.base", BASE_DOF)] if "state.base" in body else [])
-    if not isinstance(body.get(TASK_KEY), str):
-        raise ProtocolError(f"missing {TASK_KEY}")
+    if not isinstance(body.get(TASK_KEY), str) or not body[TASK_KEY].strip():
+        raise ProtocolError(f"{TASK_KEY} must be a non-empty string")
     return {"video": video, "state": np.concatenate(parts), "instruction": body[TASK_KEY]}
 
 
 def _vec(body: dict, key: str, n: int) -> np.ndarray:
     if key not in body:
         raise ProtocolError(f"missing {key}")
-    try:
-        v = np.asarray(body[key], dtype=float)
-    except (TypeError, ValueError) as e:
-        raise ProtocolError(f"{key} is not numeric: {e}") from e
+    v = _numeric_array(body[key], key)
     if v.shape != (n,) or not np.isfinite(v).all():
         raise ProtocolError(f"{key} must be {n} finite floats, got shape {list(v.shape)}")
     return v
 
 
+def _numeric_array(value, key: str) -> np.ndarray:
+    try:
+        raw = np.asarray(value, dtype=object)
+        if any(isinstance(item, (bool, np.bool_)) for item in raw.flat):
+            raise ProtocolError(f"{key} must contain numbers, not booleans")
+        return np.asarray(value, dtype=float)
+    except (TypeError, ValueError) as e:
+        raise ProtocolError(f"{key} is not numeric: {e}") from e
+
+
 def encode_response(chunk: np.ndarray) -> dict:
     """chunk [T,8] (7 arm targets + gripper) or [T,11] (plus base x, y, yaw) -> response body."""
-    chunk = np.asarray(chunk, dtype=float)
-    if chunk.ndim != 2 or chunk.shape[1] not in SCHEMA_DIM.values():
+    try:
+        chunk = np.asarray(chunk, dtype=float)
+    except (TypeError, ValueError) as e:
+        raise ProtocolError(f"chunk is not numeric: {e}") from e
+    if chunk.ndim != 2 or chunk.shape[1] not in SCHEMA_DIM.values() or chunk.shape[0] < 1:
         raise ProtocolError(f"chunk must be [T,8] (arm schema) or [T,11] (mobile schema), got shape {list(chunk.shape)}")
+    if not np.isfinite(chunk).all():
+        raise ProtocolError("chunk has non-finite values")
     out = {"action.single_arm": chunk[:, :ARM_DOF].tolist(), "action.gripper": chunk[:, ARM_DOF:ARM_DOF + 1].tolist()}
     if chunk.shape[1] == SCHEMA_DIM["mobile"]:
         out["action.base"] = chunk[:, ARM_DOF + 1:].tolist()
@@ -133,10 +151,7 @@ def decode_response(out: dict, schema: str | None = None) -> np.ndarray:
     for key, n in zip(keys, (ARM_DOF, 1, BASE_DOF)):
         if key not in out:
             raise ProtocolError(f"response is missing {key}")
-        try:
-            a = np.asarray(out[key], dtype=float)
-        except (TypeError, ValueError) as e:
-            raise ProtocolError(f"{key} is not numeric: {e}") from e
+        a = _numeric_array(out[key], key)
         if a.ndim != 2 or a.shape[1] != n:
             raise ProtocolError(f"{key} must be a chunk of shape [T,{n}], got {list(a.shape)}")
         if a.shape[0] < 1:

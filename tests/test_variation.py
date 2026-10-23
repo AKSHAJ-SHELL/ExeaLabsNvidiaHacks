@@ -2,6 +2,7 @@ import hashlib
 import http.server
 import io
 import json
+import shutil
 import threading
 
 import imageio.v2 as imageio
@@ -118,6 +119,16 @@ def test_bad_frame_count_is_rejected():
         variation.select_frames(0, -1, 0)
 
 
+def test_invalid_source_is_rejected_before_copy(dataset, tmp_path):
+    broken = tmp_path / "broken"
+    shutil.copytree(dataset, broken)
+    (broken / "meta" / "modality.json").unlink()
+    dst = tmp_path / "copy"
+    with pytest.raises(ValueError, match="source dataset does not validate"):
+        variation.vary_dataset(broken, dst)
+    assert not dst.exists()
+
+
 @pytest.mark.parametrize("fps", [0, -1, True, 20.5, "20"])
 def test_bad_fps_rejected_before_copy(dataset, tmp_path, fps):
     dst = tmp_path / "copy"
@@ -187,6 +198,17 @@ def test_cosmos_client_rejects_grayscale_response():
         srv.server_close()
 
 
+@pytest.mark.parametrize("settings,reason", [
+    ({"timeout": 0}, "timeout"), ({"timeout": float("nan")}, "timeout"),
+    ({"retries": -1}, "retries"), ({"retries": True}, "retries"),
+    ({"backoff": float("inf")}, "backoff"), ({"backoff": -0.1}, "backoff"),
+    ({"prompt": "  "}, "prompt"),
+])
+def test_cosmos_client_rejects_invalid_transport_controls(settings, reason):
+    with pytest.raises(ValueError, match=reason):
+        variation.CosmosClient("https://example.invalid", **settings)
+
+
 def test_server_down_falls_back_cleanly(dataset, tmp_path):
     srv = serve(lambda img: img)
     port = srv.server_port
@@ -205,6 +227,12 @@ def test_no_cosmos_url_is_skipped_not_labelled(dataset, tmp_path, monkeypatch):
     monkeypatch.delenv("COSMOS_URL", raising=False)
     s = variation.vary_dataset(dataset, tmp_path / "n", "cosmos")
     assert s["arrival_appearance_variation"] == "none" and s["skipped"] == 16
+
+
+@pytest.mark.parametrize("url", ["file:///tmp/cosmos.png", "ftp://example.com/image", "https:///missing-host"])
+def test_cosmos_client_requires_an_http_endpoint(url):
+    with pytest.raises(ValueError, match="COSMOS_URL"):
+        variation.CosmosClient(url)
 
 
 def test_geometry_shift_is_rejected(dataset, tmp_path):

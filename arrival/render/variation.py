@@ -15,6 +15,7 @@ import math
 import shutil
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -151,7 +152,19 @@ class CosmosClient:
                  prompt: str = "same scene, different lighting and surface appearance"):
         from arrival import config as settings
 
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Cosmos timeout must be a finite number above zero")
+        if type(retries) is not int or retries < 0:
+            raise ValueError("Cosmos retries must be a nonnegative integer")
+        if type(backoff) not in (int, float) or not math.isfinite(backoff) or backoff < 0:
+            raise ValueError("Cosmos backoff must be a finite, nonnegative number")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Cosmos prompt must be a nonempty string")
         self.url = url if url is not None else settings.get("COSMOS_URL")
+        if self.url:
+            parsed = urllib.parse.urlsplit(self.url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError("COSMOS_URL must be an HTTP or HTTPS endpoint")
         self.timeout, self.retries, self.backoff, self.prompt = timeout, retries, backoff, prompt
         self.model, self.version = "unknown", "unknown"
 
@@ -195,6 +208,7 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
                  edge_min: float = EDGE_CORR_MIN, mask_max: float = MASK_CHANGE_MAX) -> dict:
     """Copy src to dst, restyle the selected frames of every video, write the sidecar, summary and variant mp4s."""
     from arrival.export.lerobot import write_video
+    from arrival.export.validate import validate
 
     src, dst = Path(src), Path(dst)
     if backend not in ("cosmos", "local_stub"):
@@ -215,6 +229,9 @@ def vary_dataset(src: str | Path, dst: str | Path, backend: str = "local_stub", 
     fps = info.get("fps", 20) if fps is None else fps
     if type(fps) is not int or fps < 1:
         raise ValueError("fps must be a positive integer")
+    source_errors = validate(src)
+    if source_errors:
+        raise ValueError(f"source dataset does not validate: {source_errors[0]}")
 
     stage_start = time.perf_counter()
     shutil.copytree(src, dst)

@@ -138,9 +138,12 @@ def load_manifest(directory) -> Manifest:
         if not isinstance(k, dict):
             _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
         try:
-            fx, fy, cx, cy = (float(k[n]) for n in ("fx", "fy", "cx", "cy"))
+            values = [k[n] for n in ("fx", "fy", "cx", "cy")]
         except (KeyError, TypeError, ValueError):
             _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
+        if any(type(value) not in (int, float) for value in values):
+            _fail("intrinsics", f"frame {fid} needs numeric fx fy cx cy")
+        fx, fy, cx, cy = map(float, values)
         if not all(math.isfinite(x) for x in (fx, fy, cx, cy)) or fx <= 0 or fy <= 0:
             _fail("intrinsics", f"frame {fid} intrinsics must be finite with fx, fy > 0")
         T = _matrix(e.get("camera_to_room"), f"frame {fid} camera_to_room")
@@ -200,9 +203,15 @@ def depth_intrinsics(m: Manifest, frame: Frame) -> np.ndarray:
 def load_depth(m: Manifest, frame: Frame) -> np.ndarray:
     """Depth in metres, float32, shape (h, w); 0 or non-finite marks no reading."""
     if m.depth_unit == "m":
-        d = np.load(frame.depth).astype(np.float32)
+        raw = np.load(frame.depth)
+        if raw.dtype != np.float32:
+            _fail("depth_dtype", f"frame {frame.id} metric depth must be float32, got {raw.dtype}")
+        d = raw
     else:
-        d = np.asarray(Image.open(frame.depth)).astype(np.float32) / 1000.0
+        raw = np.asarray(Image.open(frame.depth))
+        if raw.dtype != np.uint16:
+            _fail("depth_dtype", f"frame {frame.id} millimetre depth must be uint16, got {raw.dtype}")
+        d = raw.astype(np.float32) / 1000.0
     if d.shape != (m.depth_size[1], m.depth_size[0]):
         _fail("depth_shape", f"frame {frame.id} depth is {d.shape[::-1]}, manifest says {m.depth_size}")
     return d
@@ -234,10 +243,18 @@ def project(points: np.ndarray, K: np.ndarray, T: np.ndarray) -> tuple[np.ndarra
 def look_at(eye, target, up=(0.0, 0.0, 1.0)) -> np.ndarray:
     """Camera-to-room 4x4 (ARKit axes) for a camera at `eye` looking at `target`, room Z up."""
     eye, target, up = (np.asarray(a, float) for a in (eye, target, up))
+    if any(a.shape != (3,) or not np.isfinite(a).all() for a in (eye, target, up)):
+        raise ValueError("eye, target and up must be finite 3D vectors")
     f = target - eye
-    f /= np.linalg.norm(f)
+    distance = np.linalg.norm(f)
+    if distance < 1e-9:
+        raise ValueError("eye and target must be distinct")
+    f /= distance
     right = np.cross(f, up)
-    right /= np.linalg.norm(right)
+    right_norm = np.linalg.norm(right)
+    if right_norm < 1e-9:
+        raise ValueError("up must not be parallel to the viewing direction")
+    right /= right_norm
     true_up = np.cross(right, f)
     T = np.eye(4)
     T[:3, 0], T[:3, 1], T[:3, 2], T[:3, 3] = right, true_up, -f, eye

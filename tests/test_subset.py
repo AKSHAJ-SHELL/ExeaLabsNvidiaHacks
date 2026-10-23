@@ -1,6 +1,7 @@
 """`arrival subset`: drop marginal or unwanted episodes of a sim dataset, and say so."""
 
 import json
+import math
 
 import pytest
 
@@ -61,3 +62,14 @@ def test_refuses_an_empty_result_and_overwriting_the_source(source, tmp_path):
         subset_dataset(source, tmp_path, families=["no_such_family"], log=lambda *_: None)
     with pytest.raises(SubsetError, match="overwrite"):
         subset_dataset(source, source.parent.parent, log=lambda *_: None)
+
+    with pytest.raises(SubsetError, match="inside the source"):
+        subset_dataset(source, source, log=lambda *_: None)
+    assert not (source / "datasets").exists()
+
+
+@pytest.mark.parametrize("threshold", [math.nan, math.inf, -0.1, True, "0.28"])
+def test_rejects_invalid_drawer_threshold_before_reading_source(tmp_path, threshold):
+    with pytest.raises(SubsetError, match="min_drawer_opening"):
+        subset_dataset(tmp_path / "missing", tmp_path / "out", min_drawer_opening=threshold)
+    assert not (tmp_path / "out").exists()

@@ -25,8 +25,15 @@ def make_manifest(twin: dict, families: list[str], episodes: int, seed: int = 0,
                   arm: str = "procedural") -> dict:
     from arrival.sim.tasks import finish_task, make_tasks
 
-    if episodes < 1 or people < 0 or res < 1 or len(set(families)) != len(families):
-        raise ValueError("evaluation needs positive episodes/resolution, nonnegative people and distinct families")
+    if any(type(value) is not int or value < minimum for value, minimum in
+           ((episodes, 1), (people, 0), (res, 1))) or type(seed) is not int or type(holdout) is not bool:
+        raise ValueError("evaluation needs integer episodes/resolution/people/seed and a boolean holdout")
+    if (not isinstance(families, list) or not families or
+            any(not isinstance(family, str) or not family.strip() for family in families) or
+            len(set(families)) != len(families)):
+        raise ValueError("evaluation needs distinct, nonempty family names")
+    if base not in ("fixed", "mobile") or arm not in ("procedural", "menagerie"):
+        raise ValueError("evaluation needs a supported base and arm")
     tasks, omitted = [], []
     for i, family in enumerate(families):
         batch = make_tasks(twin, [family], episodes, seed=seed + EVAL_SEED_BASE + i,
@@ -44,15 +51,16 @@ def make_manifest(twin: dict, families: list[str], episodes: int, seed: int = 0,
 
 
 def validate_manifest(manifest: dict) -> dict:
-    if not isinstance(manifest, dict) or manifest.get("schema_version") != SCHEMA_VERSION:
+    if (not isinstance(manifest, dict) or type(manifest.get("schema_version")) is not int or
+            manifest["schema_version"] != SCHEMA_VERSION):
         raise ValueError("unsupported evaluation manifest schema")
     payload = {k: v for k, v in manifest.items() if k != "manifest_id"}
     if manifest.get("manifest_id") != digest(payload):
         raise ValueError("evaluation manifest hash does not match its contents")
     try:
         twin, cfg, tasks = manifest["twin"], manifest["settings"], manifest["tasks"]
-        if not isinstance(twin, dict) or not isinstance(twin["room_id"], str):
-            raise ValueError("evaluation manifest needs a twin with a room_id")
+        if not isinstance(twin, dict) or not isinstance(twin["room_id"], str) or not twin["room_id"].strip():
+            raise ValueError("evaluation manifest needs a twin with a nonempty room_id")
         if digest(twin) != manifest["twin_sha256"]:
             raise ValueError("evaluation twin hash does not match")
         if cfg["base"] not in ("fixed", "mobile") or cfg.get("arm", "procedural") not in ("procedural", "menagerie") or cfg["fps"] != FPS or cfg["max_steps"] != MAX_STEPS:
