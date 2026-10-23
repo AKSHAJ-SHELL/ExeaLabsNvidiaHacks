@@ -198,6 +198,8 @@ class LeRobotWriter:
                     success: bool, videos: dict[str, np.ndarray] | None = None, extra: dict | None = None,
                     sidecar: dict | None = None) -> int:
         ep = len(self.episodes)
+        if not isinstance(instruction, str) or not instruction.strip():
+            raise ValueError(f"episode {ep}: instruction must be a nonempty string")
         states = np.asarray(states, dtype=np.float32)
         actions = np.asarray(actions, dtype=np.float32)
         n = len(states)
