@@ -55,8 +55,8 @@ def subset_dataset(src: str | Path, out_dir: str | Path = "out", families: list[
     res = info["features"][f"observation.images.{cams[0]}"]["shape"][0]
     embodiment = json.loads((meta / "embodiment.json").read_text())
     out_root = Path(out_dir) / "datasets" / f"{room}_sim"
-    if out_root.resolve() == root.resolve():
-        raise SubsetError("the output would overwrite the source; pick another --out")
+    if out_root.resolve().is_relative_to(root.resolve()):
+        raise SubsetError("the output would overwrite or be inside the source; pick another --out")
     w = SimDatasetWriter(out_root, room, fps, res, tuple(cams), base="mobile" if embodiment.get("base_actuated") else "fixed",
                          arm=embodiment.get("arm", "procedural"), provenance=info.get("arrival_provenance"))
     size = info.get("chunks_size", 1000)

@@ -69,3 +69,7 @@ def test_rejects_invalid_drawer_threshold_before_reading_source(tmp_path, thresh
     with pytest.raises(SubsetError, match="min_drawer_opening"):
         subset_dataset(tmp_path / "missing", tmp_path / "out", min_drawer_opening=threshold)
     assert not (tmp_path / "out").exists()
+
+    with pytest.raises(SubsetError, match="inside the source"):
+        subset_dataset(source, source, log=lambda *_: None)
+    assert not (source / "datasets").exists()
