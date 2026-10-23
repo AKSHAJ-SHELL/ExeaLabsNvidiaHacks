@@ -41,8 +41,10 @@ class ProtocolError(ValueError):
 def encode_image(img: np.ndarray) -> str:
     from PIL import Image
 
+    if not isinstance(img, np.ndarray) or img.ndim != 3 or img.shape[2] != 3 or img.dtype != np.uint8:
+        raise ProtocolError("camera frame must be an HxWx3 uint8 array")
     buf = io.BytesIO()
-    Image.fromarray(np.asarray(img, dtype=np.uint8)).save(buf, format="PNG")
+    Image.fromarray(img).save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
 
