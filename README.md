@@ -149,7 +149,7 @@ Integrated on feat/more-prs-2 and merged to main in #194. A row is shipped only 
 | L24 | Oven, dishwasher and faucet families on the any-wall chain Replaces #27. | M | nice | Shipped | #106 | @AvnehSBhatia |
 | L25 | Real Menagerie Franka behind --arm menagerie Replaces #25. The 34 MB meshes are fetched by script and stay out of git. The close-door push standoff is retuned for the real hand: 14 of 14 on seed 5 with no people. Not measured over other seeds, rooms or people. | M | nice | Shipped | #107 | @AvnehSBhatia |
 | L26 | Thin-object (spatula) pinch grasp, in counter_to_sink and wipe, both arms | M | nice | Shipped | #117 | @Aadi-Tiwari |
-| L27 | People pass: yield and stop from the safety distance, counter-use pause, 3D head and arm clearance check On feat/demo-site with no pull request yet. Walkers also keep out of the door hinge disc (open_door 8 of 8 on seeds 0 to 3, was 7 of 8 on one), and fridges can be right-hinged with hinge: "right". Yield ignores the arm links. The hero fridge with a right hinge is rejected by the pre-flight because its free edge is in the corner. | M | nice | Shipped | issue #24 | @AvnehSBhatia, Claude Code |
+| L27 | People pass: yield and stop from the safety distance, counter-use pause, 3D head and arm clearance check On feat/demo-site with no pull request yet. Walkers also keep out of the door hinge disc (open_door 8 of 8 on seeds 0 to 3, was 7 of 8 on one), and fridges can be right-hinged with hinge: "right". Yield uses the closest of the base and the arm-link bodies. The hero fridge with a right hinge is rejected by the pre-flight because its free edge is in the corner. | M | nice | Shipped | issue #24 | @AvnehSBhatia, Claude Code |
 | L28 | Multi-room summary command (real rooms wait on P2) | S | nice | Shipped | #102 | @AvnehSBhatia |
 | L29 | Frozen evaluation trials: replay the same trials for any policy and keep every run | M | should | Shipped | #109 | @Aadi-Tiwari |
 | L30 | Worker follow-ups: memory cap on Linux, DELETE /jobs/<id> with a retention note, cancel endpoint and per-episode progress DELETE /jobs/<id>, cancel and delete buttons, episode progress and an optional memory cap. The memory cap counts resident memory: the worker reads the job's process tree every 0.5 s and kills it past ARRIVAL_MAX_JOB_MB with a MemoryLimitError naming the stage (#192). The old RLIMIT_AS cap followed the core count and crashed jobs (docs/ref/MEMCAP.md). | M | should | Shipped | #192 | @AvnehSBhatia, Claude Code, @AKSHAJ-SHELL |
@@ -235,6 +235,11 @@ Nebius x NVIDIA Global AI Hackathon, https://nebiusglobalaihackathon.devpost.com
 - The job memory limit (`ARRIVAL_MAX_JOB_MB`) counts resident memory and was measured on Ubuntu 24.04 and macOS, not on Windows (`docs/ref/MEMCAP.md`).
 - The static demo page was checked in a browser at desktop and phone width (#195, on this branch, not on main). The upload page's buttons were checked in headless Chromium. There is no public URL yet. Uploads are processed by local workers that share one `out/` folder.
 - No real kitchen has been scanned and run end to end. GR00T has trained on the simulated data; the scores are the small paired trials above.
+
+- The expert's fridge push heading ignores the fixture's yaw.
+- The memory cap (`ARRIVAL_MAX_JOB_MB`) limits address space, not resident memory, and past it the native libraries crash rather than raise `MemoryError`; it is off by default (`docs/ref/MEMCAP.md`).
+- The web page was checked with curl, tests and scripts, not in a browser. Uploads are processed by local workers that share one `out/` folder.
+- No real kitchen has been scanned and run end to end, and nothing has trained on the data.
 
 ## Get started (5 minutes)
 
