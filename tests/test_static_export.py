@@ -107,8 +107,21 @@ def test_export_replaces_an_old_export_and_refuses_dangerous_dest(out, tmp_path)
     (dest / "stale.txt").write_text("old")
     export_site(out, REPO / "scans", dest, log=lambda *_: None)
     assert not (dest / "stale.txt").exists() and (dest / "index.html").is_file()
-    with pytest.raises(ExportError, match="refusing"):
+    with pytest.raises(ExportError, match="refusing to export over"):
         export_site(out, REPO / "scans", out, log=lambda *_: None)
+
+
+def test_export_refuses_file_dest(out, tmp_path):
+    f = tmp_path / "existing_file.html"
+    f.write_text("hello", encoding="utf-8")
+    with pytest.raises(ExportError, match="existing file"):
+        export_site(out, REPO / "scans", f, log=lambda *_: None)
+    assert not (tmp_path / "existing_file.html.tmp").exists()
+
+
+def test_export_refuses_ancestor_dest(out, tmp_path):
+    with pytest.raises(ExportError, match="ancestor directory"):
+        export_site(out, REPO / "scans", tmp_path, log=lambda *_: None)
 
 
 def test_failed_link_check_leaves_no_half_export(out, tmp_path, monkeypatch):
@@ -118,7 +131,23 @@ def test_failed_link_check_leaves_no_half_export(out, tmp_path, monkeypatch):
     assert not (tmp_path / "site").exists() and not (tmp_path / "site.tmp").exists()
 
 
+def test_failed_get_leaves_no_tmp_directory(out, tmp_path, monkeypatch):
+    monkeypatch.setattr(static_export, "_get", lambda *_, **__: (_ for _ in ()).throw(ExportError("network failed")))
+    with pytest.raises(ExportError, match="network failed"):
+        export_site(out, REPO / "scans", tmp_path / "site", log=lambda *_: None)
+    assert not (tmp_path / "site").exists() and not (tmp_path / "site.tmp").exists()
+
+
 def test_cli_export_site(out, tmp_path, capsys):
     rc = cli.main(["export-site", "--out", str(out), "--scans", str(REPO / "scans"), "--dest", str(tmp_path / "s")])
     assert rc == cli.EXIT_OK and (tmp_path / "s" / "index.html").is_file()
     assert re.search(r"static site: .* \(2 pages, 2 previews, 0 zips, rooms: hero_kitchen\)", capsys.readouterr().out)
+
+
+def test_cli_export_site_error(out, tmp_path, capsys):
+    f = tmp_path / "a_file.txt"
+    f.write_text("content", encoding="utf-8")
+    rc = cli.main(["export-site", "--out", str(out), "--scans", str(REPO / "scans"), "--dest", str(f)])
+    err = capsys.readouterr().err
+    assert rc == cli.EXIT_INVALID
+    assert "refusing to export over existing file" in err

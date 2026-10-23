@@ -523,7 +523,7 @@ def cmd_export_site(a) -> int:
 
     try:
         res = export_site(Path(a.out), resolve_scans(a.scans), Path(a.dest), zips=a.zips)
-    except ExportError as e:
+    except (ExportError, OSError) as e:
         print(f"export-site: {e}", file=sys.stderr)
         return EXIT_INVALID
     print(f"static site: {res['dest']} ({res['pages']} pages, {res['previews']} previews, "
