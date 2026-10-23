@@ -158,6 +158,9 @@ class LeRobotWriter:
             raise ValueError(f"unknown video policy {video_policy!r}")
         if type(fps) is not int or fps < 1:
             raise ValueError("fps must be a positive integer")
+
+        if type(chunks_size) is not int or chunks_size < 1:
+            raise ValueError("chunks_size must be a positive integer")
         self.root = Path(root)
         self.room_id = room_id
         self.video_policy = video_policy

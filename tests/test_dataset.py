@@ -266,6 +266,11 @@ def _writer(tmp_path, **kw):
 def test_writer_rejects_invalid_fps_before_creating_dataset(tmp_path, fps):
     with pytest.raises(ValueError, match="fps"):
         _writer(tmp_path, fps=fps)
+
+@pytest.mark.parametrize("chunks_size", [0, -1, True, 2.5, "1000"])
+def test_writer_rejects_invalid_chunk_size_before_creating_dataset(tmp_path, chunks_size):
+    with pytest.raises(ValueError, match="chunks_size"):
+        _writer(tmp_path, chunks_size=chunks_size)
     assert not (tmp_path / "ds").exists()
 
 
