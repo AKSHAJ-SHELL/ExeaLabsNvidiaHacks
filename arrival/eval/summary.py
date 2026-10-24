@@ -38,7 +38,7 @@ def resolve_room(spec: str, scans_dir: Path) -> tuple[str, Path]:
             raise FileNotFoundError(f"no such scan file: {spec}")
         # a generic file name (scans/<room>/scan.json, roomplan.json) names the room after its folder, so two
         # rooms passed as scan.json files are two rows and two datasets, not both "scan"
-        stem = cand.parent.name if cand.stem.lower() in ("scan", "roomplan") else cand.stem
+        stem = cand.resolve().parent.name if cand.stem.lower() in ("scan", "roomplan") else cand.stem
         room = "".join(c if c.isalnum() else "_" for c in stem.lower()).strip("_") or "room"
         return room, cand
     for name in ("scan.json", "roomplan.json"):

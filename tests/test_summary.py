@@ -35,6 +35,15 @@ def test_generic_scan_file_names_take_the_folder_name():
     assert (a[0], b[0]) == ("rotated_kitchen", "u_kitchen_42")
 
 
+def test_a_bare_scan_json_in_the_current_folder_takes_that_folder_name(tmp_path, monkeypatch):
+    # "scan.json" run from inside its folder has the parent ".", whose name is empty
+    room = tmp_path / "galley_7"
+    room.mkdir()
+    (room / "scan.json").write_text("{}")
+    monkeypatch.chdir(room)
+    assert summary.resolve_room("scan.json", SCANS)[0] == "galley_7"
+
+
 def test_missing_room_is_a_failed_cell_not_a_crash(tmp_path):
     row = summary.run_room("no_such_room", tmp_path, SCANS)
     assert statuses(row) == {"normalize": "failed", **dict.fromkeys(summary.STAGES[1:], "not_run")}
