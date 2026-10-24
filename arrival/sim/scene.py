@@ -761,10 +761,12 @@ def overview_camera_xml(xs, ys, base_pos, base_yaw_deg: float, fixtures=()) -> s
     """The overview camera 2.2 m up, behind the robot and looking where it faces, tilted down (forward 0.8, down
     0.6): OVERVIEW_BACK behind the base, pulled in to stay 0.2 m inside the walls and clear of every fixture
     footprint (a cabinet behind the robot would fill the frame). A robot facing -y (every north-wall run, the hero
-    kitchen) keeps the original camera line byte for byte; a run on another wall used to film empty floor."""
+    kitchen) keeps the original camera line byte for byte; a run on another wall used to film empty floor. With no
+    clear spot from OVERVIEW_BACK down to 0.6 m behind the base, it falls back to that original line too."""
     fx, fy = math.cos(math.radians(base_yaw_deg)), math.sin(math.radians(base_yaw_deg))
+    north = f'<camera name="overview" pos="{(min(xs) + max(xs)) / 2} {max(ys) - 0.1} 2.2" xyaxes="-1 0 0 0 -0.6 0.8" fovy="80"/>'
     if abs(fx) < 1e-9 and fy < 0:
-        return f'<camera name="overview" pos="{(min(xs) + max(xs)) / 2} {max(ys) - 0.1} 2.2" xyaxes="-1 0 0 0 -0.6 0.8" fovy="80"/>'
+        return north
     lo, hi = (min(xs) + 0.2, min(ys) + 0.2), (max(xs) - 0.2, max(ys) - 0.2)
 
     def clear(x, y):
@@ -772,10 +774,10 @@ def overview_camera_xml(xs, ys, base_pos, base_yaw_deg: float, fixtures=()) -> s
         return inside and all(not (abs(lx) < f["size"][0] / 2 + 0.15 and abs(ly) < f["size"][1] / 2 + 0.15)
                               for f in fixtures for lx, ly in [to_local((x, y), f)])
 
-    d = OVERVIEW_BACK
-    while d > 0.6 and not clear(base_pos[0] - fx * d, base_pos[1] - fy * d):
-        d -= 0.1
-    x, y = base_pos[0] - fx * d, base_pos[1] - fy * d
+    spots = [(base_pos[0] - fx * d, base_pos[1] - fy * d) for d in (OVERVIEW_BACK - 0.1 * i for i in range(19))]
+    x, y = next((p for p in spots if clear(*p)), (None, None))
+    if x is None:
+        return north
     xa = (fy, -fx, 0.0)  # forward x up, normalised: horizontal, to the right of the view
     ya = (0.6 * fx, 0.6 * fy, 0.8)  # xa x forward, with forward = (0.8 fx, 0.8 fy, -0.6)
     axes = " ".join(f"{v:.4f}" for v in (*xa, *ya))

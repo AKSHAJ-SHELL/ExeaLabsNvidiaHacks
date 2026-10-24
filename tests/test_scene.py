@@ -12,7 +12,7 @@ mujoco = pytest.importorskip("mujoco")
 from arrival.catalog.objects import (GRASPABLE, HANDLE_HELD, OBJECT_SPECS, PICKABLE, RIM_HELD, THIN_HELD,  # noqa: E402
                                      object_spec, sample_size)
 from arrival.scan.bundle import load_room  # noqa: E402
-from arrival.sim.scene import DOOR_FLAT, UPPER_Z0, build_mjcf, part_names  # noqa: E402
+from arrival.sim.scene import DOOR_FLAT, UPPER_Z0, build_mjcf, overview_camera_xml, part_names  # noqa: E402
 from arrival.twin.compile import compile_twin  # noqa: E402
 
 WALLS = [{"id": "n", "start": [0.0, 0.0], "end": [4.0, 0.0], "height": 2.4, "thickness": 0.02},
@@ -310,3 +310,12 @@ def test_overview_camera_stands_behind_a_robot_on_any_wall():
         assert look @ f / np.linalg.norm(look) > 0.99  # it looks the way the robot faces
         assert (np.array(base[:2]) - cam.xpos[:2]) @ f > 0.5  # from behind the robot
         assert min(xs) < cam.xpos[0] < max(xs) and min(ys) < cam.xpos[1] < max(ys)  # inside the room
+
+
+def test_overview_camera_falls_back_to_the_north_line_when_nothing_behind_the_robot_is_clear():
+    # a fixture over the whole strip behind the robot used to leave the camera at 0.5 m, unchecked, inside it
+    xs, ys = (0.0, 4.0), (0.0, 4.0)
+    block = {"position": [0.6, 2.0, 0.45], "yaw": 0.0, "size": [1.8, 4.0, 0.9]}  # x -0.3 to 1.5, every spot
+    north = overview_camera_xml(xs, ys, (2.0, 2.0, 0.75), -90.0)
+    assert overview_camera_xml(xs, ys, (2.0, 2.0, 0.75), 0.0, [block]) == north
+    assert overview_camera_xml(xs, ys, (2.0, 2.0, 0.75), 0.0) != north  # nothing in the way: behind the robot
