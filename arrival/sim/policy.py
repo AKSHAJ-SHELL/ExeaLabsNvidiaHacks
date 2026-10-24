@@ -49,8 +49,9 @@ FRIDGE_PUSH_ROLL = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
 # for the push, so the hand is narrow along the panel and its far finger stays off the edge
 FRIDGE_PULL_STEPS = 10  # control steps per quarter of the hooked pull and per sixth of the push
 FRIDGE_SETTLE_STEPS = 6  # held after sliding off the bar, so the door has stopped when its angle is read
-FRIDGE_SETTLE_IN = 0.04  # m the hand eases back toward the hinge for that hold: held where it slid off, joint 4
-# sat at its stop for 43 steps and the quality check (40) flagged every open_fridge episode
+FRIDGE_SETTLE_IN = 0.06  # m the hand eases back toward the hinge for that hold: held where it slid off, joint 4
+# sat at its stop for 43 steps and the quality check (40) flagged every open_fridge episode. 0.04 m gave 38 steps,
+# 0.06 m gives 30 and 0.08 m 28, with the door at 79.8 deg in each
 FRIDGE_REPLAN_IK = 0.02  # m: the push is re-planned only when the planned hook is reachable; past this (the
 # U kitchen's side-wall fridge plans 1.70 m) re-planning made the flailing arm fling the door open and count a success
 DOOR_SWITCH = np.radians(40)  # close_door: door angle where the push from the side hands over to the push from in front

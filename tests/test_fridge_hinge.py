@@ -108,8 +108,9 @@ def test_both_hinges_open_the_fridge_as_far(hero, mirrored):
     (left, run_l), (right, run_r) = _door_angle(hero, 0), _door_angle(mirrored, 0)
     assert left > 75.0 and right > 75.0, (left, right)
     assert abs(left - right) < 1.0, (left, right)
-    # the hold before the angle is read used to keep joint 4 on its stop for 43 steps: every episode flagged
-    assert max(run_l, run_r) <= LIMIT_STEPS, (run_l, run_r)
+    # the hold before the angle is read used to keep joint 4 on its stop for 43 steps: every episode flagged.
+    # Keep a margin under the check's limit, not just under it
+    assert max(run_l, run_r) <= LIMIT_STEPS - 5, (run_l, run_r)
 
 
 def test_a_fridge_on_a_side_wall_opens():
@@ -117,4 +118,4 @@ def test_a_fridge_on_a_side_wall_opens():
     # push were planned 90 deg off (1.70 m of IK error) and the door never opened
     u = compile_twin(load_room("u_kitchen_42", "tests/fixtures/scans"))
     angle, run = _door_angle(u, 0)
-    assert angle > 75.0 and run <= LIMIT_STEPS, (angle, run)
+    assert angle > 75.0 and run <= LIMIT_STEPS - 5, (angle, run)
